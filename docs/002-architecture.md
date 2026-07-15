@@ -60,7 +60,7 @@ The score ranges, formulas, and explanations above are illustrative rather than 
 
 The Decision Engine combines component scores with risk rules, portfolio state, current exposure, open positions, confidence thresholds, volatility, stop-loss rules, and take-profit rules. The final decision is not necessarily a simple average of component scores.
 
-Its inputs are persisted evidence and account context. Its output is an explainable action such as `BUY`, `SELL`, `HOLD`, `CLOSE_POSITION`, or `NO_ACTION`. It does not interact with a real exchange in the MVP.
+Its inputs are persisted evidence and account context. Its output is an explainable action such as `BUY`, `SELL`, `HOLD`, `CLOSE_POSITION`, or `NO_ACTION`. `HOLD` keeps an existing open position unchanged; `NO_ACTION` does not open, close, or modify any position. It does not interact with a real exchange in the MVP.
 
 ### Decision Snapshot
 
@@ -72,7 +72,7 @@ Snapshots allow the team to reconstruct why a decision was made and support debu
 
 Paper Trading is a virtual brokerage account that uses simulated money. It receives decisions from the Decision Engine, simulates order execution using market prices, applies simulated fees and slippage, and manages virtual cash, holdings, open positions, average entry price, and realized and unrealized P&L. It supports stop-loss, take-profit, and position closing. It never sends orders to a real exchange in the MVP.
 
-Illustrative example: a simulated account starts with USD 1,000 and buys 0.25 ETH at USD 2,000. The notional purchase is USD 500; a USD 1 fee and USD 1 simulated slippage cost leave USD 498 in virtual cash. Selling 0.25 ETH later at USD 2,100 produces USD 525 before costs. After another USD 1 fee and USD 1 slippage cost, the account ends with USD 1,021, a net simulated profit of USD 21. These costs are illustrative; the fee and slippage models remain open decisions.
+Illustrative example: a simulated account starts with USD 1,000 and buys 0.25 ETH at USD 2,000. The notional purchase is USD 500; a USD 1 fee and USD 1 simulated slippage cost leave USD 498 in virtual cash. Selling 0.25 ETH later at USD 2,100 produces USD 525 before costs. After another USD 1 fee and USD 1 slippage cost, the account ends with USD 1,021, a net simulated profit of USD 21. The USD 1 simulated slippage on each side is a simplified illustrative execution cost, not the final slippage model. These costs are illustrative; the fee and slippage models remain open decisions.
 
 ### Metrics
 
