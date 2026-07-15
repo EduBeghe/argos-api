@@ -60,7 +60,7 @@ The score ranges, formulas, and explanations above are illustrative rather than 
 
 The Decision Engine combines component scores with risk rules, portfolio state, current exposure, open positions, confidence thresholds, volatility, stop-loss rules, and take-profit rules. The final decision is not necessarily a simple average of component scores.
 
-Its inputs are persisted evidence and account context. Its output is an explainable action such as `BUY`, `SELL`, `HOLD`, `CLOSE_POSITION`, or `NO_ACTION`. `HOLD` keeps an existing open position unchanged; `NO_ACTION` does not open, close, or modify any position. It does not interact with a real exchange in the MVP.
+Its inputs are persisted evidence and account context. Its output is an explainable action such as `BUY`, `SELL`, `CLOSE_POSITION`, or `NO_ACTION`. `NO_ACTION` intentionally leaves the current portfolio unchanged without opening, closing, or modifying a position. It does not interact with a real exchange in the MVP.
 
 ### Decision Snapshot
 
@@ -105,8 +105,8 @@ The initial experience is optimized for desktop web use while remaining responsi
 
 The first implementation may use:
 
-- one liquid cryptocurrency;
-- one market data provider;
+- BTC/USDT and ETH/USDT;
+- Binance Spot;
 - OHLCV candle data;
 - a small initial feature set;
 - a small number of explainable scores;
@@ -119,8 +119,6 @@ The first implementation may use:
 
 The following remain unresolved:
 
-- initial asset;
-- initial data provider;
 - candle interval;
 - first features;
 - first component scores;

@@ -4,13 +4,14 @@ Argos is a private, asset-agnostic quantitative research and predictive decision
 
 The platform will ingest market observations, calculate explicit and explainable component metrics, generate simulated decisions, execute paper trades, and evaluate results after fees and simulated slippage. Potential analytical components include technical analysis, momentum, volatility, market context, news, sentiment, and machine-learning outputs. These independent scores may later contribute to an aggregated Argos Score.
 
-Every generated signal must retain its component scores, supporting metrics, and reasoning. The initial implementation will study one liquid cryptocurrency, while keeping the domain model suitable for other asset classes.
+Every generated signal must retain its component scores, supporting metrics, and reasoning. The initial MVP will study BTC/USDT and ETH/USDT on Binance Spot, while keeping the domain model suitable for other providers, instruments, and asset classes.
 
 ## Documentation
 
 - [Project vision](docs/000-project-vision.md)
 - [MVP scope](docs/001-mvp-scope.md)
 - [Architecture overview](docs/002-architecture.md)
+- [Domain model](docs/003-domain-model.md)
 - [Architecture decisions](docs/decisions/)
 
 ## Current phase

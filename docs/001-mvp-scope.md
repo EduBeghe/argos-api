@@ -2,7 +2,7 @@
 
 ## Objective
 
-The MVP will demonstrate an auditable research loop for one liquid cryptocurrency without coupling the domain model permanently to cryptocurrency. It will estimate probabilities from measurable evidence, make simulated decisions, paper trade them, and evaluate performance after fees and simulated slippage.
+The MVP will demonstrate an auditable research loop for BTC/USDT and ETH/USDT on Binance Spot without coupling the domain model permanently to Binance, those instruments, or cryptocurrency. It will estimate probabilities from measurable evidence, make simulated decisions, paper trade them, and evaluate performance after fees and simulated slippage.
 
 The MVP will not trade real money and will not claim guaranteed profitability.
 
@@ -57,9 +57,9 @@ The API must expose persisted market observations, component metrics and scores,
 - Trading real money.
 - Claims or assurances of profitability.
 - Broad multi-asset coverage in the first implementation.
-- Final formulas, thresholds, providers, exchanges, frameworks, deployment platforms, model choices, or score weights.
+- Final formulas, thresholds, frameworks, deployment platforms, model choices, or score weights.
 - Production operational concerns not required to validate the research loop.
 
 ## Open decisions
 
-The initial asset, observation interval, market-data source, score set, metric conventions, decision policy, execution assumptions, evaluation period, technologies, deployment approach, and any future Argos Score aggregation method remain unresolved.
+The observation interval, score set, metric conventions, decision policy, execution assumptions, evaluation period, technologies, deployment approach, and any future Argos Score aggregation method remain unresolved.
