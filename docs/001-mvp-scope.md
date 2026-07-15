@@ -62,4 +62,4 @@ The API must expose persisted market observations, component metrics and scores,
 
 ## Open decisions
 
-The observation interval, score set, metric conventions, decision policy, execution assumptions, evaluation period, technologies, deployment approach, and any future Argos Score aggregation method remain unresolved.
+The score set, metric conventions, decision policy, execution assumptions, evaluation period, technologies, deployment approach, and any future Argos Score aggregation method remain unresolved.
