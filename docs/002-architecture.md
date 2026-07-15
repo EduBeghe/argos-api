@@ -26,9 +26,9 @@ The analytical pipeline runs independently of its presentation layers. The API e
 
 ### Ingestion
 
-Ingestion connects to external data providers and retrieves raw market data. The MVP may ingest OHLCV candles and current price; later inputs may include trades, order book data, funding rates, open interest, news, and sentiment.
+Ingestion connects to external data providers and retrieves raw market data. The MVP ingests five-minute Binance Spot candles and retains normalized price, volume, activity, temporal, interval, and provenance fields that have present or justified future analytical value. Later inputs may include trades, order book data, funding rates, open interest, news, and sentiment.
 
-Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Provider formats must end at this boundary. Ingestion does not calculate trading signals or make decisions.
+Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Binance's positional tuple and all other provider-specific formats must end at this boundary. Ingestion does not calculate trading signals or make decisions.
 
 ### Storage
 
@@ -107,7 +107,7 @@ The first implementation may use:
 
 - BTC/USDT and ETH/USDT;
 - Binance Spot;
-- OHLCV candle data;
+- normalized five-minute candle data with retained price, volume, activity, temporal, interval, and provenance fields;
 - a small initial feature set;
 - a small number of explainable scores;
 - one simulated account;
