@@ -13,7 +13,7 @@ Argos does not predict the future with certainty. It must communicate uncertaint
 - Traceable signals: every signal must preserve its component scores and the reasoning that produced it.
 - Independent components: scores may cover technical analysis, momentum, volatility, market context, news, sentiment, and machine-learning outputs.
 - Explainable aggregation: independent scores may later contribute to an aggregated Argos Score without erasing their individual values or rationale.
-- Asset-agnostic design: the first research subject will be one liquid cryptocurrency, but core domain concepts must remain applicable to other asset classes.
+- Asset-agnostic design: the initial MVP markets are BTC/USDT and ETH/USDT on Binance Spot, but core domain concepts must remain applicable to other providers, instruments, and asset classes.
 - Honest evaluation: performance must account for fees and simulated slippage and must be compared with a relevant baseline.
 - Safety first: the MVP will use paper trading only and will not trade real money.
 
@@ -23,4 +23,4 @@ Argos will support a repeatable path from market observation to feature and scor
 
 ## Open decisions
 
-Detailed formulas, thresholds, data providers, exchanges, frameworks, deployment platforms, model selection, and score weights remain open decisions. They will be recorded when evidence and implementation constraints justify them.
+Detailed formulas, thresholds, frameworks, deployment platforms, model selection, and score weights remain open decisions. They will be recorded when evidence and implementation constraints justify them.
