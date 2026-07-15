@@ -12,7 +12,7 @@ NonNegativeInteger = Annotated[int, Field(ge=0)]
 
 
 class MarketCandle(BaseModel):
-    """Provider-independent, normalized closed market candle."""
+    """Provider-independent normalized market candle."""
 
     id: UUID = Field(default_factory=uuid4)
     asset: Asset
