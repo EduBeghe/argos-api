@@ -17,3 +17,48 @@ Every generated signal must retain its component scores, supporting metrics, and
 ## Current phase
 
 The project is in its documentation-first phase. No application implementation, live-money trading, or profitability claim is part of this phase.
+
+## Development
+
+### Requirements
+
+- Python 3.13
+- [uv](https://docs.astral.sh/uv/)
+- Docker with Docker Compose, for the containerized environment
+
+### Installation
+
+Copy `.env.example` to `.env`, replace the example credentials, and install the locked dependencies:
+
+```sh
+cp .env.example .env
+uv sync
+```
+
+### Local execution
+
+```sh
+make run
+```
+
+The API is available at `http://localhost:8000`. Process health is reported by `GET /health`; PostgreSQL connectivity is reported independently by `GET /health/database`.
+
+### Tests and quality checks
+
+```sh
+make test
+make lint
+make typecheck
+```
+
+Run `make format` to format the codebase.
+
+### Docker
+
+After configuring `.env`, build and start the API and PostgreSQL:
+
+```sh
+make docker
+```
+
+The API starts independently of PostgreSQL readiness. Its database health endpoint returns HTTP 503 while PostgreSQL is unavailable.
