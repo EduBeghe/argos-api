@@ -2,44 +2,72 @@ name: CI
 
 on:
   pull_request:
-    branches:
-      - master
+    branches: [master]
   push:
-    branches:
-      - master
+    branches: [master]
 
 permissions:
   contents: read
 
 jobs:
-  quality:
+  unit:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-
       - name: Set up uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-
       - name: Install dependencies
         run: uv sync --frozen
-
       - name: Lint
         run: uv run ruff check .
-
       - name: Check formatting
         run: uv run ruff format --check .
-
       - name: Type check
         run: uv run mypy
-
       - name: Test
         run: uv run pytest
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: argos_test
+          POSTGRES_USER: argos
+          POSTGRES_PASSWORD: argos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U argos -d argos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://argos:argos@localhost:5432/argos_test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+      - name: Run PostgreSQL integration tests
+        run: uv run pytest -m integration -o addopts=-q
