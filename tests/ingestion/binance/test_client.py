@@ -16,7 +16,7 @@ from app.market.enums import Asset, Interval
 
 pytestmark = pytest.mark.asyncio
 
-KLINE: list[int | str] = [
+KLINE: list[object] = [
     1499040000000,
     "0.01634790",
     "0.80000000",
@@ -173,9 +173,7 @@ async def test_get_klines_exposes_transport_failure() -> None:
             )
 
 
-@pytest.mark.parametrize(
-    "payload", [{}, [KLINE[:-1]], [[*KLINE[:8], "308", *KLINE[9:]]]]
-)
+@pytest.mark.parametrize("payload", [{}, ["not-a-row"], [{"not": "a row"}]])
 async def test_get_klines_rejects_malformed_response(payload: object) -> None:
     transport = httpx.MockTransport(lambda _: httpx.Response(200, json=payload))
     async with BinanceClient(make_settings(), transport=transport) as client:
@@ -184,6 +182,22 @@ async def test_get_klines_rejects_malformed_response(payload: object) -> None:
                 asset=Asset.BTC_USDT,
                 interval=Interval.FIVE_MINUTES,
             )
+
+
+async def test_get_klines_leaves_row_semantics_to_the_normalizer() -> None:
+    raw_rows: list[list[object]] = [
+        [],
+        ["unexpected-length"],
+        [True, None, 3.14, {"unvalidated": "value"}],
+    ]
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=raw_rows))
+    async with BinanceClient(make_settings(), transport=transport) as client:
+        response = await client.get_klines(
+            asset=Asset.BTC_USDT,
+            interval=Interval.FIVE_MINUTES,
+        )
+
+    assert response == raw_rows
 
 
 async def test_get_klines_rejects_invalid_json() -> None:

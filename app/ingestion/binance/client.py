@@ -11,15 +11,13 @@ from app.ingestion.binance.errors import (
     BinanceTimeoutError,
     BinanceTransportError,
 )
-from app.ingestion.binance.types import BinanceKline, BinanceKlineResponse
+from app.ingestion.binance.types import BinanceKlineResponse
 from app.market.enums import Asset, Interval
 
 _ASSET_SYMBOLS: dict[Asset, str] = {
     Asset.BTC_USDT: "BTCUSDT",
     Asset.ETH_USDT: "ETHUSDT",
 }
-_KLINE_LENGTH = 12
-_INTEGER_FIELDS = frozenset({0, 6, 8})
 
 
 class BinanceClient:
@@ -136,15 +134,4 @@ class BinanceClient:
 def _is_kline_response(payload: object) -> TypeGuard[BinanceKlineResponse]:
     if not isinstance(payload, list):
         return False
-    return all(_is_kline(row) for row in payload)
-
-
-def _is_kline(row: object) -> TypeGuard[BinanceKline]:
-    if not isinstance(row, list) or len(row) != _KLINE_LENGTH:
-        return False
-    return all(
-        isinstance(value, int) and not isinstance(value, bool)
-        if index in _INTEGER_FIELDS
-        else isinstance(value, str)
-        for index, value in enumerate(row)
-    )
+    return all(isinstance(row, list) for row in payload)

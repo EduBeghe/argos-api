@@ -28,7 +28,9 @@ The analytical pipeline runs independently of its presentation layers. The API e
 
 Ingestion connects to external data providers and retrieves raw market data. The MVP ingests five-minute Binance Spot candles and retains normalized price, volume, activity, temporal, interval, and provenance fields that have present or justified future analytical value. Later inputs may include trades, order book data, funding rates, open interest, news, and sentiment.
 
-Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Binance's positional tuple and all other provider-specific formats must end at this boundary. Ingestion does not calculate trading signals or make decisions.
+Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Ingestion orchestration calls the Binance client and passes each raw provider response to the Binance normalizer. The client handles only HTTP transport and never constructs domain models. The normalizer knows both Binance's positional kline contract and Argos's MarketCandle contract, and is responsible for translating between them.
+
+Binance's positional tuple and all other provider-specific formats must end at this boundary. Domain, persistence, Features, Scores, Strategies, and Decisions do not access Binance directly. Ingestion does not calculate trading signals or make decisions.
 
 ### Storage
 
@@ -133,3 +135,4 @@ The following remain unresolved:
 ## Architectural Principle
 
 > Argos does not attempt to predict the future with certainty. It estimates probabilities using measurable evidence, records why every decision was made, and evaluates those decisions through simulated results.
+
