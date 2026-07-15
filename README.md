@@ -10,6 +10,7 @@ Every generated signal must retain its component scores, supporting metrics, and
 
 - [Project vision](docs/000-project-vision.md)
 - [MVP scope](docs/001-mvp-scope.md)
+- [Architecture overview](docs/002-architecture.md)
 - [Architecture decisions](docs/decisions/)
 
 ## Current phase
