@@ -16,9 +16,9 @@ An Asset contains identity and market metadata, but not historical prices. Histo
 
 ### Market Candle
 
-A Market Candle represents one normalized OHLCV candle. It conceptually contains a timestamp, open, high, low, close, and volume.
+A Market Candle represents normalized price, volume, activity, temporal, interval, and provenance data for one market window. It remains provider-independent at the domain level.
 
-Provider-specific market data must be normalized into this structure before entering the analytical pipeline. Provider-specific formats must not leak beyond Ingestion.
+Provider-specific market data must be normalized into this concept before entering the analytical pipeline, and provider formats must not leak beyond Ingestion. The initial retained field set is defined by the [Binance market-data contract](004-binance-market-data-contract.md) without copying Binance's positional indexes into the domain model.
 
 ### Feature
 
@@ -166,7 +166,7 @@ The initial MVP includes:
 - BTC/USDT;
 - ETH/USDT;
 - Binance Spot;
-- normalized OHLCV candles;
+- normalized Market Candles;
 - a small technical Feature set;
 - a small set of explainable technical, momentum, volatility, or market-context Scores;
 - an aggregated Argos Score;

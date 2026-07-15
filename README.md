@@ -12,6 +12,7 @@ Every generated signal must retain its component scores, supporting metrics, and
 - [MVP scope](docs/001-mvp-scope.md)
 - [Architecture overview](docs/002-architecture.md)
 - [Domain model](docs/003-domain-model.md)
+- [Binance market-data contract](docs/004-binance-market-data-contract.md)
 - [Architecture decisions](docs/decisions/)
 
 ## Current phase
