@@ -20,6 +20,19 @@ class Settings(BaseSettings):
     service_name: str = Field(default="argos-api", validation_alias="SERVICE_NAME")
     version: str = Field(default="0.1.0", validation_alias="APP_VERSION")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    binance_base_url: str = Field(
+        default="https://api.binance.com", validation_alias="BINANCE_BASE_URL"
+    )
+    binance_connect_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias="BINANCE_CONNECT_TIMEOUT_SECONDS",
+    )
+    binance_read_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias="BINANCE_READ_TIMEOUT_SECONDS",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod
