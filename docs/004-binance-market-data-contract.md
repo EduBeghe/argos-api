@@ -22,7 +22,8 @@ Binance facts in this document come from the current official [Spot REST API mar
 | --- | --- |
 | Method | `GET` |
 | Path | `/api/v3/klines` |
-| Provider and market | Binance Spot |
+| Provider | Binance |
+| Market type | Spot |
 | Authentication | None; this is public market data and does not require an API key |
 | Request weight | 2 |
 | Binance data source | Database |
@@ -102,7 +103,13 @@ The normalized name is `interval`; its initial value is `5m`. It is retained bec
 
 ### Provider
 
-The normalized name is `provider`; its initial value is Binance Spot. Provider provenance must be persisted or otherwise preserved so analysis is reproducible and provider discrepancies can be investigated. Whether it lives on every candle or a related source/import record remains an open persistence decision.
+The normalized name is `provider`; its initial value is Binance. Provider identifies the external venue or data provider. It forms part of provenance and must be persisted or otherwise preserved so analysis is reproducible and provider discrepancies can be investigated.
+
+### Market type
+
+The normalized name is `market_type`; its initial value is Spot. Market Type distinguishes the MVP market and prevents future ambiguity if Binance Futures or another Binance market is introduced. It also forms part of provenance.
+
+Whether Provider and Market Type live directly on every candle or through a related source/import record remains an open persistence decision.
 
 ### Ingestion time
 
@@ -113,7 +120,8 @@ The normalized name is `ingested_at`. It measures ingestion delay, supports debu
 Argos conceptually retains:
 
 - Asset identity;
-- provider provenance;
+- Provider;
+- Market Type;
 - interval;
 - open and close times;
 - open, high, low, and close prices;
@@ -122,7 +130,7 @@ Argos conceptually retains:
 - taker buy base and quote asset volumes; and
 - ingestion time.
 
-This contract defines no IDs, SQL column types, indexes, ORM mappings, or table names. The likely natural uniqueness is Asset, Provider, Interval, and Open time. The final persistence constraint must be confirmed in the following domain/persistence PR.
+This contract defines no IDs, SQL column types, indexes, ORM mappings, or table names. The likely natural uniqueness is Asset, Provider, Market Type, Interval, and Open Time. The final persistence constraint must be confirmed in the following domain/persistence PR.
 
 ## Validation and Normalization Rules
 
