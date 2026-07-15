@@ -119,7 +119,6 @@ The first implementation may use:
 
 The following remain unresolved:
 
-- candle interval;
 - first features;
 - first component scores;
 - score aggregation method;

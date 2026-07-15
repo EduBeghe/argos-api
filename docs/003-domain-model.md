@@ -226,7 +226,6 @@ The following remain unresolved:
 - position sizing rules;
 - stop-loss rules;
 - take-profit rules;
-- candle interval;
 - initial simulated capital;
 - fee model; and
 - slippage model.
