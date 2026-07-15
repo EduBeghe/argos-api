@@ -54,6 +54,22 @@ make typecheck
 
 Run `make format` to format the codebase.
 
+### PostgreSQL integration tests
+
+After configuring `.env`, start PostgreSQL, apply migrations, and run only the integration tests:
+
+```sh
+docker compose up -d postgres
+uv run alembic upgrade head
+uv run pytest -m integration -o addopts=-q
+```
+
+Optionally stop PostgreSQL afterward:
+
+```sh
+docker compose stop postgres
+```
+
 ### Docker
 
 After configuring `.env`, build and start the API and PostgreSQL:
@@ -63,3 +79,4 @@ make docker
 ```
 
 The API starts independently of PostgreSQL readiness. Its database health endpoint returns HTTP 503 while PostgreSQL is unavailable.
+
