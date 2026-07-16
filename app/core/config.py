@@ -1,7 +1,9 @@
 from functools import lru_cache
+from typing import Annotated
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -39,6 +41,51 @@ class Settings(BaseSettings):
         le=1000,
         validation_alias="BINANCE_INGESTION_LIMIT",
     )
+    cors_allowed_origins: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=("http://localhost:4200",),
+        validation_alias="CORS_ALLOWED_ORIGINS",
+    )
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: object) -> tuple[str, ...]:
+        """Parse and validate exact HTTP origins from a comma-separated value."""
+
+        candidates = value.split(",") if isinstance(value, str) else value
+        if not isinstance(candidates, (list, tuple)):
+            raise TypeError("CORS_ALLOWED_ORIGINS must be a comma-separated string")
+
+        origins: list[str] = []
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                raise TypeError("CORS_ALLOWED_ORIGINS entries must be strings")
+            origin = candidate.strip()
+            if not origin:
+                raise ValueError("CORS_ALLOWED_ORIGINS must not contain empty entries")
+            if origin == "*":
+                raise ValueError("CORS_ALLOWED_ORIGINS must not contain a wildcard")
+            parsed = urlsplit(origin)
+            try:
+                parsed_port = parsed.port
+            except ValueError as exc:
+                raise ValueError(
+                    "CORS_ALLOWED_ORIGINS contains an invalid port"
+                ) from exc
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+                or (":" in parsed.netloc and parsed_port is None)
+            ):
+                raise ValueError(
+                    "CORS_ALLOWED_ORIGINS entries must be exact HTTP origins"
+                )
+            origins.append(origin)
+        return tuple(origins)
 
     @field_validator("database_url", mode="before")
     @classmethod
