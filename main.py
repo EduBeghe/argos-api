@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.lifespan import lifespan
 from app.health.router import router as health_router
+from app.market.api import router as market_router
 
 
 def create_app() -> FastAPI:
@@ -15,6 +16,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.include_router(health_router)
+    application.include_router(market_router)
     return application
 
 

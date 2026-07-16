@@ -86,7 +86,7 @@ This module consumes persisted decisions and paper-trading outcomes and produces
 
 ### API
 
-The API exposes system information and actions to the frontend. It may provide access to market history, current scores, score explanations, decisions, snapshots, simulated positions, simulated account state, performance metrics, and backtest execution.
+The API exposes system information and actions to the frontend. It provides read-only access to persisted market candles and ingestion freshness for the Web application; these endpoints never trigger ingestion, which remains a separate one-shot job. It may later provide access to current scores, score explanations, decisions, snapshots, simulated positions, simulated account state, performance metrics, and backtest execution.
 
 The API orchestrates application use cases and maps them to explicit module interfaces. It does not contain core analytical or trading logic.
 
