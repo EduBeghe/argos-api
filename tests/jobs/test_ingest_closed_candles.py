@@ -6,7 +6,6 @@ import pytest
 
 from app.core.config import Settings
 from app.features.calculation import FeatureCalculationResult
-from app.features.models import FeatureName
 from app.ingestion.binance.ingestion import IngestionResult
 from app.ingestion.orchestration import (
     AssetIngestionResult,
@@ -47,9 +46,7 @@ def ingestion_result() -> ClosedCandleIngestionResult:
 
 
 def feature_result(asset: Asset) -> FeatureCalculationResult:
-    return FeatureCalculationResult(
-        asset, FeatureName.EMA_20, 1, 20, 1, 1, 0, CALCULATED_AT, CALCULATED_AT
-    )
+    return FeatureCalculationResult(asset, 20, 0, 0, 0, None, None, ())
 
 
 def resources() -> tuple[MagicMock, AsyncMock, MagicMock, MagicMock]:
@@ -191,7 +188,7 @@ def test_completion_log_contains_both_stage_fields(
     assert fields["ingestion_completed"] is True
     assert fields["received"] == 4
     assert fields["feature_calculated_at"] == CALCULATED_AT.isoformat()
-    assert fields["feature_values_inserted"] == 2
+    assert fields["feature_values_inserted"] == 0
     assert [item["asset"] for item in fields["feature_assets"]] == [
         "BTC/USDT",
         "ETH/USDT",

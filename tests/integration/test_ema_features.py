@@ -84,25 +84,27 @@ async def test_ema_feature_history_is_seeded_incremental_and_idempotent(
     await add_candles(session, 19)
     insufficient = await calculate(session)
     await session.commit()
-    assert insufficient.values_calculated == 0
+    assert insufficient.values_calculated == 36
 
     await add_candles(session, 20)
     seeded = await calculate(session)
     await session.commit()
-    assert (seeded.values_calculated, seeded.values_inserted) == (1, 1)
+    assert (seeded.values_calculated, seeded.values_inserted) == (41, 5)
 
     repeated = await calculate(session)
     await session.commit()
-    assert (repeated.values_inserted, repeated.duplicates) == (0, 1)
+    assert (repeated.values_inserted, repeated.duplicates) == (0, 41)
 
     await add_candles(session, 21)
     incremental = await calculate(session)
     await session.commit()
-    assert (incremental.values_calculated, incremental.values_inserted) == (2, 1)
+    assert (incremental.values_calculated, incremental.values_inserted) == (47, 6)
 
     records = (
         await session.scalars(
-            select(MarketFeatureRecord).order_by(MarketFeatureRecord.candle_open_time)
+            select(MarketFeatureRecord)
+            .where(MarketFeatureRecord.feature_name == "ema_20")
+            .order_by(MarketFeatureRecord.candle_open_time)
         )
     ).all()
     assert len(records) == 2
@@ -116,7 +118,9 @@ async def committed_feature_assets() -> list[str]:
     async with factory() as verification_session:
         assets = list(
             await verification_session.scalars(
-                select(MarketFeatureRecord.asset).order_by(MarketFeatureRecord.asset)
+                select(MarketFeatureRecord.asset)
+                .distinct()
+                .order_by(MarketFeatureRecord.asset)
             )
         )
     await engine.dispose()
@@ -135,6 +139,33 @@ async def test_feature_job_commits_btc_and_eth_atomically(
 
     assert [result.asset for result in results] == [Asset.BTC_USDT, Asset.ETH_USDT]
     assert await committed_feature_assets() == ["BTC/USDT", "ETH/USDT"]
+
+
+async def test_fifty_candles_persist_complete_feature_pack(
+    session: AsyncSession,
+) -> None:
+    await add_candles(session, 50, Asset.BTC_USDT)
+
+    calculated = await calculate(session)
+    await session.commit()
+    names = set(
+        await session.scalars(
+            select(MarketFeatureRecord.feature_name).where(
+                MarketFeatureRecord.asset == Asset.BTC_USDT.value
+            )
+        )
+    )
+
+    assert names == {
+        "ema_20",
+        "ema_50",
+        "rsi_14",
+        "atr_14",
+        "return_1",
+        "return_12",
+        "relative_volume_20",
+    }
+    assert calculated.values_inserted == calculated.values_calculated
 
 
 async def test_feature_job_rolls_back_btc_when_eth_fails(session: AsyncSession) -> None:
@@ -165,7 +196,7 @@ async def test_feature_job_rolls_back_btc_when_eth_fails(session: AsyncSession) 
 
     with (
         patch(
-            "app.features.orchestration.calculate_ema_20_features",
+            "app.features.orchestration.calculate_market_features",
             fail_after_btc,
         ),
         pytest.raises(RuntimeError) as captured,

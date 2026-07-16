@@ -5,9 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
-from app.features.calculation import EMA_20_VERSION
-from app.features.models import FeatureName
-from app.features.persistence import get_latest_feature
+from app.features.calculation import FEATURE_VERSION
+from app.features.persistence import get_latest_feature_snapshot
 from app.features.schemas import MarketFeatureResponse
 from app.ingestion.time_windows import latest_closed_five_minute_open_time
 from app.market.enums import Asset, Interval, MarketType, Provider
@@ -116,24 +115,23 @@ def build_market_status(
 @router.get(
     "/features/latest",
     response_model=MarketFeatureResponse,
-    summary="Get the latest persisted EMA 20 feature",
+    summary="Get the latest persisted feature snapshot",
 )
 async def latest_feature(
     session: SessionDependency,
     asset: Annotated[Asset, Query(description="Market asset.")],
     interval: Annotated[Interval, Query(description="Candle interval.")],
 ) -> MarketFeatureResponse:
-    """Return the latest persisted EMA 20 without triggering calculation."""
+    """Return same-candle persisted features without triggering calculation."""
 
-    feature = await get_latest_feature(
+    features = await get_latest_feature_snapshot(
         session=session,
         asset=asset,
         provider=Provider.BINANCE,
         market_type=MarketType.SPOT,
         interval=interval,
-        feature_name=FeatureName.EMA_20,
-        feature_version=EMA_20_VERSION,
+        feature_version=FEATURE_VERSION,
     )
-    if feature is None:
-        raise HTTPException(status_code=404, detail="EMA 20 feature not found")
-    return MarketFeatureResponse.from_domain(feature)
+    if not features:
+        raise HTTPException(status_code=404, detail="Feature snapshot not found")
+    return MarketFeatureResponse.from_features(features)

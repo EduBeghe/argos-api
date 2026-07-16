@@ -34,7 +34,11 @@ class MarketFeatureRecord(Base):
         ),
         CheckConstraint("interval IN ('5m')", name="ck_market_features_interval"),
         CheckConstraint("feature_version > 0", name="ck_market_features_version"),
-        CheckConstraint("feature_name IN ('ema_20')", name="ck_market_features_name"),
+        CheckConstraint(
+            "feature_name IN ('ema_20', 'ema_50', 'rsi_14', 'atr_14', "
+            "'return_1', 'return_12', 'relative_volume_20')",
+            name="ck_market_features_name",
+        ),
         UniqueConstraint(
             "asset",
             "provider",
@@ -65,9 +69,9 @@ class MarketFeatureRecord(Base):
 
 async def insert_market_features(
     session: AsyncSession, features: Sequence[MarketFeature]
-) -> int:
+) -> list[FeatureName]:
     if not features:
-        return 0
+        return []
     statement = (
         insert(MarketFeatureRecord)
         .values([feature.model_dump(mode="python") for feature in features])
@@ -82,9 +86,9 @@ async def insert_market_features(
                 "feature_version",
             ]
         )
-        .returning(MarketFeatureRecord.id)
+        .returning(MarketFeatureRecord.feature_name)
     )
-    return len((await session.scalars(statement)).all())
+    return [FeatureName(value) for value in (await session.scalars(statement)).all()]
 
 
 async def get_latest_feature(
@@ -119,3 +123,48 @@ async def get_latest_feature(
             for column in record.__table__.columns
         }
     )
+
+
+async def get_latest_feature_snapshot(
+    *,
+    session: AsyncSession,
+    asset: Asset,
+    provider: Provider,
+    market_type: MarketType,
+    interval: Interval,
+    feature_version: int,
+) -> list[MarketFeature]:
+    latest_time = (
+        select(MarketFeatureRecord.candle_open_time)
+        .where(
+            MarketFeatureRecord.asset == asset.value,
+            MarketFeatureRecord.provider == provider.value,
+            MarketFeatureRecord.market_type == market_type.value,
+            MarketFeatureRecord.interval == interval.value,
+            MarketFeatureRecord.feature_version == feature_version,
+        )
+        .order_by(MarketFeatureRecord.candle_open_time.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    records = (
+        await session.scalars(
+            select(MarketFeatureRecord).where(
+                MarketFeatureRecord.asset == asset.value,
+                MarketFeatureRecord.provider == provider.value,
+                MarketFeatureRecord.market_type == market_type.value,
+                MarketFeatureRecord.interval == interval.value,
+                MarketFeatureRecord.feature_version == feature_version,
+                MarketFeatureRecord.candle_open_time == latest_time,
+            )
+        )
+    ).all()
+    return [
+        MarketFeature.model_validate(
+            {
+                column.name: getattr(record, column.name)
+                for column in record.__table__.columns
+            }
+        )
+        for record in records
+    ]

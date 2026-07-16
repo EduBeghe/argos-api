@@ -8,16 +8,16 @@ The frontend is a responsive Angular application maintained in the separate `arg
 
 ```text
 External data source
-→ Ingestion
-→ Storage
-→ Feature Engine
-→ Scoring
-→ Decision Engine
-→ Decision Snapshot
-→ Paper Trading
-→ Metrics
-→ API
-→ Web
+â†’ Ingestion
+â†’ Storage
+â†’ Feature Engine
+â†’ Scoring
+â†’ Decision Engine
+â†’ Decision Snapshot
+â†’ Paper Trading
+â†’ Metrics
+â†’ API
+â†’ Web
 ```
 
 The analytical pipeline runs independently of its presentation layers. The API exposes system information and actions; the Web application visualizes them and supports user interaction.
@@ -46,7 +46,7 @@ The Feature Engine transforms raw market data into measurable analytical variabl
 
 It may calculate RSI, moving averages, MACD, ATR, volatility, momentum, volume changes, and returns over different windows. Its input is normalized market data; its output is a reusable, persisted feature set. It does not decide whether to buy or sell.
 
-EMA 20 is the first implemented feature. The Feature Engine consumes persisted normalized candles and stores a versioned value associated with each eligible candle, seeded from the first 20 closes. Calculation may run historically or incrementally and must never use future candle data. In production, the closed-candle job starts feature calculation only after its candle transaction commits, then commits EMA 20 for both assets in a second atomic transaction. A feature failure cannot roll back committed candles and is recoverable on the next idempotent run. The standalone feature command remains available for explicit repair and historical execution; scheduling remains external.
+The first feature pack persists EMA 20, EMA 50, RSI 14, ATR 14, one-candle return, twelve-candle return, and twenty-candle relative quote volume. Each value is versioned, aligned to its eligible candle, and uses only current and earlier data. In production, the closed-candle job starts feature calculation only after its candle transaction commits, then commits the complete feature pack for both assets in a second atomic transaction. A feature failure cannot roll back committed candles and is recoverable on the next idempotent run. The standalone feature command remains available for explicit reconstruction and historical execution; scheduling remains external.
 
 ### Scoring
 
@@ -55,9 +55,9 @@ Scoring executes independent analytical models using available features and cont
 Illustrative output:
 
 ```text
-technical: 0.65 — price is above the selected moving average
-momentum: 0.40 — recent returns are positive but weakening
-volatility: 0.25 — current volatility increases downside uncertainty
+technical: 0.65 â€” price is above the selected moving average
+momentum: 0.40 â€” recent returns are positive but weakening
+volatility: 0.25 â€” current volatility increases downside uncertainty
 ```
 
 The score ranges, formulas, and explanations above are illustrative rather than selected model definitions.
@@ -127,7 +127,6 @@ The first implementation may use:
 
 The following remain unresolved:
 
-- first features;
 - first component scores;
 - score aggregation method;
 - decision thresholds;
