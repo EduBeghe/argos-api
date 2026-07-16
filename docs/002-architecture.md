@@ -88,7 +88,9 @@ This module consumes persisted decisions and paper-trading outcomes and produces
 
 The API exposes system information and actions to the frontend. It provides read-only access to persisted market candles and ingestion freshness for the Web application; these endpoints never trigger ingestion, which remains a separate one-shot job. It may later provide access to current scores, score explanations, decisions, snapshots, simulated positions, simulated account state, performance metrics, and backtest execution.
 
-The API orchestrates application use cases and maps them to explicit module interfaces. It does not contain core analytical or trading logic.\n\nIn production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources, while closed-candle orchestration owns its transaction. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins.
+The API orchestrates application use cases and maps them to explicit module interfaces. It does not contain core analytical or trading logic.
+
+In production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources, while closed-candle orchestration owns its transaction. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins.
 
 ### Web
 
