@@ -19,6 +19,8 @@ from app.ingestion.orchestration import (
     ingest_latest_closed_klines,
 )
 from app.market.enums import Asset, Interval
+from app.scores.calculation import ScoreCalculationResult
+from app.scores.orchestration import calculate_all_market_scores
 
 JOB_NAME = "ingest_closed_candles"
 ASSETS = (Asset.BTC_USDT, Asset.ETH_USDT)
@@ -31,6 +33,8 @@ class IngestionPipelineResult:
     ingestion: ClosedCandleIngestionResult
     calculated_at: datetime
     features: tuple[FeatureCalculationResult, ...]
+    score_calculated_at: datetime
+    scores: tuple[ScoreCalculationResult, ...]
 
 
 def utc_now() -> datetime:
@@ -84,8 +88,22 @@ async def run(
                 await _rollback_preserving(session.rollback, error)
                 logger.exception("Feature calculation stage failed")
                 raise
+            score_calculated_at = clock()
+            try:
+                scores = await calculate_all_market_scores(
+                    session=session, calculated_at=score_calculated_at
+                )
+                await session.commit()
+            except Exception as error:
+                await _rollback_preserving(session.rollback, error)
+                logger.exception("Score calculation stage failed")
+                raise
         result = IngestionPipelineResult(
-            ingestion=ingestion, calculated_at=calculated_at, features=features
+            ingestion=ingestion,
+            calculated_at=calculated_at,
+            features=features,
+            score_calculated_at=score_calculated_at,
+            scores=scores,
         )
         _log_completion(result)
         return result
@@ -144,6 +162,23 @@ def _log_completion(result: IngestionPipelineResult) -> None:
                     for item in result.features
                 ],
                 "feature_totals": feature_log_totals(result.features),
+                "score_calculated_at": result.score_calculated_at.isoformat(),
+                "scores_calculated": sum(
+                    item.scores_calculated for item in result.scores
+                ),
+                "scores_inserted": sum(item.scores_inserted for item in result.scores),
+                "score_duplicates": sum(item.duplicates for item in result.scores),
+                "score_model_name": "baseline_technical",
+                "score_model_version": 1,
+                "score_assets": [
+                    {
+                        "asset": item.asset.value,
+                        "calculated": item.scores_calculated,
+                        "inserted": item.scores_inserted,
+                        "duplicates": item.duplicates,
+                    }
+                    for item in result.scores
+                ],
             }
         },
     )

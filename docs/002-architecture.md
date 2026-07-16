@@ -52,6 +52,8 @@ The first feature pack persists EMA 20, EMA 50, RSI 14, ATR 14, one-candle retur
 
 Scoring executes independent analytical models using available features and context. It produces explicit component scores such as technical, momentum, volatility, market context, news, sentiment, and machine-learning scores. Every result must be measurable and persist both its score and explanation. Scoring does not execute trades.
 
+The first persisted model is the deterministic `baseline_technical` version 1 score. It reads complete same-candle feature sets and their exact candle close, persists explicit weighted contributions, and generates deterministic explanations at the presentation boundary. The production pipeline commits candles, features, and scores in three separate transactions so a score failure preserves committed observations and features. Missing scores are recoverable idempotently through the existing ingestion command or the standalone score reconstruction command.
+
 Illustrative output:
 
 ```text
