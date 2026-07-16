@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
 from app.ingestion.time_windows import latest_closed_five_minute_open_time
-from app.market.enums import Asset, Interval
+from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.queries import (
     MarketStatusAggregate,
     get_market_status_aggregates,
@@ -38,6 +38,8 @@ async def candles(
     results = await list_market_candles(
         session=session,
         asset=params.asset,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
         interval=params.interval,
         start_time=params.start_time,
         end_time=params.end_time,
@@ -57,7 +59,10 @@ async def market_status(session: SessionDependency) -> list[MarketStatusResponse
 
     now = datetime.now(UTC)
     aggregates = await get_market_status_aggregates(
-        session=session, interval=Interval.FIVE_MINUTES
+        session=session,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
     )
     return build_market_status(aggregates=aggregates, now=now)
 

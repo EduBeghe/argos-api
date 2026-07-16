@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import get_settings
 from app.market.api import build_market_status
-from app.market.enums import Asset, Interval
+from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord, to_record
 from app.market.queries import get_market_status_aggregates, list_market_candles
 from app.market.schemas import CandleOrder
@@ -56,6 +56,8 @@ async def test_candle_query_orders_ranges_and_limits_in_postgresql(
     latest = await list_market_candles(
         session=session,
         asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
         interval=Interval.FIVE_MINUTES,
         start_time=None,
         end_time=None,
@@ -65,6 +67,8 @@ async def test_candle_query_orders_ranges_and_limits_in_postgresql(
     ranged = await list_market_candles(
         session=session,
         asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
         interval=Interval.FIVE_MINUTES,
         start_time=BASE_OPEN + timedelta(minutes=5),
         end_time=BASE_OPEN + timedelta(minutes=10),
@@ -88,7 +92,10 @@ async def test_grouped_status_supports_missing_asset_and_freshness(
     await insert_btc_candles(session)
 
     aggregates = await get_market_status_aggregates(
-        session=session, interval=Interval.FIVE_MINUTES
+        session=session,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
     )
     statuses = build_market_status(
         aggregates=aggregates,

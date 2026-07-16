@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from app.core.database.session import get_db_session
 from app.market.api import build_market_status
-from app.market.enums import Asset, Interval
+from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.queries import MarketStatusAggregate
 from app.market.schemas import CandleOrder, MarketCandleQuery, MarketCandleResponse
 from main import app
@@ -90,6 +90,8 @@ def test_candles_endpoint_passes_valid_filters(
     assert query.await_args is not None
     called = query.await_args.kwargs
     assert called["asset"] is asset
+    assert called["provider"] is Provider.BINANCE
+    assert called["market_type"] is MarketType.SPOT
     assert called["interval"] is Interval.FIVE_MINUTES
     assert called["limit"] == 25
     assert called["order"] is CandleOrder.ASC
@@ -203,6 +205,9 @@ def test_market_status_endpoint_and_openapi(client: TestClient) -> None:
     assert response.status_code == 200
     assert [item["asset"] for item in response.json()] == ["BTC/USDT", "ETH/USDT"]
     query.assert_awaited_once()
+    assert query.await_args is not None
+    assert query.await_args.kwargs["provider"] is Provider.BINANCE
+    assert query.await_args.kwargs["market_type"] is MarketType.SPOT
     paths = client.get("/openapi.json").json()["paths"]
     assert "/market/candles" in paths
     assert "/market/status" in paths

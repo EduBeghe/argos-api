@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.market.enums import Asset, Interval
+from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.models import MarketCandle
 from app.market.persistence import MarketCandleRecord, to_domain
 from app.market.schemas import CandleOrder
@@ -25,6 +25,8 @@ async def list_market_candles(
     *,
     session: AsyncSession,
     asset: Asset,
+    provider: Provider,
+    market_type: MarketType,
     interval: Interval,
     start_time: datetime | None,
     end_time: datetime | None,
@@ -35,6 +37,8 @@ async def list_market_candles(
 
     statement = select(MarketCandleRecord).where(
         MarketCandleRecord.asset == asset.value,
+        MarketCandleRecord.provider == provider.value,
+        MarketCandleRecord.market_type == market_type.value,
         MarketCandleRecord.interval == interval.value,
     )
     if start_time is not None:
@@ -51,7 +55,11 @@ async def list_market_candles(
 
 
 async def get_market_status_aggregates(
-    *, session: AsyncSession, interval: Interval
+    *,
+    session: AsyncSession,
+    provider: Provider,
+    market_type: MarketType,
+    interval: Interval,
 ) -> list[MarketStatusAggregate]:
     """Read grouped status for all persisted assets in one database query."""
 
@@ -63,7 +71,11 @@ async def get_market_status_aggregates(
             func.max(MarketCandleRecord.close_time),
             func.max(MarketCandleRecord.ingested_at),
         )
-        .where(MarketCandleRecord.interval == interval.value)
+        .where(
+            MarketCandleRecord.provider == provider.value,
+            MarketCandleRecord.market_type == market_type.value,
+            MarketCandleRecord.interval == interval.value,
+        )
         .group_by(MarketCandleRecord.asset)
     )
     rows = (await session.execute(statement)).tuples().all()
