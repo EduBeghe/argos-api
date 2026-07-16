@@ -21,3 +21,11 @@ def test_processes_keep_api_and_ingestion_responsibilities_separate() -> None:
         "web: scripts/start_api.sh",
         "ingest: python -m app.jobs.ingest_closed_candles",
     ]
+
+
+def test_dockerfile_uses_the_production_start_script() -> None:
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY scripts ./scripts" in dockerfile
+    assert 'CMD ["sh", "scripts/start_api.sh"]' in dockerfile
+    assert 'CMD ["uvicorn"' not in dockerfile

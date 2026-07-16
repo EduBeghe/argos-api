@@ -14,6 +14,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
 COPY alembic ./alembic
+COPY scripts ./scripts
 COPY alembic.ini main.py ./
 
 RUN addgroup --system argos && adduser --system --ingroup argos argos \
@@ -22,4 +23,4 @@ USER argos
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "scripts/start_api.sh"]
