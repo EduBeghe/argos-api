@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -11,6 +12,8 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database.base import Base
@@ -136,3 +139,24 @@ def to_domain(record: MarketCandleRecord) -> MarketCandle:
             for column in record.__table__.columns
         }
     )
+
+
+async def insert_market_candles(
+    session: AsyncSession, candles: Sequence[MarketCandle]
+) -> int:
+    """Bulk insert candles and return the number not rejected as duplicates."""
+
+    if not candles:
+        return 0
+
+    values: list[dict[str, object]] = [
+        candle.model_dump(mode="python") for candle in candles
+    ]
+    statement = (
+        insert(MarketCandleRecord)
+        .values(values)
+        .on_conflict_do_nothing(constraint="uq_market_candles_natural_identity")
+        .returning(MarketCandleRecord.id)
+    )
+    inserted_ids = await session.scalars(statement)
+    return len(inserted_ids.all())
