@@ -70,6 +70,22 @@ Optionally stop PostgreSQL afterward:
 docker compose stop postgres
 ```
 
+### One-shot closed-candle ingestion
+
+With PostgreSQL migrated and the environment configured, run the latest fully
+closed five-minute Binance Spot candle ingestion once:
+
+```sh
+python -m app.jobs.ingest_closed_candles
+```
+
+`BINANCE_INGESTION_LIMIT` controls the requested candles per asset and defaults
+to 12 (one hour of five-minute candles). The command processes BTC/USDT followed
+by ETH/USDT, commits the run atomically through ingestion orchestration, closes
+its resources, and exits. It never ingests the current open candle. Repeated
+execution must be scheduled by the external deployment platform; Argos embeds
+no scheduler.
+
 ### Docker
 
 After configuring `.env`, build and start the API and PostgreSQL:
@@ -79,4 +95,3 @@ make docker
 ```
 
 The API starts independently of PostgreSQL readiness. Its database health endpoint returns HTTP 503 while PostgreSQL is unavailable.
-

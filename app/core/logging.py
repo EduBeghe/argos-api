@@ -1,6 +1,11 @@
 import json
 import logging
 from datetime import UTC, datetime
+from typing import cast
+
+_RESERVED_LOG_FIELDS = frozenset(
+    {"timestamp", "level", "logger", "message", "exception"}
+)
 
 
 class JsonFormatter(logging.Formatter):
@@ -15,6 +20,11 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info is not None:
             payload["exception"] = self.formatException(record.exc_info)
+        structured_fields: object = record.__dict__.get("structured_fields")
+        if isinstance(structured_fields, dict):
+            for key, value in cast(dict[str, object], structured_fields).items():
+                if key not in _RESERVED_LOG_FIELDS:
+                    payload[key] = value
         return json.dumps(payload, ensure_ascii=False)
 
 

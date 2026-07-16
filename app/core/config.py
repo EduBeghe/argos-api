@@ -33,6 +33,12 @@ class Settings(BaseSettings):
         gt=0,
         validation_alias="BINANCE_READ_TIMEOUT_SECONDS",
     )
+    binance_ingestion_limit: int = Field(
+        default=12,
+        ge=1,
+        le=1000,
+        validation_alias="BINANCE_INGESTION_LIMIT",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod
