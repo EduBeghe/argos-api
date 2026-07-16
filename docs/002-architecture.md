@@ -8,16 +8,16 @@ The frontend is a responsive Angular application maintained in the separate `arg
 
 ```text
 External data source
-→ Ingestion
-→ Storage
-→ Feature Engine
-→ Scoring
-→ Decision Engine
-→ Decision Snapshot
-→ Paper Trading
-→ Metrics
-→ API
-→ Web
+â†’ Ingestion
+â†’ Storage
+â†’ Feature Engine
+â†’ Scoring
+â†’ Decision Engine
+â†’ Decision Snapshot
+â†’ Paper Trading
+â†’ Metrics
+â†’ API
+â†’ Web
 ```
 
 The analytical pipeline runs independently of its presentation layers. The API exposes system information and actions; the Web application visualizes them and supports user interaction.
@@ -30,7 +30,7 @@ Ingestion connects to external data providers and retrieves raw market data. The
 
 Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Ingestion orchestration calls the Binance client and passes each raw provider response to the Binance normalizer. The client handles only HTTP transport and never constructs domain models. The normalizer knows both Binance's positional kline contract and Argos's MarketCandle contract, and is responsible for translating between them.
 
-The ingestion pipeline stages normalized candles without committing. Closed-candle orchestration selects only fully closed UTC candle windows and owns commit and rollback, making one run atomic across all requested Assets. Scheduling remains a future external trigger, and retries remain outside this orchestration.
+The ingestion pipeline stages normalized candles without committing. Closed-candle orchestration selects only fully closed UTC candle windows and owns commit and rollback, making one run atomic across all requested Assets. A one-shot executable job owns the database session, Binance client, engine, and their cleanup while invoking this orchestration once. Scheduling is owned by the external deployment platform; Argos includes no internal job framework, and retries remain outside this orchestration.
 
 Binance's positional tuple and all other provider-specific formats must end at this boundary. Domain, persistence, Features, Scores, Strategies, and Decisions do not access Binance directly. Ingestion does not calculate trading signals or make decisions.
 
@@ -53,9 +53,9 @@ Scoring executes independent analytical models using available features and cont
 Illustrative output:
 
 ```text
-technical: 0.65 — price is above the selected moving average
-momentum: 0.40 — recent returns are positive but weakening
-volatility: 0.25 — current volatility increases downside uncertainty
+technical: 0.65 â€” price is above the selected moving average
+momentum: 0.40 â€” recent returns are positive but weakening
+volatility: 0.25 â€” current volatility increases downside uncertainty
 ```
 
 The score ranges, formulas, and explanations above are illustrative rather than selected model definitions.
@@ -131,7 +131,6 @@ The following remain unresolved:
 - simulated slippage model;
 - initial capital;
 - backtesting approach;
-- background job strategy; and
 - deployment platform.
 
 ## Architectural Principle
