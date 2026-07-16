@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.lifespan import lifespan
@@ -14,6 +15,13 @@ def create_app() -> FastAPI:
         title=settings.service_name,
         version=settings.version,
         lifespan=lifespan,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "OPTIONS"],
+        allow_headers=["Accept", "Content-Type"],
     )
     application.include_router(health_router)
     application.include_router(market_router)

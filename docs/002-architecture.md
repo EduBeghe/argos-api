@@ -90,6 +90,8 @@ The API exposes system information and actions to the frontend. It provides read
 
 The API orchestrates application use cases and maps them to explicit module interfaces. It does not contain core analytical or trading logic.
 
+In production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources, while closed-candle orchestration owns its transaction. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins.
+
 ### Web
 
 The Web module lives in the separate `argos-web` repository and is implemented as a responsive Angular dashboard. It displays price evolution, scores and their explanations, decisions, paper trades, virtual portfolio state, performance metrics, buy-and-hold comparison, strategy status, and process health.
