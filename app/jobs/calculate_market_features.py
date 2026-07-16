@@ -7,11 +7,10 @@ from app.core.config import Settings, get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
-from app.features.calculation import FeatureCalculationResult, calculate_ema_20_features
-from app.market.enums import Asset, Interval, MarketType, Provider
+from app.features.calculation import FeatureCalculationResult
+from app.features.orchestration import calculate_all_market_features
 
 logger = logging.getLogger(__name__)
-ASSETS = (Asset.BTC_USDT, Asset.ETH_USDT)
 
 
 def utc_now() -> datetime:
@@ -31,18 +30,8 @@ async def run(
         async with factory() as session:
             calculated_at = clock()
             try:
-                results = tuple(
-                    [
-                        await calculate_ema_20_features(
-                            session=session,
-                            asset=asset,
-                            provider=Provider.BINANCE,
-                            market_type=MarketType.SPOT,
-                            interval=Interval.FIVE_MINUTES,
-                            calculated_at=calculated_at,
-                        )
-                        for asset in ASSETS
-                    ]
+                results = await calculate_all_market_features(
+                    session=session, calculated_at=calculated_at
                 )
                 await session.commit()
             except Exception as original_error:

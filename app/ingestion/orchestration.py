@@ -58,26 +58,18 @@ async def ingest_latest_closed_klines(
     )
 
     asset_results: list[AssetIngestionResult] = []
-    try:
-        for asset in validated_assets:
-            result = await ingest_klines(
-                session=session,
-                client=client,
-                asset=asset,
-                interval=interval,
-                start_time=window.start_time,
-                end_time=window.end_time,
-                limit=limit,
-                ingested_at=now,
-            )
-            asset_results.append(AssetIngestionResult(asset=asset, result=result))
-        await session.commit()
-    except Exception as original_error:
-        try:
-            await session.rollback()
-        except Exception as rollback_error:
-            original_error.add_note(f"Rollback also failed: {rollback_error!r}")
-        raise
+    for asset in validated_assets:
+        result = await ingest_klines(
+            session=session,
+            client=client,
+            asset=asset,
+            interval=interval,
+            start_time=window.start_time,
+            end_time=window.end_time,
+            limit=limit,
+            ingested_at=now,
+        )
+        asset_results.append(AssetIngestionResult(asset=asset, result=result))
 
     immutable_results = tuple(asset_results)
     return ClosedCandleIngestionResult(

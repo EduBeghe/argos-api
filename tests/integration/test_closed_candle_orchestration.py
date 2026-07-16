@@ -92,7 +92,7 @@ async def persisted_count(engine: AsyncEngine) -> int:
         return count
 
 
-async def test_orchestration_commits_all_assets_atomically(engine: AsyncEngine) -> None:
+async def test_caller_commits_staged_assets_atomically(engine: AsyncEngine) -> None:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with (
         factory() as session,
@@ -106,12 +106,13 @@ async def test_orchestration_commits_all_assets_atomically(engine: AsyncEngine) 
             now=NOW,
             limit=1,
         )
+        await session.commit()
 
     assert result.inserted == 2
     assert await persisted_assets(engine) == ["BTC/USDT", "ETH/USDT"]
 
 
-async def test_orchestration_rolls_back_all_assets_on_failure(
+async def test_caller_rolls_back_staged_assets_on_failure(
     engine: AsyncEngine,
 ) -> None:
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -128,6 +129,7 @@ async def test_orchestration_rolls_back_all_assets_on_failure(
                 now=NOW,
                 limit=1,
             )
+        await session.rollback()
 
     assert await persisted_count(engine) == 0
 
@@ -144,6 +146,7 @@ async def test_repeated_orchestration_is_idempotent(engine: AsyncEngine) -> None
             now=NOW,
             limit=1,
         )
+        await session.commit()
         second = await ingest_latest_closed_klines(
             session=session,
             client=client,
@@ -152,6 +155,7 @@ async def test_repeated_orchestration_is_idempotent(engine: AsyncEngine) -> None
             now=NOW,
             limit=1,
         )
+        await session.commit()
 
     assert (first.inserted, first.duplicates) == (2, 0)
     assert (second.inserted, second.duplicates) == (0, 2)

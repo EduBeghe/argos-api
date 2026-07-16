@@ -23,7 +23,7 @@ def client_mock() -> BinanceClient:
     return cast(BinanceClient, Mock(spec=BinanceClient))
 
 
-async def test_orchestration_ingests_all_assets_atomically_in_order() -> None:
+async def test_orchestration_stages_all_assets_in_order() -> None:
     session_mock = AsyncMock(spec=AsyncSession)
     session = cast(AsyncSession, session_mock)
     client = client_mock()
@@ -67,7 +67,7 @@ async def test_orchestration_ingests_all_assets_atomically_in_order() -> None:
             ingested_at=NOW,
         ),
     ]
-    session_mock.commit.assert_awaited_once_with()
+    session_mock.commit.assert_not_awaited()
     session_mock.rollback.assert_not_awaited()
     assert result.ingested_at is NOW
     assert result.start_time == START_TIME
@@ -145,7 +145,7 @@ async def test_orchestration_rejects_invalid_window_before_work(
 
 
 @pytest.mark.parametrize("failure_index", [0, 1])
-async def test_ingestion_failure_rolls_back_and_preserves_original_error(
+async def test_ingestion_failure_propagates_without_managing_transaction(
     failure_index: int,
 ) -> None:
     session_mock = AsyncMock(spec=AsyncSession)
@@ -175,64 +175,8 @@ async def test_ingestion_failure_rolls_back_and_preserves_original_error(
 
     assert captured.value is original
     assert ingest.await_count == failure_index + 1
-    session_mock.rollback.assert_awaited_once_with()
+    session_mock.rollback.assert_not_awaited()
     session_mock.commit.assert_not_awaited()
-
-
-async def test_commit_failure_rolls_back_and_preserves_original_error() -> None:
-    session_mock = AsyncMock(spec=AsyncSession)
-    original = RuntimeError("commit failed")
-    session_mock.commit.side_effect = original
-
-    with (
-        patch.object(
-            orchestration,
-            "ingest_klines",
-            new_callable=AsyncMock,
-            return_value=IngestionResult(1, 1, 1, 0),
-        ),
-        pytest.raises(RuntimeError) as captured,
-    ):
-        await orchestration.ingest_latest_closed_klines(
-            session=cast(AsyncSession, session_mock),
-            client=client_mock(),
-            assets=[Asset.BTC_USDT],
-            interval=Interval.FIVE_MINUTES,
-            now=NOW,
-            limit=1,
-        )
-
-    assert captured.value is original
-    session_mock.commit.assert_awaited_once_with()
-    session_mock.rollback.assert_awaited_once_with()
-
-
-async def test_rollback_failure_is_noted_on_original_error() -> None:
-    session_mock = AsyncMock(spec=AsyncSession)
-    original = RuntimeError("ingestion failed")
-    rollback_error = RuntimeError("rollback failed")
-    session_mock.rollback.side_effect = rollback_error
-
-    with (
-        patch.object(
-            orchestration,
-            "ingest_klines",
-            new_callable=AsyncMock,
-            side_effect=original,
-        ),
-        pytest.raises(RuntimeError) as captured,
-    ):
-        await orchestration.ingest_latest_closed_klines(
-            session=cast(AsyncSession, session_mock),
-            client=client_mock(),
-            assets=[Asset.BTC_USDT],
-            interval=Interval.FIVE_MINUTES,
-            now=NOW,
-            limit=1,
-        )
-
-    assert captured.value is original
-    assert original.__notes__ == [f"Rollback also failed: {rollback_error!r}"]
 
 
 async def test_async_cancellation_is_not_intercepted() -> None:

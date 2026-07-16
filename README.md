@@ -73,7 +73,7 @@ docker compose stop postgres
 ### One-shot closed-candle ingestion
 
 With PostgreSQL migrated and the environment configured, run the latest fully
-closed five-minute Binance Spot candle ingestion once:
+closed five-minute Binance Spot candle ingestion and EMA 20 calculation once:
 
 ```sh
 python -m app.jobs.ingest_closed_candles
@@ -81,8 +81,10 @@ python -m app.jobs.ingest_closed_candles
 
 `BINANCE_INGESTION_LIMIT` controls the requested candles per asset and defaults
 to 12 (one hour of five-minute candles). The command processes BTC/USDT followed
-by ETH/USDT, commits the run atomically through ingestion orchestration, closes
-its resources, and exits. It never ingests the current open candle. Repeated
+by ETH/USDT and commits those candles atomically. It then calculates EMA 20 for
+both assets in a separate atomic transaction before closing its resources and
+exiting. A feature failure preserves committed candles and can recover on the
+next run. It never ingests the current open candle. Repeated
 execution must be scheduled by the external deployment platform; Argos embeds
 no scheduler.
 
@@ -110,8 +112,9 @@ These endpoints only read persisted candles. They never trigger ingestion.
 
 ### EMA 20 feature calculation
 
-After at least 20 closed candles exist, calculate and persist EMA 20 for both
-supported assets with:
+The ingestion job calculates EMA 20 after committing each closed-candle batch.
+For an explicit repair or historical calculation after at least 20 closed
+candles exist, run the standalone command:
 
 ```sh
 python -m app.jobs.calculate_market_features

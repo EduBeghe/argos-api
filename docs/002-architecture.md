@@ -8,16 +8,16 @@ The frontend is a responsive Angular application maintained in the separate `arg
 
 ```text
 External data source
-→ Ingestion
-→ Storage
-→ Feature Engine
-→ Scoring
-→ Decision Engine
-→ Decision Snapshot
-→ Paper Trading
-→ Metrics
-→ API
-→ Web
+â†’ Ingestion
+â†’ Storage
+â†’ Feature Engine
+â†’ Scoring
+â†’ Decision Engine
+â†’ Decision Snapshot
+â†’ Paper Trading
+â†’ Metrics
+â†’ API
+â†’ Web
 ```
 
 The analytical pipeline runs independently of its presentation layers. The API exposes system information and actions; the Web application visualizes them and supports user interaction.
@@ -30,7 +30,7 @@ Ingestion connects to external data providers and retrieves raw market data. The
 
 Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Ingestion orchestration calls the Binance client and passes each raw provider response to the Binance normalizer. The client handles only HTTP transport and never constructs domain models. The normalizer knows both Binance's positional kline contract and Argos's MarketCandle contract, and is responsible for translating between them.
 
-The ingestion pipeline stages normalized candles without committing. Closed-candle orchestration selects only fully closed UTC candle windows and owns commit and rollback, making one run atomic across all requested Assets. A one-shot executable job owns the database session, Binance client, engine, and their cleanup while invoking this orchestration once. Scheduling is owned by the external deployment platform; Argos includes no internal job framework, and retries remain outside this orchestration.
+The ingestion pipeline and closed-candle orchestration stage normalized candles without committing. The one-shot executable job owns the database session, Binance client, engine, transaction boundaries, and cleanup. It commits the fully closed BTC/USDT and ETH/USDT candle batch atomically before starting feature calculation. Scheduling is owned by the external deployment platform; Argos includes no internal job framework, and retries remain outside this orchestration.
 
 Binance's positional tuple and all other provider-specific formats must end at this boundary. Domain, persistence, Features, Scores, Strategies, and Decisions do not access Binance directly. Ingestion does not calculate trading signals or make decisions.
 
@@ -46,7 +46,7 @@ The Feature Engine transforms raw market data into measurable analytical variabl
 
 It may calculate RSI, moving averages, MACD, ATR, volatility, momentum, volume changes, and returns over different windows. Its input is normalized market data; its output is a reusable, persisted feature set. It does not decide whether to buy or sell.
 
-EMA 20 is the first implemented feature. The Feature Engine consumes persisted normalized candles and stores a versioned value associated with each eligible candle, seeded from the first 20 closes. Calculation is separate from ingestion, may run historically or incrementally, and must never use future candle data. Repeated runs are idempotent and scheduling remains external.
+EMA 20 is the first implemented feature. The Feature Engine consumes persisted normalized candles and stores a versioned value associated with each eligible candle, seeded from the first 20 closes. Calculation may run historically or incrementally and must never use future candle data. In production, the closed-candle job starts feature calculation only after its candle transaction commits, then commits EMA 20 for both assets in a second atomic transaction. A feature failure cannot roll back committed candles and is recoverable on the next idempotent run. The standalone feature command remains available for explicit repair and historical execution; scheduling remains external.
 
 ### Scoring
 
@@ -55,9 +55,9 @@ Scoring executes independent analytical models using available features and cont
 Illustrative output:
 
 ```text
-technical: 0.65 — price is above the selected moving average
-momentum: 0.40 — recent returns are positive but weakening
-volatility: 0.25 — current volatility increases downside uncertainty
+technical: 0.65 â€” price is above the selected moving average
+momentum: 0.40 â€” recent returns are positive but weakening
+volatility: 0.25 â€” current volatility increases downside uncertainty
 ```
 
 The score ranges, formulas, and explanations above are illustrative rather than selected model definitions.
@@ -92,7 +92,7 @@ The API exposes system information and actions to the frontend. It provides read
 
 The API orchestrates application use cases and maps them to explicit module interfaces. It does not contain core analytical or trading logic.
 
-In production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources, while closed-candle orchestration owns its transaction. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins.
+In production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources and separate candle and feature transactions. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins.
 
 ### Web
 
