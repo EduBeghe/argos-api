@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from app.features.calculation import FeatureCalculationResult
-from app.features.models import FeatureName
 from app.jobs import calculate_market_features as job
 from app.market.enums import Asset
 
@@ -15,14 +14,13 @@ NOW = datetime(2026, 7, 16, tzinfo=UTC)
 def feature_result(asset: Asset) -> FeatureCalculationResult:
     return FeatureCalculationResult(
         asset=asset,
-        feature_name=FeatureName.EMA_20,
-        feature_version=1,
         candle_count_read=20,
-        values_calculated=1,
-        values_inserted=1,
+        values_calculated=0,
+        values_inserted=0,
         duplicates=0,
-        first_feature_time=NOW,
-        last_feature_time=NOW,
+        first_feature_time=None,
+        last_feature_time=None,
+        features=(),
     )
 
 

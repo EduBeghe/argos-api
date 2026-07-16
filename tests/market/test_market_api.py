@@ -228,10 +228,22 @@ def test_latest_feature_endpoint_returns_exact_ema(client: TestClient) -> None:
         value=Decimal("65000.123456789012345678"),
         calculated_at=feature_time,
     )
+    rsi = MarketFeature(
+        asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
+        candle_open_time=feature_time,
+        feature_name=FeatureName.RSI_14,
+        feature_version=1,
+        value=Decimal("54.123456789012345678"),
+        calculated_at=feature_time,
+    )
     app.dependency_overrides[get_db_session] = fake_session
     try:
         with patch(
-            "app.market.api.get_latest_feature", AsyncMock(return_value=feature)
+            "app.market.api.get_latest_feature_snapshot",
+            AsyncMock(return_value=[feature, rsi]),
         ):
             response = client.get(
                 "/market/features/latest",
@@ -240,16 +252,19 @@ def test_latest_feature_endpoint_returns_exact_ema(client: TestClient) -> None:
     finally:
         app.dependency_overrides.clear()
     assert response.status_code == 200
-    assert response.json()["value"] == "65000.123456789012345678"
+    assert response.json()["features"]["ema_20"] == "65000.123456789012345678"
+    assert response.json()["features"]["rsi_14"] == "54.123456789012345678"
+    assert response.json()["features"]["ema_50"] is None
+    assert response.json()["candle_open_time"] == "2026-07-15T12:00:00Z"
 
 
 def test_latest_feature_endpoint_returns_404_without_calculation(
     client: TestClient,
 ) -> None:
-    query = AsyncMock(return_value=None)
+    query = AsyncMock(return_value=[])
     app.dependency_overrides[get_db_session] = fake_session
     try:
-        with patch("app.market.api.get_latest_feature", query):
+        with patch("app.market.api.get_latest_feature_snapshot", query):
             response = client.get(
                 "/market/features/latest",
                 params={"asset": "ETH/USDT", "interval": "5m"},

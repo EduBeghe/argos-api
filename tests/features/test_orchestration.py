@@ -5,21 +5,20 @@ import pytest
 
 from app.features import orchestration
 from app.features.calculation import FeatureCalculationResult
-from app.features.models import FeatureName
 from app.market.enums import Asset, Interval, MarketType, Provider
 
 NOW = datetime(2026, 7, 16, tzinfo=UTC)
 
 
 def result(asset: Asset) -> FeatureCalculationResult:
-    return FeatureCalculationResult(asset, FeatureName.EMA_20, 1, 20, 1, 1, 0, NOW, NOW)
+    return FeatureCalculationResult(asset, 20, 0, 0, 0, None, None, ())
 
 
 @pytest.mark.asyncio
 async def test_calculates_btc_then_eth_with_same_timestamp() -> None:
     session = AsyncMock()
     calculate = AsyncMock(side_effect=[result(Asset.BTC_USDT), result(Asset.ETH_USDT)])
-    with patch.object(orchestration, "calculate_ema_20_features", calculate):
+    with patch.object(orchestration, "calculate_market_features", calculate):
         results = await orchestration.calculate_all_market_features(
             session=session, calculated_at=NOW
         )

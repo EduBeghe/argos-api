@@ -110,9 +110,12 @@ curl "http://localhost:8000/market/status"
 
 These endpoints only read persisted candles. They never trigger ingestion.
 
-### EMA 20 feature calculation
+### Analytical feature calculation
 
-The ingestion job calculates EMA 20 after committing each closed-candle batch.
+The ingestion job calculates EMA 20, EMA 50, RSI 14, ATR 14, one- and
+twelve-candle fractional returns, and twenty-candle relative quote volume after
+committing each closed-candle batch. Each feature is persisted only when its
+history requirement is satisfied; these measurements are not trading decisions.
 For an explicit repair or historical calculation after at least 20 closed
 candles exist, run the standalone command:
 
@@ -120,13 +123,14 @@ candles exist, run the standalone command:
 python -m app.jobs.calculate_market_features
 ```
 
-Repeated execution is idempotent. Fetch the latest persisted value with:
+Repeated execution is idempotent. Fetch the latest same-candle snapshot with:
 
 ```sh
 curl "http://localhost:8000/market/features/latest?asset=BTC%2FUSDT&interval=5m"
 ```
 
-EMA 20 is a measurable feature, not a buy or sell signal.
+See [the analytical feature reference](docs/005-analytical-features.md) for exact
+formulas, warm-up periods, interpretations, limitations, and versions.
 
 ## Production deployment
 

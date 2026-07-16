@@ -11,7 +11,7 @@ from app.core.config import Settings, get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
-from app.features.calculation import FeatureCalculationResult
+from app.features.calculation import FeatureCalculationResult, feature_log_totals
 from app.features.orchestration import calculate_all_market_features
 from app.ingestion.binance.client import BinanceClient
 from app.ingestion.orchestration import (
@@ -143,6 +143,7 @@ def _log_completion(result: IngestionPipelineResult) -> None:
                     }
                     for item in result.features
                 ],
+                "feature_totals": feature_log_totals(result.features),
             }
         },
     )

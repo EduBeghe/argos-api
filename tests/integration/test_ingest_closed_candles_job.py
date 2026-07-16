@@ -138,7 +138,7 @@ async def test_feature_failure_preserves_candles_and_next_run_recovers() -> None
 
     with (
         patch(
-            "app.features.orchestration.calculate_ema_20_features",
+            "app.features.orchestration.calculate_market_features",
             fail_after_btc,
         ),
         pytest.raises(RuntimeError) as captured,
@@ -170,7 +170,9 @@ async def test_feature_failure_preserves_candles_and_next_run_recovers() -> None
         )
         feature_assets = list(
             await verification.scalars(
-                select(MarketFeatureRecord.asset).order_by(MarketFeatureRecord.asset)
+                select(MarketFeatureRecord.asset)
+                .distinct()
+                .order_by(MarketFeatureRecord.asset)
             )
         )
         await verification.execute(delete(MarketFeatureRecord))

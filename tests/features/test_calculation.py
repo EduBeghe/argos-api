@@ -17,7 +17,10 @@ async def test_calculation_reads_once_bulk_inserts_and_never_commits() -> None:
     rows = [
         (
             datetime(2026, 7, 15, tzinfo=UTC) + timedelta(minutes=5 * index),
+            Decimal(index + 2),
+            Decimal(index),
             Decimal(index + 1),
+            Decimal(100 + index),
         )
         for index in range(21)
     ]
@@ -27,7 +30,7 @@ async def test_calculation_reads_once_bulk_inserts_and_never_commits() -> None:
 
     with patch(
         "app.features.calculation.insert_market_features",
-        AsyncMock(return_value=1),
+        AsyncMock(return_value=["ema_20"]),
     ) as insert:
         calculated = await calculate_ema_20_features(
             session=cast(AsyncSession, session_mock),
@@ -42,8 +45,9 @@ async def test_calculation_reads_once_bulk_inserts_and_never_commits() -> None:
     insert.assert_awaited_once()
     session_mock.commit.assert_not_awaited()
     session_mock.rollback.assert_not_awaited()
-    assert (calculated.candle_count_read, calculated.values_calculated) == (21, 2)
-    assert (calculated.values_inserted, calculated.duplicates) == (1, 1)
+    assert calculated.candle_count_read == 21
+    assert calculated.values_calculated == 47
+    assert (calculated.values_inserted, calculated.duplicates) == (1, 46)
 
 
 async def test_insufficient_history_skips_bulk_insert() -> None:
@@ -53,7 +57,7 @@ async def test_insufficient_history_skips_bulk_insert() -> None:
     session_mock.execute.return_value = result
 
     with patch(
-        "app.features.calculation.insert_market_features", AsyncMock(return_value=0)
+        "app.features.calculation.insert_market_features", AsyncMock(return_value=[])
     ) as insert:
         calculated = await calculate_ema_20_features(
             session=cast(AsyncSession, session_mock),

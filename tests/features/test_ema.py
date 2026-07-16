@@ -11,7 +11,9 @@ def test_fewer_than_period_closes_produces_no_values() -> None:
 
 def test_twenty_closes_seed_ema_with_sma() -> None:
     values = calculate_ema([Decimal(index) for index in range(1, 21)], period=20)
-    assert values == [Decimal("10.5")]
+    assert [(point.candle_index, point.value) for point in values] == [
+        (19, Decimal("10.5"))
+    ]
 
 
 def test_next_close_uses_decimal_recurrence() -> None:
@@ -20,8 +22,11 @@ def test_next_close_uses_decimal_recurrence() -> None:
     expected = Decimal(2) / Decimal(21) * Decimal(21) + Decimal(19) / Decimal(
         21
     ) * Decimal("10.5")
-    assert values == [Decimal("10.5"), expected]
-    assert all(isinstance(value, Decimal) for value in values)
+    assert [(point.candle_index, point.value) for point in values] == [
+        (19, Decimal("10.5")),
+        (20, expected),
+    ]
+    assert all(isinstance(point.value, Decimal) for point in values)
 
 
 def test_future_close_does_not_change_prior_values() -> None:

@@ -7,7 +7,7 @@ from app.core.config import Settings, get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
-from app.features.calculation import FeatureCalculationResult
+from app.features.calculation import FeatureCalculationResult, feature_log_totals
 from app.features.orchestration import calculate_all_market_features
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ def utc_now() -> datetime:
 async def run(
     *, settings: Settings | None = None, clock: Callable[[], datetime] = utc_now
 ) -> tuple[FeatureCalculationResult, ...]:
-    """Calculate EMA 20 for both MVP assets in one transaction."""
+    """Calculate the complete feature pack for both MVP assets atomically."""
 
     resolved = settings or get_settings()
     configure_logging(resolved.log_level)
@@ -60,6 +60,7 @@ async def run(
                         }
                         for item in results
                     ],
+                    "features": feature_log_totals(results),
                 }
             },
         )
