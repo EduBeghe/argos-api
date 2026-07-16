@@ -86,6 +86,28 @@ its resources, and exits. It never ingests the current open candle. Repeated
 execution must be scheduled by the external deployment platform; Argos embeds
 no scheduler.
 
+### Read-only market data
+
+Fetch the latest persisted BTC/USDT five-minute candles:
+
+```sh
+curl "http://localhost:8000/market/candles?asset=BTC%2FUSDT&interval=5m"
+```
+
+Request candles in ascending chronological order:
+
+```sh
+curl "http://localhost:8000/market/candles?asset=BTC%2FUSDT&interval=5m&order=asc"
+```
+
+Inspect ingestion freshness for both supported assets:
+
+```sh
+curl "http://localhost:8000/market/status"
+```
+
+These endpoints only read persisted candles. They never trigger ingestion.
+
 ### Docker
 
 After configuring `.env`, build and start the API and PostgreSQL:
