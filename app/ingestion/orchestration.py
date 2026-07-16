@@ -72,10 +72,10 @@ async def ingest_latest_closed_klines(
             )
             asset_results.append(AssetIngestionResult(asset=asset, result=result))
         await session.commit()
-    except BaseException as original_error:
+    except Exception as original_error:
         try:
             await session.rollback()
-        except BaseException as rollback_error:
+        except Exception as rollback_error:
             original_error.add_note(f"Rollback also failed: {rollback_error!r}")
         raise
 

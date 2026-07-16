@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import AsyncMock, Mock, call, patch
@@ -204,3 +205,58 @@ async def test_commit_failure_rolls_back_and_preserves_original_error() -> None:
     assert captured.value is original
     session_mock.commit.assert_awaited_once_with()
     session_mock.rollback.assert_awaited_once_with()
+
+
+async def test_rollback_failure_is_noted_on_original_error() -> None:
+    session_mock = AsyncMock(spec=AsyncSession)
+    original = RuntimeError("ingestion failed")
+    rollback_error = RuntimeError("rollback failed")
+    session_mock.rollback.side_effect = rollback_error
+
+    with (
+        patch.object(
+            orchestration,
+            "ingest_klines",
+            new_callable=AsyncMock,
+            side_effect=original,
+        ),
+        pytest.raises(RuntimeError) as captured,
+    ):
+        await orchestration.ingest_latest_closed_klines(
+            session=cast(AsyncSession, session_mock),
+            client=client_mock(),
+            assets=[Asset.BTC_USDT],
+            interval=Interval.FIVE_MINUTES,
+            now=NOW,
+            limit=1,
+        )
+
+    assert captured.value is original
+    assert original.__notes__ == [f"Rollback also failed: {rollback_error!r}"]
+
+
+async def test_async_cancellation_is_not_intercepted() -> None:
+    session_mock = AsyncMock(spec=AsyncSession)
+    cancellation = asyncio.CancelledError()
+
+    with (
+        patch.object(
+            orchestration,
+            "ingest_klines",
+            new_callable=AsyncMock,
+            side_effect=cancellation,
+        ),
+        pytest.raises(asyncio.CancelledError) as captured,
+    ):
+        await orchestration.ingest_latest_closed_klines(
+            session=cast(AsyncSession, session_mock),
+            client=client_mock(),
+            assets=[Asset.BTC_USDT],
+            interval=Interval.FIVE_MINUTES,
+            now=NOW,
+            limit=1,
+        )
+
+    assert captured.value is cancellation
+    session_mock.commit.assert_not_awaited()
+    session_mock.rollback.assert_not_awaited()
