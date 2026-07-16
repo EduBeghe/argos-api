@@ -46,6 +46,8 @@ The Feature Engine transforms raw market data into measurable analytical variabl
 
 It may calculate RSI, moving averages, MACD, ATR, volatility, momentum, volume changes, and returns over different windows. Its input is normalized market data; its output is a reusable, persisted feature set. It does not decide whether to buy or sell.
 
+EMA 20 is the first implemented feature. The Feature Engine consumes persisted normalized candles and stores a versioned value associated with each eligible candle, seeded from the first 20 closes. Calculation is separate from ingestion, may run historically or incrementally, and must never use future candle data. Repeated runs are idempotent and scheduling remains external.
+
 ### Scoring
 
 Scoring executes independent analytical models using available features and context. It produces explicit component scores such as technical, momentum, volatility, market context, news, sentiment, and machine-learning scores. Every result must be measurable and persist both its score and explanation. Scoring does not execute trades.

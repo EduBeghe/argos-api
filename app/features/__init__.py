@@ -1,0 +1,1 @@
+"""Persisted analytical market features."""
