@@ -30,6 +30,8 @@ Ingestion connects to external data providers and retrieves raw market data. The
 
 Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Ingestion orchestration calls the Binance client and passes each raw provider response to the Binance normalizer. The client handles only HTTP transport and never constructs domain models. The normalizer knows both Binance's positional kline contract and Argos's MarketCandle contract, and is responsible for translating between them.
 
+The ingestion pipeline stages normalized candles without committing. Closed-candle orchestration selects only fully closed UTC candle windows and owns commit and rollback, making one run atomic across all requested Assets. Scheduling remains a future external trigger, and retries remain outside this orchestration.
+
 Binance's positional tuple and all other provider-specific formats must end at this boundary. Domain, persistence, Features, Scores, Strategies, and Decisions do not access Binance directly. Ingestion does not calculate trading signals or make decisions.
 
 ### Storage
@@ -135,4 +137,3 @@ The following remain unresolved:
 ## Architectural Principle
 
 > Argos does not attempt to predict the future with certainty. It estimates probabilities using measurable evidence, records why every decision was made, and evaluates those decisions through simulated results.
-
