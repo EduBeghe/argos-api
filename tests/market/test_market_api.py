@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.core.database.session import get_db_session
+from app.features.models import FeatureName, MarketFeature
 from app.market.api import build_market_status
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.queries import MarketStatusAggregate
@@ -211,3 +213,49 @@ def test_market_status_endpoint_and_openapi(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
     assert "/market/candles" in paths
     assert "/market/status" in paths
+
+
+def test_latest_feature_endpoint_returns_exact_ema(client: TestClient) -> None:
+    feature_time = datetime(2026, 7, 15, 12, tzinfo=UTC)
+    feature = MarketFeature(
+        asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
+        candle_open_time=feature_time,
+        feature_name=FeatureName.EMA_20,
+        feature_version=1,
+        value=Decimal("65000.123456789012345678"),
+        calculated_at=feature_time,
+    )
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch(
+            "app.market.api.get_latest_feature", AsyncMock(return_value=feature)
+        ):
+            response = client.get(
+                "/market/features/latest",
+                params={"asset": "BTC/USDT", "interval": "5m"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()["value"] == "65000.123456789012345678"
+
+
+def test_latest_feature_endpoint_returns_404_without_calculation(
+    client: TestClient,
+) -> None:
+    query = AsyncMock(return_value=None)
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch("app.market.api.get_latest_feature", query):
+            response = client.get(
+                "/market/features/latest",
+                params={"asset": "ETH/USDT", "interval": "5m"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 404
+    query.assert_awaited_once()
+    assert "/market/features/latest" in client.get("/openapi.json").json()["paths"]

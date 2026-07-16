@@ -108,6 +108,23 @@ curl "http://localhost:8000/market/status"
 
 These endpoints only read persisted candles. They never trigger ingestion.
 
+### EMA 20 feature calculation
+
+After at least 20 closed candles exist, calculate and persist EMA 20 for both
+supported assets with:
+
+```sh
+python -m app.jobs.calculate_market_features
+```
+
+Repeated execution is idempotent. Fetch the latest persisted value with:
+
+```sh
+curl "http://localhost:8000/market/features/latest?asset=BTC%2FUSDT&interval=5m"
+```
+
+EMA 20 is a measurable feature, not a buy or sell signal.
+
 ## Production deployment
 
 Provide `DATABASE_URL` and review the production values for `BINANCE_BASE_URL`,
