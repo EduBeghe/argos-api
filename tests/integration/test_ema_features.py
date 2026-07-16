@@ -165,7 +165,7 @@ async def test_feature_job_rolls_back_btc_when_eth_fails(session: AsyncSession) 
 
     with (
         patch(
-            "app.jobs.calculate_market_features.calculate_ema_20_features",
+            "app.features.orchestration.calculate_ema_20_features",
             fail_after_btc,
         ),
         pytest.raises(RuntimeError) as captured,

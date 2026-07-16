@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from app.core.config import Settings
+from app.features.calculation import FeatureCalculationResult
+from app.features.models import FeatureName
 from app.ingestion.binance.ingestion import IngestionResult
 from app.ingestion.orchestration import (
     AssetIngestionResult,
@@ -13,7 +15,8 @@ from app.ingestion.orchestration import (
 from app.jobs import ingest_closed_candles as job
 from app.market.enums import Asset, Interval
 
-NOW = datetime(2026, 7, 16, 12, 7, tzinfo=UTC)
+INGESTED_AT = datetime(2026, 7, 16, 12, 7, tzinfo=UTC)
+CALCULATED_AT = datetime(2026, 7, 16, 12, 8, tzinfo=UTC)
 
 
 def settings() -> Settings:
@@ -26,80 +29,61 @@ def settings() -> Settings:
     )
 
 
-def result() -> ClosedCandleIngestionResult:
-    btc = IngestionResult(received=2, normalized=2, inserted=2, duplicates=0)
-    eth = IngestionResult(received=2, normalized=2, inserted=1, duplicates=1)
+def ingestion_result() -> ClosedCandleIngestionResult:
+    btc = IngestionResult(2, 2, 2, 0)
+    eth = IngestionResult(2, 2, 1, 1)
     return ClosedCandleIngestionResult(
-        ingested_at=NOW,
-        start_time=1000,
-        end_time=2000,
-        assets=(
-            AssetIngestionResult(asset=Asset.BTC_USDT, result=btc),
-            AssetIngestionResult(asset=Asset.ETH_USDT, result=eth),
+        INGESTED_AT,
+        1000,
+        2000,
+        (
+            AssetIngestionResult(Asset.BTC_USDT, btc),
+            AssetIngestionResult(Asset.ETH_USDT, eth),
         ),
-        received=4,
-        inserted=3,
-        duplicates=1,
+        4,
+        3,
+        1,
     )
 
 
-@pytest.mark.asyncio
-async def test_run_composes_one_ingestion_and_closes_resources() -> None:
-    database_engine = MagicMock()
-    database_engine.dispose = AsyncMock()
+def feature_result(asset: Asset) -> FeatureCalculationResult:
+    return FeatureCalculationResult(
+        asset, FeatureName.EMA_20, 1, 20, 1, 1, 0, CALCULATED_AT, CALCULATED_AT
+    )
+
+
+def resources() -> tuple[MagicMock, AsyncMock, MagicMock, MagicMock]:
+    engine = MagicMock()
+    engine.dispose = AsyncMock()
     session = AsyncMock()
     session_context = MagicMock()
     session_context.__aenter__ = AsyncMock(return_value=session)
     session_context.__aexit__ = AsyncMock(return_value=None)
-    session_factory = Mock(return_value=session_context)
-    client = MagicMock()
-    client_context = MagicMock()
-    client_context.__aenter__ = AsyncMock(return_value=client)
-    client_context.__aexit__ = AsyncMock(return_value=None)
-    clock = Mock(return_value=NOW)
-    expected = result()
-
-    with (
-        patch.object(job, "configure_logging"),
-        patch.object(job, "create_session_factory", return_value=session_factory),
-        patch.object(job, "BinanceClient", return_value=client_context) as client_type,
-        patch.object(
-            job, "ingest_latest_closed_klines", AsyncMock(return_value=expected)
-        ) as orchestration,
-        patch.object(job.logger, "info") as info,
-    ):
-        actual = await job.run(settings=settings(), clock=clock, engine=database_engine)
-
-    assert actual is expected
-    clock.assert_called_once_with()
-    client_type.assert_called_once()
-    orchestration.assert_awaited_once_with(
-        session=session,
-        client=client,
-        assets=(Asset.BTC_USDT, Asset.ETH_USDT),
-        interval=Interval.FIVE_MINUTES,
-        now=NOW,
-        limit=18,
-    )
-    info.assert_called_once()
-    session_context.__aexit__.assert_awaited_once()
-    client_context.__aexit__.assert_awaited_once()
-    database_engine.dispose.assert_awaited_once_with()
-    session.commit.assert_not_awaited()
-    session.rollback.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_run_logs_and_propagates_failure_after_cleanup() -> None:
-    database_engine = MagicMock()
-    database_engine.dispose = AsyncMock()
-    session_context = MagicMock()
-    session_context.__aenter__ = AsyncMock(return_value=AsyncMock())
-    session_context.__aexit__ = AsyncMock(return_value=None)
     client_context = MagicMock()
     client_context.__aenter__ = AsyncMock(return_value=MagicMock())
     client_context.__aexit__ = AsyncMock(return_value=None)
-    failure = RuntimeError("provider unavailable")
+    return engine, session, session_context, client_context
+
+
+@pytest.mark.asyncio
+async def test_run_commits_ingestion_then_features_and_closes_resources() -> None:
+    engine, session, session_context, client_context = resources()
+    events: list[str] = []
+    ingestion = ingestion_result()
+    features = (feature_result(Asset.BTC_USDT), feature_result(Asset.ETH_USDT))
+
+    async def stage_ingestion(**_: object) -> ClosedCandleIngestionResult:
+        events.append("ingest")
+        return ingestion
+
+    async def stage_features(**_: object) -> tuple[FeatureCalculationResult, ...]:
+        events.append("features")
+        return features
+
+    ingest = AsyncMock(side_effect=stage_ingestion)
+    calculate = AsyncMock(side_effect=stage_features)
+    session.commit.side_effect = lambda: events.append("commit")
+    clock = Mock(side_effect=[INGESTED_AT, CALCULATED_AT])
 
     with (
         patch.object(job, "configure_logging"),
@@ -109,41 +93,106 @@ async def test_run_logs_and_propagates_failure_after_cleanup() -> None:
             return_value=Mock(return_value=session_context),
         ),
         patch.object(job, "BinanceClient", return_value=client_context),
-        patch.object(
-            job, "ingest_latest_closed_klines", AsyncMock(side_effect=failure)
-        ),
-        patch.object(job.logger, "exception") as exception_log,
-        pytest.raises(RuntimeError, match="provider unavailable"),
+        patch.object(job, "ingest_latest_closed_klines", ingest),
+        patch.object(job, "calculate_all_market_features", calculate),
     ):
-        await job.run(settings=settings(), engine=database_engine)
+        result = await job.run(settings=settings(), clock=clock, engine=engine)
 
-    exception_log.assert_called_once()
-    logged_arguments = repr(exception_log.call_args)
-    assert "secret" not in logged_arguments
-    assert "postgresql" not in logged_arguments
-    session_context.__aexit__.assert_awaited_once()
-    client_context.__aexit__.assert_awaited_once()
-    database_engine.dispose.assert_awaited_once_with()
+    assert events == ["ingest", "commit", "features", "commit"]
+    assert result == job.IngestionPipelineResult(ingestion, CALCULATED_AT, features)
+    assert clock.call_count == 2
+    ingest.assert_awaited_once_with(
+        session=session,
+        client=client_context.__aenter__.return_value,
+        assets=(Asset.BTC_USDT, Asset.ETH_USDT),
+        interval=Interval.FIVE_MINUTES,
+        now=INGESTED_AT,
+        limit=18,
+    )
+    calculate.assert_awaited_once_with(session=session, calculated_at=CALCULATED_AT)
+    assert session.commit.await_count == 2
+    session.rollback.assert_not_awaited()
+    engine.dispose.assert_awaited_once_with()
 
 
-def test_completion_log_contains_aggregate_and_per_asset_fields(
+@pytest.mark.asyncio
+async def test_ingestion_failure_rolls_back_and_never_calculates_features() -> None:
+    engine, session, session_context, client_context = resources()
+    original = RuntimeError("provider unavailable")
+    calculate = AsyncMock()
+    with (
+        patch.object(job, "configure_logging"),
+        patch.object(
+            job,
+            "create_session_factory",
+            return_value=Mock(return_value=session_context),
+        ),
+        patch.object(job, "BinanceClient", return_value=client_context),
+        patch.object(
+            job, "ingest_latest_closed_klines", AsyncMock(side_effect=original)
+        ),
+        patch.object(job, "calculate_all_market_features", calculate),
+        pytest.raises(RuntimeError) as captured,
+    ):
+        await job.run(settings=settings(), engine=engine)
+
+    assert captured.value is original
+    session.rollback.assert_awaited_once_with()
+    session.commit.assert_not_awaited()
+    calculate.assert_not_awaited()
+    engine.dispose.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_second_feature_failure_rolls_back_only_feature_transaction() -> None:
+    engine, session, session_context, client_context = resources()
+    original = RuntimeError("ETH calculation failed")
+    calculate = AsyncMock(side_effect=original)
+    with (
+        patch.object(job, "configure_logging"),
+        patch.object(
+            job,
+            "create_session_factory",
+            return_value=Mock(return_value=session_context),
+        ),
+        patch.object(job, "BinanceClient", return_value=client_context),
+        patch.object(
+            job,
+            "ingest_latest_closed_klines",
+            AsyncMock(return_value=ingestion_result()),
+        ),
+        patch.object(job, "calculate_all_market_features", calculate),
+        pytest.raises(RuntimeError) as captured,
+    ):
+        await job.run(
+            settings=settings(),
+            clock=Mock(side_effect=[INGESTED_AT, CALCULATED_AT]),
+            engine=engine,
+        )
+
+    assert captured.value is original
+    session.commit.assert_awaited_once_with()
+    session.rollback.assert_awaited_once_with()
+    calculate.assert_awaited_once_with(session=session, calculated_at=CALCULATED_AT)
+
+
+def test_completion_log_contains_both_stage_fields(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    result = job.IngestionPipelineResult(
+        ingestion_result(),
+        CALCULATED_AT,
+        (feature_result(Asset.BTC_USDT), feature_result(Asset.ETH_USDT)),
+    )
     with caplog.at_level(logging.INFO, logger=job.__name__):
-        job._log_completion(result())
+        job._log_completion(result)
 
-    assert len(caplog.records) == 1
     fields = caplog.records[0].__dict__["structured_fields"]
-    assert fields == {
-        "job_name": "ingest_closed_candles",
-        "ingested_at": NOW.isoformat(),
-        "start_time": 1000,
-        "end_time": 2000,
-        "received": 4,
-        "inserted": 3,
-        "duplicates": 1,
-        "assets": [
-            {"asset": "BTC/USDT", "received": 2, "inserted": 2, "duplicates": 0},
-            {"asset": "ETH/USDT", "received": 2, "inserted": 1, "duplicates": 1},
-        ],
-    }
+    assert fields["ingestion_completed"] is True
+    assert fields["received"] == 4
+    assert fields["feature_calculated_at"] == CALCULATED_AT.isoformat()
+    assert fields["feature_values_inserted"] == 2
+    assert [item["asset"] for item in fields["feature_assets"]] == [
+        "BTC/USDT",
+        "ETH/USDT",
+    ]
