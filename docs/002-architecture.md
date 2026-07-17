@@ -30,7 +30,7 @@ Ingestion connects to external data providers and retrieves raw market data. The
 
 Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Ingestion orchestration calls the Binance client and passes each raw provider response to the Binance normalizer. The client handles only HTTP transport and never constructs domain models. The normalizer knows both Binance's positional kline contract and Argos's MarketCandle contract, and is responsible for translating between them.
 
-The ingestion pipeline and closed-candle orchestration stage normalized candles without committing. The one-shot executable job owns the database session, Binance client, engine, transaction boundaries, and cleanup. It commits the fully closed BTC/USDT and ETH/USDT candle batch atomically before starting feature calculation. Scheduling is owned by the external deployment platform; Argos includes no internal job framework, and retries remain outside this orchestration.
+The ingestion pipeline and closed-candle orchestration stage normalized candles without committing. The one-shot executable job owns the database session, Binance client, engine, transaction boundaries, and cleanup. It commits the fully closed BTC/USDT and ETH/USDT candle batch atomically before starting feature calculation. The current Railway deployment owns external scheduling; Argos includes no internal job framework, and retries remain outside this orchestration.
 
 Binance's positional tuple and all other provider-specific formats must end at this boundary. Domain, persistence, Features, Scores, Strategies, and Decisions do not access Binance directly. Ingestion does not calculate trading signals or make decisions.
 
@@ -66,19 +66,19 @@ The score ranges, formulas, and explanations above are illustrative rather than 
 
 ### Decision Engine
 
-The Decision Engine combines component scores with risk rules, portfolio state, current exposure, open positions, confidence thresholds, volatility, stop-loss rules, and take-profit rules. The final decision is not necessarily a simple average of component scores.
+The Decision Engine combines normalized, persisted Scores with portfolio state, current exposure, open positions, and versioned Strategy configuration. A Strategy may consume compatible component Scores directly or an Argos Score when one exists and that Strategy requires it. `baseline_long_only` version 1 consumes `baseline_technical` version 1 directly and contains no provider-specific decision logic.
 
-Its inputs are persisted evidence and account context. Its output is an explainable action such as `BUY`, `SELL`, `CLOSE_POSITION`, or `NO_ACTION`. `NO_ACTION` intentionally leaves the current portfolio unchanged without opening, closing, or modifying a position. It does not interact with a real exchange in the MVP.
+Its inputs are persisted evidence and account context. Its output is one of `OPEN_POSITION`, `INCREASE_POSITION`, `SELL_PARTIAL`, `SELL_ALL`, or `NO_ACTION`, with requested sizing where required. `NO_ACTION` intentionally leaves the portfolio unchanged; `HOLD` is not a Decision action. The initial `baseline_long_only` version 1 emits only `OPEN_POSITION`, `SELL_ALL`, and `NO_ACTION`. It does not interact with a real exchange in the MVP.
 
 ### Decision Snapshot
 
-A Decision Snapshot is an immutable historical record created whenever Argos generates a decision. It stores the timestamp, asset, price, market inputs, features, component scores, aggregated score, decision, confidence, applied rules, and model and configuration versions.
+A Decision Snapshot is an immutable historical record created whenever Argos generates a decision. It stores the timestamp, asset, price, market inputs, Features, every Score actually used, Decision and requested sizing, applied rules, and model, Strategy, and configuration versions. An aggregated Argos Score is included only when available and used. A calibrated confidence value may be absent or null; `signal_strength` is score magnitude, not probability or confidence.
 
 Snapshots allow the team to reconstruct why a decision was made and support debugging, model-version comparisons, audits, and later model evaluation. This module persists records; it is not an analytical engine.
 
 ### Paper Trading
 
-Paper Trading is a virtual brokerage account that uses simulated money. It receives decisions from the Decision Engine, simulates order execution using market prices, applies simulated fees and slippage, and manages virtual cash, holdings, open positions, average entry price, and realized and unrealized P&L. It supports stop-loss, take-profit, and position closing. It never sends orders to a real exchange in the MVP.
+Paper Trading is a virtual brokerage account that uses simulated money. It receives requested intent from the Decision Engine and later determines the executed asset quantity, execution price, notional, fees, simulated slippage, and resulting cash and position changes. Requested percentages are not executed quantities. Paper Trading manages virtual cash, holdings, open positions, average entry price, and realized and unrealized P&L. It never sends orders to a real exchange in the MVP.
 
 Illustrative example: a simulated account starts with USD 1,000 and buys 0.25 ETH at USD 2,000. The notional purchase is USD 500; a USD 1 fee and USD 1 simulated slippage cost leave USD 498 in virtual cash. Selling 0.25 ETH later at USD 2,100 produces USD 525 before costs. After another USD 1 fee and USD 1 slippage cost, the account ends with USD 1,021, a net simulated profit of USD 21. The USD 1 simulated slippage on each side is a simplified illustrative execution cost, not the final slippage model. These costs are illustrative; the fee and slippage models remain open decisions.
 
@@ -129,14 +129,17 @@ The first implementation may use:
 
 The following remain unresolved:
 
-- first component scores;
-- score aggregation method;
-- decision thresholds;
+- future Feature sets and Score models;
+- future Argos Score aggregation;
 - simulated fee model;
 - simulated slippage model;
-- initial capital;
-- backtesting approach;
-- deployment platform.
+- initial Paper Account cash balance;
+- Paper Trading execution details;
+- stop-loss and take-profit rules;
+- future Strategy types;
+- calibrated confidence;
+- backtesting methodology;
+- evaluation conventions and future provider, market, and asset-class support requirements.
 
 ## Architectural Principle
 

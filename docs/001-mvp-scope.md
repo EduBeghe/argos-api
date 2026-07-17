@@ -2,7 +2,7 @@
 
 ## Objective
 
-The MVP will demonstrate an auditable research loop for BTC/USDT and ETH/USDT on Binance Spot without coupling the domain model permanently to Binance, those instruments, or cryptocurrency. It will estimate probabilities from measurable evidence, make simulated decisions, paper trade them, and evaluate performance after fees and simulated slippage.
+The MVP will demonstrate an auditable research loop for BTC/USDT and ETH/USDT using Binance Spot observations. The domain remains asset-agnostic and provider-independent rather than permanently coupled to Binance, these assets, USDT, or cryptocurrency. The MVP will estimate probabilities from measurable evidence, make simulated decisions, paper trade them, and evaluate performance after fees and simulated slippage.
 
 The MVP will not trade real money and will not claim guaranteed profitability.
 
@@ -14,13 +14,13 @@ Ingest and persist the market data needed for the initial research subject. Obse
 
 ### 2. Feature and score calculation
 
-Calculate a small initial set of explicit, persisted, explainable features and component scores. Candidate score families may include technical analysis, momentum, volatility, market context, news, sentiment, and machine-learning outputs, but the initial selection remains an open decision.
+Calculate the seven explicit, persisted, version-1 Features documented in the analytical feature reference and the persisted `baseline_technical` version-1 Score. Future Feature sets and Score models may add technical analysis, momentum, volatility, market context, news, sentiment, or machine-learning outputs through separately versioned decisions.
 
 An aggregated Argos Score may be introduced later. Any aggregation must preserve every contributing component score, metric, and rationale.
 
 ### 3. Decision generation
 
-Generate simulated decisions from the available evidence. Each decision must record the observations, component metrics, scores, uncertainty, and reasoning that supported it. Detailed formulas, thresholds, and model weights remain open decisions.
+Generate simulated decisions from the available evidence. Each decision must record the observations, component metrics, scores, reasoning, requested action, and requested sizing that supported it. The initial `baseline_long_only` version-1 thresholds, position allocation, cadence, and supported actions are defined in ADR-009. They are versioned hypotheses rather than permanent rules for future Strategies.
 
 ### 4. Paper-trade execution
 
@@ -56,10 +56,10 @@ The API must expose persisted market observations, component metrics and scores,
 
 - Trading real money.
 - Claims or assurances of profitability.
-- Broad multi-asset coverage in the first implementation.
-- Final formulas, thresholds, frameworks, deployment platforms, model choices, or score weights.
+- Broad multi-asset coverage beyond the configured BTC/USDT and ETH/USDT comparison.
+- Future providers, markets, Feature sets, Score models, Strategy types, or Argos Score aggregation not explicitly accepted for the MVP.
 - Production operational concerns not required to validate the research loop.
 
 ## Open decisions
 
-The score set, metric conventions, decision policy, execution assumptions, evaluation period, technologies, deployment approach, and any future Argos Score aggregation method remain unresolved.
+Future Feature sets and Score models, metric and evaluation conventions, exact fee and slippage models, initial Paper Account cash balance, Paper Trading execution details, stop-loss and take-profit rules, future Strategy types, calibrated confidence, backtesting methodology, evaluation period, future provider and asset-class support requirements, and any future Argos Score aggregation method remain unresolved.

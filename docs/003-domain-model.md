@@ -4,7 +4,7 @@
 
 This document defines the shared business vocabulary of Argos independently of any programming language, framework, provider, or persistence technology. Future backend, frontend, persistence, tests, and documentation must use these concepts consistently.
 
-The MVP focuses on BTC/USDT and ETH/USDT on Binance Spot. The domain remains asset-agnostic and must not become permanently coupled to Binance, BTC, ETH, USDT, or cryptocurrency.
+The MVP focuses on BTC/USDT and ETH/USDT on Binance Spot. The domain remains asset-agnostic and must not become permanently coupled to Binance, BTC, ETH, USDT, or cryptocurrency. Asset, Feature, Score, Argos Score, Strategy, Decision, Decision Snapshot, Paper Account, Paper Position, Trade, and Metrics are provider-independent domain concepts.
 
 ## Core Domain Concepts
 
@@ -41,9 +41,7 @@ Scores must be measurable, explainable, versioned where relevant, and persistabl
 
 #### MVP Score Types
 
-The MVP uses a small set of explainable Scores derived from market data and technical Features. Possible initial categories include Technical Score, Momentum Score, Volatility Score, and Market Context Score.
-
-Formulas, ranges, weights, and thresholds remain open decisions.
+The first persisted Score model is `baseline_technical` version 1. It consumes the seven version-1 Features documented in the analytical feature reference and uses the documented range and interpretation boundaries. Future Score models remain open and must be versioned independently.
 
 #### Future Score Types Outside the MVP
 
@@ -57,9 +55,9 @@ These Scores require additional data sources, collection pipelines, deduplicatio
 
 ### Argos Score
 
-The Argos Score is an aggregated analytical summary produced from multiple component Scores. It provides a high-level view of current analytical confidence while preserving explainability.
+The Argos Score is an optional aggregated analytical summary produced from multiple component Scores. It provides a high-level analytical view while preserving explainability.
 
-The aggregation algorithm is intentionally undefined and is not necessarily an arithmetic average. The Argos Score preserves every component Score's contribution and explanation, does not replace component Scores, and does not execute trades. Strategies may consume it together with selected component Scores.
+The aggregation algorithm is intentionally undefined and is not necessarily an arithmetic average. The Argos Score preserves every component Score's contribution and explanation, does not replace component Scores, and does not execute trades. A Strategy may consume it when available and required, or consume compatible component Scores directly.
 
 The Argos Score is an analytical summary, not a trading decision.
 
@@ -67,28 +65,28 @@ The Argos Score is an analytical summary, not a trading decision.
 
 A Strategy is a configurable decision policy. It consumes:
 
-- the Argos Score;
-- one or more component Scores;
+- an Argos Score when available and required, or one or more compatible component Scores directly;
 - account state;
 - portfolio state;
 - current exposure;
 - configured thresholds; and
 - risk rules.
 
-A Strategy conceptually defines relevant component Scores, decision thresholds, position sizing rules, stop-loss rules, take-profit rules, and eligibility conditions. Different Strategies may use different subsets of available Scores. Strategies produce Decisions.
+A Strategy conceptually defines relevant Scores, decision thresholds, position sizing rules, stop-loss rules, take-profit rules, and eligibility conditions. Different Strategies may use different subsets of available Scores. Strategies produce Decisions. The initial `baseline_long_only` version 1 consumes `baseline_technical` version 1 directly and is deterministic code with explicit versioned configuration constants; it is not a generic rule engine or database-editable configuration.
 
-Whether Strategies are represented as configuration, code, or a hybrid remains an open architectural decision.
+Future Strategies may use a different representation; this decision is not permanent beyond the versioned initial Strategy.
 
 ### Decision
 
 A Decision is an action proposed by a Strategy. Its possible values are:
 
-- `BUY`: open or increase exposure.
-- `SELL`: reduce exposure according to the active Strategy.
-- `CLOSE_POSITION`: explicitly exit an existing position.
-- `NO_ACTION`: intentionally leave the current portfolio unchanged without opening, closing, or modifying a position.
+- `OPEN_POSITION`: create a new position when none exists; includes the requested target portfolio percentage.
+- `INCREASE_POSITION`: increase an open position; includes the requested target portfolio percentage or requested increase amount.
+- `SELL_PARTIAL`: sell a specified percentage of an open position; includes the requested position percentage to sell.
+- `SELL_ALL`: sell 100% of an open position and leave the asset with no open position.
+- `NO_ACTION`: intentionally leave the portfolio unchanged without opening, closing, or modifying any position.
 
-Every Decision must be explainable and reference the evidence used to produce it. `HOLD` is not part of this domain vocabulary.
+Every Decision must be explainable and reference the evidence used to produce it. `HOLD` is not part of this domain vocabulary. `INCREASE_POSITION` and `SELL_PARTIAL` are defined for future Strategy versions but are not emitted by `baseline_long_only` version 1.
 
 ### Decision Snapshot
 
@@ -99,10 +97,10 @@ A Decision Snapshot is an immutable historical record created every time Argos g
 - market price;
 - market context;
 - Features;
-- component Scores;
-- Argos Score;
+- every Score used by the Strategy;
+- an Argos Score only when available and used;
 - Decision;
-- confidence;
+- calibrated confidence, when available;
 - applied rules;
 - Strategy version; and
 - model and configuration versions.
@@ -132,7 +130,7 @@ A Trade is one simulated execution generated by Paper Trading after a Decision. 
 - timestamp; and
 - related Decision.
 
-A Decision is an analytical instruction. A Trade is the resulting simulated execution.
+A Decision records requested intent and sizing. A Trade records what Paper Trading actually executed. Requested percentages are not executed quantities.
 
 ### Metrics
 
@@ -148,8 +146,8 @@ The conceptual domain relationships are:
 - Market Candles produce Features.
 - Features feed analytical models.
 - Analytical models produce component Scores.
-- Component Scores contribute to the Argos Score.
-- A Strategy consumes the Argos Score, selected component Scores, account context, portfolio context, and risk rules.
+- Component Scores may contribute to an Argos Score.
+- A Strategy consumes compatible component Scores directly or an Argos Score when required, together with account and portfolio context and risk rules.
 - A Strategy generates a Decision.
 - A Decision creates a Decision Snapshot.
 - Paper Trading may execute a Decision.
@@ -169,7 +167,7 @@ The initial MVP includes:
 - normalized Market Candles;
 - a small technical Feature set;
 - a small set of explainable technical, momentum, volatility, or market-context Scores;
-- an aggregated Argos Score;
+- an optional future aggregated Argos Score;
 - one or more Strategies;
 - Decisions;
 - Decision Snapshots;
@@ -216,18 +214,19 @@ These exclusions are sequencing decisions, not permanent product limitations.
 
 The following remain unresolved:
 
-- exact initial Feature set;
-- exact initial Score types;
-- score value ranges;
-- score aggregation method;
-- Strategy representation as configuration, code, or hybrid;
-- which component Scores each Strategy consumes;
-- decision thresholds;
-- position sizing rules;
+- future Feature sets;
+- future Score models;
+- future Argos Score aggregation;
 - stop-loss rules;
 - take-profit rules;
-- initial simulated capital;
+- future Strategy types;
+- calibrated confidence;
+- backtesting methodology;
+- Paper Trading execution details;
+- initial Paper Account cash balance;
 - fee model; and
 - slippage model.
+
+Support requirements for future providers, markets, and asset classes and their compatible calendars, Features, Scores, and versioned configuration also remain open.
 
 No Signal concept is introduced at this stage. It may be considered later if a clear domain need appears.
