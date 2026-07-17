@@ -12,7 +12,11 @@ from app.paper.calculation import (
     calculate_open_position,
     calculate_sell_all,
 )
-from app.paper.config import DEFAULT_ACCOUNT_CURRENCY, SimulationConfiguration
+from app.paper.config import (
+    DEFAULT_ACCOUNT_CURRENCY,
+    SimulationConfiguration,
+    quantize_financial,
+)
 from app.paper.models import (
     ExecutionCalculation,
     NoTrade,
@@ -35,15 +39,19 @@ class UnsupportedPaperActionError(PaperExecutionError):
 async def execute_decision(
     *, session: AsyncSession, decision: DecisionSnapshot, executed_at: datetime
 ) -> PaperTradeRecord | NoTrade:
-    if decision.action is StrategyAction.NO_ACTION:
-        return calculate_no_action()
-    if decision.action not in {StrategyAction.OPEN_POSITION, StrategyAction.SELL_ALL}:
+    if decision.action not in {
+        StrategyAction.OPEN_POSITION,
+        StrategyAction.SELL_ALL,
+        StrategyAction.NO_ACTION,
+    }:
         raise UnsupportedPaperActionError(
             f"unsupported paper action: {decision.action}"
         )
     run = await get_active_run(session, currency=DEFAULT_ACCOUNT_CURRENCY, lock=True)
     if run is None:
         raise PaperExecutionError("active Paper Trading run not found")
+    if decision.action is StrategyAction.NO_ACTION:
+        return calculate_no_action()
     existing_trade = await session.scalar(
         select(PaperTradeRecord).where(
             PaperTradeRecord.decision_snapshot_id == decision.id
@@ -66,9 +74,15 @@ async def execute_decision(
     if decision.action is StrategyAction.OPEN_POSITION:
         if position is not None:
             raise PaperExecutionError("position is already open")
+        total_equity = await _total_equity(
+            session=session,
+            run_id=run.id,
+            cash=run.current_cash,
+            decision=decision,
+        )
         calculation = calculate_open_position(
             cash=run.current_cash,
-            total_equity=run.current_cash,
+            total_equity=total_equity,
             observed_price=decision.source_market_price,
             target_percentage=decision.requested_target_portfolio_percentage
             or Decimal("0"),
@@ -113,6 +127,38 @@ async def execute_decision(
     session.add(trade)
     await session.flush()
     return trade
+
+
+async def _total_equity(
+    *,
+    session: AsyncSession,
+    run_id: UUID,
+    cash: Decimal,
+    decision: DecisionSnapshot,
+) -> Decimal:
+    positions = (
+        await session.scalars(
+            select(PaperPositionRecord).where(
+                PaperPositionRecord.run_id == run_id,
+                PaperPositionRecord.status == PaperPositionStatus.OPEN.value,
+            )
+        )
+    ).all()
+    value = cash
+    for position in positions:
+        same_instrument = (
+            position.asset == decision.asset.value
+            and position.provider == decision.provider.value
+            and position.market_type == decision.market_type.value
+            and position.interval == decision.interval.value
+        )
+        valuation_price = (
+            decision.source_market_price
+            if same_instrument
+            else position.average_entry_price
+        )
+        value += position.quantity * valuation_price
+    return quantize_financial(value)
 
 
 def _domain(record: PaperPositionRecord) -> PaperPosition:
