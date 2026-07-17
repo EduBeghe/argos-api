@@ -15,7 +15,7 @@ async def reset_paper_account(
     initial_cash: Decimal = DEFAULT_INITIAL_CASH,
     reason: str | None = None,
 ) -> PaperTradingRun:
-    """Close the active experiment and stage a new run; caller owns transaction."""
+    """Stop the active experiment and stage a new run; caller owns transaction."""
     cash = validate_initial_cash(initial_cash)
     normalized_reason = reason.strip() if reason else None
     current = await get_active_run(

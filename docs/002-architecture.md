@@ -88,6 +88,8 @@ Resetting administratively stops the active run and creates a linked successor w
 
 Before opening a Position, Paper Trading values every existing open Position with the latest eligible persisted closed-candle price at or before the Decision timestamp. It never substitutes entry price for current market evidence and fails closed when valuation evidence is missing. The persisted candles and immutable Decision timestamp make the valuation reproducible.
 
+Paper execution also enforces an experiment boundary: the Decision timestamp and execution timestamp must not predate the active run, and execution must not predate the Decision. A Decision created during a STOPPED predecessor run cannot execute against its successor. Timestamp eligibility is sufficient before the modules are wired; the wiring change will evaluate an explicit execution-context identity.
+
 The reusable reset use case is exposed only through an administrative CLI until authenticated mutation endpoints exist. A future authenticated frontend reset must call the same use case.
 
 ### Metrics

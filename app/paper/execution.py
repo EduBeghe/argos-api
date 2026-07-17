@@ -56,6 +56,14 @@ async def execute_decision(
     run = await get_active_run(session, currency=DEFAULT_ACCOUNT_CURRENCY, lock=True)
     if run is None:
         raise PaperExecutionError("active Paper Trading run not found")
+    if decision.decision_timestamp < run.started_at:
+        raise PaperExecutionError(
+            "Decision Snapshot predates the active Paper Trading run"
+        )
+    if executed_at < run.started_at:
+        raise PaperExecutionError("execution timestamp predates the active run")
+    if executed_at < decision.decision_timestamp:
+        raise PaperExecutionError("execution timestamp predates the Decision Snapshot")
     persisted_decision = await session.scalar(
         select(DecisionSnapshotRecord).where(DecisionSnapshotRecord.id == decision.id)
     )

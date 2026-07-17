@@ -70,7 +70,9 @@ jobs:
       - name: Apply migrations
         run: uv run alembic upgrade head
       - name: Run PostgreSQL integration tests
-        run: uv run pytest -m integration -o addopts=-q
+        run: |
+          uv run pytest -m integration -o addopts=-q
+          uv run pytest -m integration -o addopts=-q
       - name: Downgrade and verify empty schema
         run: |
           uv run alembic downgrade base

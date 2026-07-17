@@ -15,7 +15,7 @@ from app.decisions.generation import PortfolioState, generate_decision_from_evid
 from app.decisions.models import DecisionSnapshot
 from app.decisions.persistence import DecisionSnapshotRecord, ScoreEvidence
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.market.persistence import to_record
+from app.market.persistence import MarketCandleRecord, to_record
 from app.paper.calculation import PaperExecutionError
 from app.paper.execution import execute_decision
 from app.paper.models import PaperPositionStatus, PaperRunStatus
@@ -24,6 +24,10 @@ from app.paper.persistence import (
     PaperTradeRecord,
     PaperTradingRunRecord,
     get_active_run,
+    get_run,
+    list_positions,
+    list_runs,
+    list_trades,
 )
 from app.paper.portfolio import (
     PaperPortfolioUnavailableError,
@@ -36,6 +40,7 @@ from tests.market.factories import make_candle
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 NOW = datetime(2026, 7, 17, 12, tzinfo=UTC)
+PAPER_CANDLE_MARKER = datetime(2099, 1, 1, tzinfo=UTC)
 
 
 @pytest_asyncio.fixture
@@ -59,6 +64,11 @@ async def _clear(session: AsyncSession) -> None:
         MarketScoreRecord,
     ):
         await session.execute(delete(record))
+    await session.execute(
+        delete(MarketCandleRecord).where(
+            MarketCandleRecord.ingested_at == PAPER_CANDLE_MARKER
+        )
+    )
     await session.commit()
 
 
@@ -183,7 +193,7 @@ async def test_concurrent_resets_leave_exactly_one_active_run(
     await engine.dispose()
 
 
-async def test_unique_active_run_and_invalid_trade_direction_are_enforced(
+async def test_unique_active_run_is_enforced(
     session: AsyncSession,
 ) -> None:
     await reset_paper_account(session=session, started_at=NOW)
@@ -206,6 +216,65 @@ async def test_unique_active_run_and_invalid_trade_direction_are_enforced(
     with pytest.raises(IntegrityError):
         await session.flush()
     await session.rollback()
+
+
+async def test_database_rejects_invalid_run_position_and_trade_rows(
+    session: AsyncSession,
+) -> None:
+    run = await reset_paper_account(session=session, started_at=NOW)
+    decision = await _decision(
+        session, score_value=Decimal("0.60"), position_is_open=False
+    )
+    trade = await execute_decision(
+        session=session,
+        decision=decision,
+        executed_at=decision.decision_timestamp + timedelta(seconds=1),
+    )
+    assert isinstance(trade, PaperTradeRecord)
+    await session.commit()
+
+    async def rejects(record: object, attribute: str, value: object) -> None:
+        setattr(record, attribute, value)
+        with pytest.raises(IntegrityError):
+            await session.flush()
+        await session.rollback()
+
+    persisted_trade = await session.get(PaperTradeRecord, trade.id)
+    assert persisted_trade is not None
+    await rejects(persisted_trade, "cash_impact", Decimal("1"))
+    persisted_trade = await session.get(PaperTradeRecord, trade.id)
+    assert persisted_trade is not None
+    persisted_trade.side = "sell"
+    persisted_trade.cash_impact = Decimal("-1")
+    with pytest.raises(IntegrityError):
+        await session.flush()
+    await session.rollback()
+    persisted_trade = await session.get(PaperTradeRecord, trade.id)
+    assert persisted_trade is not None
+    await rejects(persisted_trade, "asset", "")
+    persisted_trade = await session.get(PaperTradeRecord, trade.id)
+    assert persisted_trade is not None
+    await rejects(persisted_trade, "configuration_version", 0)
+
+    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    assert persisted_run is not None
+    await rejects(persisted_run, "account_currency", "")
+    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    assert persisted_run is not None
+    await rejects(persisted_run, "configuration_version", 0)
+    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    assert persisted_run is not None
+    await rejects(persisted_run, "status", "stopped")
+    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    assert persisted_run is not None
+    await rejects(persisted_run, "stopped_at", NOW + timedelta(hours=1))
+    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    assert persisted_run is not None
+    await rejects(persisted_run, "predecessor_run_id", persisted_run.id)
+
+    position = await session.get(PaperPositionRecord, trade.position_id)
+    assert position is not None
+    await rejects(position, "status", "closed")
 
 
 async def test_open_and_sell_are_atomic_and_duplicate_execution_is_idempotent(
@@ -244,6 +313,48 @@ async def test_open_and_sell_are_atomic_and_duplicate_execution_is_idempotent(
     assert position.net_realized_pnl is not None
 
 
+async def test_concurrent_execution_mutates_exactly_once(
+    session: AsyncSession,
+) -> None:
+    run = await reset_paper_account(session=session, started_at=NOW)
+    decision = await _decision(
+        session, score_value=Decimal("0.60"), position_is_open=False
+    )
+    await session.commit()
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def attempt() -> object:
+        async with factory() as concurrent_session:
+            result = await execute_decision(
+                session=concurrent_session,
+                decision=decision,
+                executed_at=decision.decision_timestamp + timedelta(seconds=1),
+            )
+            await concurrent_session.commit()
+            return result
+
+    outcomes = await asyncio.gather(attempt(), attempt(), return_exceptions=True)
+    assert all(not isinstance(outcome, BaseException) for outcome in outcomes)
+    async with factory() as verification:
+        trades = (
+            await verification.scalars(
+                select(PaperTradeRecord).where(PaperTradeRecord.run_id == run.id)
+            )
+        ).all()
+        positions = (
+            await verification.scalars(
+                select(PaperPositionRecord).where(PaperPositionRecord.run_id == run.id)
+            )
+        ).all()
+        persisted_run = await verification.get(PaperTradingRunRecord, run.id)
+        assert len(trades) == 1
+        assert len(positions) == 1
+        assert persisted_run is not None
+        assert persisted_run.current_cash == Decimal("10000") + trades[0].cash_impact
+    await engine.dispose()
+
+
 async def test_execution_rollback_restores_cash_position_and_trade(
     session: AsyncSession,
 ) -> None:
@@ -252,7 +363,11 @@ async def test_execution_rollback_restores_cash_position_and_trade(
     decision = await _decision(
         session, score_value=Decimal("0.60"), position_is_open=False
     )
-    await execute_decision(session=session, decision=decision, executed_at=NOW)
+    await execute_decision(
+        session=session,
+        decision=decision,
+        executed_at=decision.decision_timestamp + timedelta(seconds=1),
+    )
     await session.rollback()
     await session.refresh(await session.get(PaperTradingRunRecord, run.id))
     persisted = await session.get(PaperTradingRunRecord, run.id)
@@ -261,6 +376,90 @@ async def test_execution_rollback_restores_cash_position_and_trade(
     )
     assert await session.scalar(select(PaperPositionRecord.id)) is None
     assert await session.scalar(select(PaperTradeRecord.id)) is None
+
+
+@pytest.mark.parametrize(
+    ("run_start", "decision_offset", "executed_at", "message"),
+    [
+        (NOW, -10, NOW + timedelta(minutes=1), "predates the active"),
+        (NOW, 0, NOW + timedelta(minutes=1), "predates the Decision"),
+        (
+            NOW + timedelta(minutes=10),
+            10,
+            NOW + timedelta(minutes=9),
+            "predates the active run",
+        ),
+    ],
+)
+async def test_experiment_boundary_rejection_leaves_no_mutation(
+    session: AsyncSession,
+    run_start: datetime,
+    decision_offset: int,
+    executed_at: datetime,
+    message: str,
+) -> None:
+    run = await reset_paper_account(session=session, started_at=run_start)
+    await session.commit()
+    decision = await _decision(
+        session,
+        score_value=Decimal("0.60"),
+        position_is_open=False,
+        offset=decision_offset,
+    )
+    with pytest.raises(PaperExecutionError, match=message):
+        await execute_decision(
+            session=session, decision=decision, executed_at=executed_at
+        )
+    await session.rollback()
+    persisted = await session.get(PaperTradingRunRecord, run.id)
+    assert persisted is not None
+    assert persisted.current_cash == Decimal("10000.000000000000000000")
+    assert await session.scalar(select(PaperPositionRecord.id)) is None
+    assert await session.scalar(select(PaperTradeRecord.id)) is None
+
+
+async def test_decision_from_stopped_run_cannot_cross_into_successor(
+    session: AsyncSession,
+) -> None:
+    first = await reset_paper_account(session=session, started_at=NOW)
+    decision = await _decision(
+        session, score_value=Decimal("0.60"), position_is_open=False
+    )
+    await session.commit()
+    successor = await reset_paper_account(
+        session=session, started_at=NOW + timedelta(hours=1)
+    )
+    await session.commit()
+
+    with pytest.raises(PaperExecutionError, match="predates the active"):
+        await execute_decision(
+            session=session,
+            decision=decision,
+            executed_at=NOW + timedelta(hours=1, minutes=1),
+        )
+    await session.rollback()
+    stopped = await session.get(PaperTradingRunRecord, first.id)
+    active = await session.get(PaperTradingRunRecord, successor.id)
+    assert stopped is not None and stopped.status == "stopped"
+    assert active is not None and active.current_cash == Decimal(
+        "10000.000000000000000000"
+    )
+    assert await session.scalar(select(PaperTradeRecord.id)) is None
+
+
+async def test_decision_during_active_run_executes_normally(
+    session: AsyncSession,
+) -> None:
+    await reset_paper_account(session=session, started_at=NOW)
+    decision = await _decision(
+        session, score_value=Decimal("0.60"), position_is_open=False
+    )
+    trade = await execute_decision(
+        session=session,
+        decision=decision,
+        executed_at=decision.decision_timestamp + timedelta(seconds=1),
+    )
+    assert isinstance(trade, PaperTradeRecord)
 
 
 async def test_multi_asset_equity_uses_persisted_price_and_missing_price_fails_closed(
@@ -290,7 +489,11 @@ async def test_multi_asset_equity_uses_persisted_price_and_missing_price_fails_c
         session, score_value=Decimal("0.60"), position_is_open=False
     )
     with pytest.raises(PaperExecutionError, match="valuation price"):
-        await execute_decision(session=session, decision=decision, executed_at=NOW)
+        await execute_decision(
+            session=session,
+            decision=decision,
+            executed_at=decision.decision_timestamp + timedelta(seconds=1),
+        )
     await session.rollback()
 
     new_run = await reset_paper_account(session=session, started_at=NOW)
@@ -320,12 +523,16 @@ async def test_multi_asset_equity_uses_persisted_price_and_missing_price_fails_c
         high_price=Decimal("205"),
         low_price=Decimal("190"),
         close_price=Decimal("200"),
-    ).model_copy(update={"close_time": NOW})
+    ).model_copy(update={"close_time": NOW, "ingested_at": PAPER_CANDLE_MARKER})
     session.add(to_record(candle))
     decision = await _decision(
         session, score_value=Decimal("0.60"), position_is_open=False
     )
-    trade = await execute_decision(session=session, decision=decision, executed_at=NOW)
+    trade = await execute_decision(
+        session=session,
+        decision=decision,
+        executed_at=decision.decision_timestamp + timedelta(seconds=1),
+    )
     assert isinstance(trade, PaperTradeRecord)
     assert trade.equity_before == Decimal("10400.000000000000000000")
 
@@ -359,3 +566,34 @@ async def test_portfolio_source_uses_only_active_run(session: AsyncSession) -> N
             market_type=MarketType.SPOT,
             interval=Interval.FIVE_MINUTES,
         )
+
+
+async def test_historical_queries_return_stopped_run_positions_trades_and_pages(
+    session: AsyncSession,
+) -> None:
+    first = await reset_paper_account(session=session, started_at=NOW)
+    decision = await _decision(
+        session, score_value=Decimal("0.60"), position_is_open=False
+    )
+    trade = await execute_decision(
+        session=session,
+        decision=decision,
+        executed_at=decision.decision_timestamp + timedelta(seconds=1),
+    )
+    assert isinstance(trade, PaperTradeRecord)
+    await session.commit()
+    second = await reset_paper_account(
+        session=session, started_at=NOW + timedelta(hours=1)
+    )
+    await session.commit()
+
+    runs = await list_runs(session, limit=10, offset=0)
+    page = await list_runs(session, limit=1, offset=1)
+    historical = await get_run(session, run_id=first.id)
+    positions = await list_positions(session, run_id=first.id, limit=10, offset=0)
+    trades = await list_trades(session, run_id=first.id, limit=10, offset=0)
+    assert [item.id for item in runs] == [second.id, first.id]
+    assert [item.id for item in page] == [first.id]
+    assert historical is not None and historical.status == "stopped"
+    assert len(positions) == 1 and positions[0].status == PaperPositionStatus.OPEN
+    assert len(trades) == 1 and trades[0].id == trade.id

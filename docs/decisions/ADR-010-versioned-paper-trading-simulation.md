@@ -18,6 +18,8 @@ Resetting starts a new experiment, marks the prior run STOPPED, links its predec
 
 Portfolio equity uses the latest eligible persisted closed-candle price for each open Position at or before the Decision timestamp. Missing evidence fails closed; entry price is never a silent valuation fallback. Reset remains CLI-only until authenticated mutation endpoints exist, and a future authenticated frontend action must reuse the same use case. Assets, currencies, providers, and market types remain extension points.
 
+A Decision is eligible for execution only when its timestamp is at or after the active run's `started_at`. Execution must occur at or after both the run start and Decision timestamp. This prevents intent created during a stopped predecessor experiment from crossing into its successor. Timestamp eligibility is an interim boundary while Decision generation and Paper execution remain unwired; the wiring PR will evaluate an explicit run or execution-context identity without coupling analytical Decisions prematurely.
+
 ## Consequences
 
 Results are reproducible within configuration version 1 and can be compared between preserved runs. Reset requests are deliberately non-idempotent: each successful request creates a successor; callers needing safe retries will require a future explicit idempotency key. Row locking and the one-ACTIVE-run constraint prevent concurrent requests from leaving multiple active runs. These parameters are simulation hypotheses and may be replaced by later configuration versions. Paper Trading never contacts an exchange or moves real money.
