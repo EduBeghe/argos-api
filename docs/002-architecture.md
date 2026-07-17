@@ -30,7 +30,7 @@ Ingestion connects to external data providers and retrieves raw market data. The
 
 Its input is provider-specific data. Its output is validated, normalized data in Argos internal formats. Ingestion orchestration calls the Binance client and passes each raw provider response to the Binance normalizer. The client handles only HTTP transport and never constructs domain models. The normalizer knows both Binance's positional kline contract and Argos's MarketCandle contract, and is responsible for translating between them.
 
-The ingestion pipeline and closed-candle orchestration stage normalized candles without committing. The one-shot executable job owns the database session, Binance client, engine, transaction boundaries, and cleanup. It commits the fully closed BTC/USDT and ETH/USDT candle batch atomically before starting feature calculation. Scheduling is owned by the external deployment platform; Argos includes no internal job framework, and retries remain outside this orchestration.
+The ingestion pipeline and closed-candle orchestration stage normalized candles without committing. The one-shot executable job owns the database session, Binance client, engine, transaction boundaries, and cleanup. It commits the fully closed BTC/USDT and ETH/USDT candle batch atomically before starting feature calculation. The current Railway deployment owns external scheduling; Argos includes no internal job framework, and retries remain outside this orchestration.
 
 Binance's positional tuple and all other provider-specific formats must end at this boundary. Domain, persistence, Features, Scores, Strategies, and Decisions do not access Binance directly. Ingestion does not calculate trading signals or make decisions.
 
@@ -66,13 +66,13 @@ The score ranges, formulas, and explanations above are illustrative rather than 
 
 ### Decision Engine
 
-The Decision Engine combines persisted scores with risk rules, portfolio state, current exposure, open positions, and versioned Strategy configuration. The final decision is not necessarily a simple average of component scores.
+The Decision Engine combines normalized, persisted Scores with portfolio state, current exposure, open positions, and versioned Strategy configuration. A Strategy may consume compatible component Scores directly or an Argos Score when one exists and that Strategy requires it. `baseline_long_only` version 1 consumes `baseline_technical` version 1 directly and contains no provider-specific decision logic.
 
 Its inputs are persisted evidence and account context. Its output is one of `OPEN_POSITION`, `INCREASE_POSITION`, `SELL_PARTIAL`, `SELL_ALL`, or `NO_ACTION`, with requested sizing where required. `NO_ACTION` intentionally leaves the portfolio unchanged; `HOLD` is not a Decision action. The initial `baseline_long_only` version 1 emits only `OPEN_POSITION`, `SELL_ALL`, and `NO_ACTION`. It does not interact with a real exchange in the MVP.
 
 ### Decision Snapshot
 
-A Decision Snapshot is an immutable historical record created whenever Argos generates a decision. It stores the timestamp, asset, price, market inputs, features, component scores, aggregated score, Decision and requested sizing, applied rules, and model, Strategy, and configuration versions. A calibrated confidence value may be absent or null; `signal_strength` is score magnitude, not probability or confidence.
+A Decision Snapshot is an immutable historical record created whenever Argos generates a decision. It stores the timestamp, asset, price, market inputs, Features, every Score actually used, Decision and requested sizing, applied rules, and model, Strategy, and configuration versions. An aggregated Argos Score is included only when available and used. A calibrated confidence value may be absent or null; `signal_strength` is score magnitude, not probability or confidence.
 
 Snapshots allow the team to reconstruct why a decision was made and support debugging, model-version comparisons, audits, and later model evaluation. This module persists records; it is not an analytical engine.
 
@@ -129,8 +129,8 @@ The first implementation may use:
 
 The following remain unresolved:
 
-- first component scores;
-- score aggregation method;
+- future Feature sets and Score models;
+- future Argos Score aggregation;
 - simulated fee model;
 - simulated slippage model;
 - initial Paper Account cash balance;
@@ -139,7 +139,7 @@ The following remain unresolved:
 - future Strategy types;
 - calibrated confidence;
 - backtesting methodology;
-- deployment platform.
+- evaluation conventions and future provider, market, and asset-class support requirements.
 
 ## Architectural Principle
 

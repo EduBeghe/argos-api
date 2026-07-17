@@ -10,9 +10,9 @@ Argos needs one deterministic, explainable Strategy to turn persisted analytical
 
 ## Decision
 
-Use Strategy `baseline_long_only`, strategy version 1, configuration version 1. It requires persisted `baseline_technical` model-version-1 Scores calculated from fully closed candles. The Strategy logic will be deterministic code with explicit versioned configuration constants; no generic rule engine or database-editable Strategy configuration is introduced.
+Use Strategy `baseline_long_only`, strategy version 1, configuration version 1. It consumes normalized, persisted `baseline_technical` model-version-1 Scores calculated from fully closed candles. It does not require an aggregated Argos Score. The Strategy logic will be deterministic code with explicit versioned configuration constants; no generic rule engine or database-editable Strategy configuration is introduced.
 
-The Strategy is long-only on Binance Spot, with no shorts or leverage and at most one open position per asset. Version 1 never increases an open position or sells partially. `INCREASE_POSITION` and `SELL_PARTIAL` remain defined future actions but are never emitted by this version.
+The Strategy is provider-independent and long-only, with no shorts or leverage and at most one open position per asset. The current MVP evaluates it for BTC/USDT and ETH/USDT using normalized Binance Spot observations. It contains no BTC-, ETH-, USDT-, cryptocurrency-, Binance-, or provider-format-specific decision logic. Version 1 never increases an open position or sells partially. `INCREASE_POSITION` and `SELL_PARTIAL` remain defined future actions but are never emitted by this version.
 
 Evaluate every 30 minutes as established by ADR-006. The eligible five-minute candle is the final closed candle for the corresponding UTC `:00` or `:30` boundary. Intermediate five-minute Scores do not automatically generate Decisions. The external Railway cron continues to run every five minutes; Argos introduces no internal scheduler.
 
@@ -35,7 +35,7 @@ available cash
 + current market value of all open positions
 ```
 
-Maximum requested exposure is 15% per asset and 30% combined across BTC/USDT and ETH/USDT. A requested purchase must not exceed available cash. The 15% allocation is a conservative, versioned hypothesis for evaluation, not an optimized value.
+Under strategy version 1 and configuration version 1, maximum requested exposure is 15% per asset and 30% combined across the currently configured BTC/USDT and ETH/USDT assets. A requested purchase must not exceed available cash. The 15% allocation is a conservative hypothesis, not an optimized or permanent value; the 30% limit is not a universal limit for future asset counts. Adding assets or changing allocation rules requires an explicit new configuration or Strategy version, as appropriate, so historical Decisions remain reproducible.
 
 A Decision records requested intent: target portfolio percentage for `OPEN_POSITION`, position percentage for `SELL_PARTIAL`, or 100% position liquidation for `SELL_ALL`. Later Paper Trading determines executed asset quantity, execution price, notional, fees, simulated slippage, and resulting cash and position changes after applying price, precision, and available-cash constraints. Requested percentages are not executed quantities.
 
@@ -43,4 +43,4 @@ A Decision records requested intent: target portfolio percentage for `OPEN_POSIT
 
 ## Consequences
 
-The initial Strategy is simple, reproducible, and directly testable across BTC/USDT and ETH/USDT. It cannot short, use leverage, increase positions, or partially sell. Individual trades may lose money. Thresholds and sizing must later be evaluated after fees and simulated slippage and compared with buy-and-hold. Stop-loss and take-profit rules, exact execution behavior, fee and slippage models, initial Paper Account cash, calibrated confidence, future Strategy types, and backtesting methodology remain open. No real-money execution is included.
+The initial Strategy is simple, reproducible, provider-independent, and directly testable across the current BTC/USDT and ETH/USDT configuration. It cannot short, use leverage, increase positions, or partially sell. Future assets or providers require compatible ingestion adapters, market-calendar handling, Features, Scores, and versioned configuration, but do not redefine the core Decision vocabulary. Individual trades may lose money. Thresholds and sizing must later be evaluated after fees and simulated slippage and compared with buy-and-hold. Stop-loss and take-profit rules, exact execution behavior, fee and slippage models, initial Paper Account cash, calibrated confidence, future Strategy types, and backtesting methodology remain open. No real-money execution is included.
