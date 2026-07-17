@@ -9,6 +9,7 @@ from app.scores.calculator import (
     calculate_baseline_score,
     clamp,
     interpretation_for,
+    quantize_score,
 )
 
 
@@ -36,22 +37,29 @@ def test_exact_baseline_formula_and_contributions() -> None:
     assert result.rsi_signal == 1
     assert result.return_1_signal == Decimal("0.5")
     assert result.return_12_signal == Decimal("0.5")
-    expected_momentum = (
+    expected_momentum = quantize_score(
         Decimal("0.35")
         + Decimal("0.20") * Decimal("0.5")
         + Decimal("0.45") * Decimal("0.5")
     )
-    expected_directional = (
-        Decimal("0.55") * Decimal("0.5") + Decimal("0.45") * expected_momentum
+    expected_activity = quantize_score((Decimal(1) - Decimal("0.5")) / Decimal("1.5"))
+    expected_confirmation = quantize_score(
+        Decimal("0.75") + Decimal("0.25") * expected_activity
     )
-    expected_activity = (Decimal(1) - Decimal("0.5")) / Decimal("1.5")
-    expected_confirmation = Decimal("0.75") + Decimal("0.25") * expected_activity
     assert result.momentum_score == expected_momentum
     assert result.volume_activity == expected_activity
     assert result.volatility_ratio == Decimal("0.04")
+    expected_directional = quantize_score(
+        result.trend_contribution
+        + result.rsi_contribution
+        + result.return_1_contribution
+        + result.return_12_contribution
+    )
     assert result.directional_score == expected_directional
     assert result.volume_confirmation_factor == expected_confirmation
-    assert result.overall_score == expected_directional * expected_confirmation
+    assert result.overall_score == quantize_score(
+        expected_directional * expected_confirmation
+    )
     assert result.signal_strength == abs(result.overall_score)
     assert (
         result.trend_contribution
@@ -136,3 +144,59 @@ def test_repeated_execution_is_deterministic_and_volume_cannot_reverse_sign() ->
     assert calculate_baseline_score(inputs()) == calculate_baseline_score(inputs())
     assert low.overall_score > 0 and high.overall_score > 0
     assert abs(low.overall_score) <= abs(high.overall_score)
+
+
+def test_half_even_quantization_is_symmetric_and_persisted_invariants_hold() -> None:
+    assert quantize_score(Decimal("0.1234567890123456785")) == Decimal(
+        "0.123456789012345678"
+    )
+    assert quantize_score(Decimal("-0.1234567890123456785")) == Decimal(
+        "-0.123456789012345678"
+    )
+    assert quantize_score(Decimal("0.9999999999999999995")) == Decimal(1)
+    assert quantize_score(Decimal("-0.9999999999999999995")) == Decimal(-1)
+    value = calculate_baseline_score(
+        replace(
+            inputs(),
+            ema_20=Decimal("100.1234567890123456789"),
+            rsi_14=Decimal("63.333333333333333333"),
+            return_1=Decimal("0.001234567890123456789"),
+            return_12=Decimal("-0.003333333333333333333"),
+            relative_volume_20=Decimal("1.111111111111111111"),
+        )
+    )
+    persisted = (
+        value.trend_score,
+        value.momentum_score,
+        value.volume_activity,
+        value.volatility_ratio,
+        value.directional_score,
+        value.volume_confirmation_factor,
+        value.overall_score,
+        value.signal_strength,
+        value.trend_contribution,
+        value.rsi_contribution,
+        value.return_1_contribution,
+        value.return_12_contribution,
+    )
+    exponents = [item.as_tuple().exponent for item in persisted]
+    assert all(isinstance(exponent, int) and exponent >= -18 for exponent in exponents)
+    assert (
+        value.trend_contribution
+        + value.rsi_contribution
+        + value.return_1_contribution
+        + value.return_12_contribution
+        == value.directional_score
+    )
+    assert value.signal_strength == abs(value.overall_score)
+    assert value.interpretation is interpretation_for(value.overall_score)
+    assert value == calculate_baseline_score(
+        replace(
+            inputs(),
+            ema_20=Decimal("100.1234567890123456789"),
+            rsi_14=Decimal("63.333333333333333333"),
+            return_1=Decimal("0.001234567890123456789"),
+            return_12=Decimal("-0.003333333333333333333"),
+            relative_volume_20=Decimal("1.111111111111111111"),
+        )
+    )

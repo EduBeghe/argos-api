@@ -70,10 +70,50 @@ async def test_complete_features_generate_idempotent_score() -> None:
             calculated_at=CALCULATED_AT,
         )
         await session.commit()
+        await session.execute(delete(MarketScoreRecord))
+        await session.commit()
+        reconstructed = await calculate_market_scores(
+            session=session,
+            asset=Asset.BTC_USDT,
+            provider=Provider.BINANCE,
+            market_type=MarketType.SPOT,
+            interval=Interval.FIVE_MINUTES,
+            calculated_at=CALCULATED_AT,
+        )
+        await session.commit()
         records = (await session.scalars(select(MarketScoreRecord))).all()
-        assert (first.scores_inserted, second.duplicates) == (1, 1)
+        assert first.scores_inserted == 1
+        assert (second.candidate_candles_read, second.scores_calculated) == (0, 0)
+        assert second.duplicates == 0
+        assert reconstructed.scores_inserted == 1
         assert len(records) == 1
         assert records[0].candle_open_time == START + timedelta(minutes=245)
+        decimal_values = (
+            records[0].trend_score,
+            records[0].momentum_score,
+            records[0].volume_activity,
+            records[0].volatility_ratio,
+            records[0].directional_score,
+            records[0].volume_confirmation_factor,
+            records[0].overall_score,
+            records[0].signal_strength,
+            records[0].trend_contribution,
+            records[0].rsi_contribution,
+            records[0].return_1_contribution,
+            records[0].return_12_contribution,
+        )
+        exponents = [value.as_tuple().exponent for value in decimal_values]
+        assert all(
+            isinstance(exponent, int) and exponent >= -18 for exponent in exponents
+        )
+        assert (
+            records[0].trend_contribution
+            + records[0].rsi_contribution
+            + records[0].return_1_contribution
+            + records[0].return_12_contribution
+            == records[0].directional_score
+        )
+        assert records[0].signal_strength == abs(records[0].overall_score)
         await session.execute(delete(MarketScoreRecord))
         await session.execute(delete(MarketFeatureRecord))
         await session.execute(delete(MarketCandleRecord))

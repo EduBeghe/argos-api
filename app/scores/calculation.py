@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.models import FeatureName
@@ -11,11 +11,19 @@ from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord
 from app.scores.calculator import BaselineScoreInput, calculate_baseline_score
 from app.scores.models import MarketScore
-from app.scores.persistence import insert_market_scores
+from app.scores.persistence import MarketScoreRecord, insert_market_scores
 
 MODEL_NAME = "baseline_technical"
 MODEL_VERSION = 1
-REQUIRED_FEATURES = tuple(FeatureName)
+REQUIRED_FEATURES = (
+    FeatureName.EMA_20,
+    FeatureName.EMA_50,
+    FeatureName.RSI_14,
+    FeatureName.ATR_14,
+    FeatureName.RETURN_1,
+    FeatureName.RETURN_12,
+    FeatureName.RELATIVE_VOLUME_20,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +78,15 @@ async def calculate_market_scores(
             MarketFeatureRecord.feature_version == 1,
             MarketFeatureRecord.feature_name.in_(
                 [name.value for name in REQUIRED_FEATURES]
+            ),
+            ~exists().where(
+                MarketScoreRecord.asset == MarketCandleRecord.asset,
+                MarketScoreRecord.provider == MarketCandleRecord.provider,
+                MarketScoreRecord.market_type == MarketCandleRecord.market_type,
+                MarketScoreRecord.interval == MarketCandleRecord.interval,
+                MarketScoreRecord.candle_open_time == MarketCandleRecord.open_time,
+                MarketScoreRecord.model_name == MODEL_NAME,
+                MarketScoreRecord.model_version == MODEL_VERSION,
             ),
         )
         .order_by(MarketCandleRecord.open_time.asc())

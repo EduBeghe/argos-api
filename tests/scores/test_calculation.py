@@ -8,10 +8,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.models import FeatureName
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.scores.calculation import calculate_market_scores
+from app.scores.calculation import REQUIRED_FEATURES, calculate_market_scores
 
 NOW = datetime(2026, 7, 16, tzinfo=UTC)
 CANDLE_TIME = datetime(2026, 7, 15, tzinfo=UTC)
+
+
+def test_version_one_feature_contract_is_explicit() -> None:
+    assert REQUIRED_FEATURES == (
+        FeatureName.EMA_20,
+        FeatureName.EMA_50,
+        FeatureName.RSI_14,
+        FeatureName.ATR_14,
+        FeatureName.RETURN_1,
+        FeatureName.RETURN_12,
+        FeatureName.RELATIVE_VOLUME_20,
+    )
 
 
 @pytest.mark.asyncio
@@ -43,6 +55,8 @@ async def test_one_ordered_read_one_bulk_insert_and_no_transaction_management() 
             calculated_at=NOW,
         )
     session_mock.execute.assert_awaited_once()
+    assert session_mock.execute.await_args is not None
+    assert "NOT (EXISTS" in str(session_mock.execute.await_args.args[0])
     insert.assert_awaited_once()
     assert insert.await_args is not None
     inserted = insert.await_args.args[1]

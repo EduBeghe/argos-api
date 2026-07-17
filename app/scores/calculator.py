@@ -1,9 +1,16 @@
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
+SCORE_QUANTUM = Decimal("0.000000000000000001")
+
+
+def quantize_score(value: Decimal) -> Decimal:
+    """Round persisted values to scale 18 using decimal half-even."""
+
+    return value.quantize(SCORE_QUANTUM, rounding=ROUND_HALF_EVEN)
 
 
 class ScoreInterpretation(StrEnum):
@@ -87,28 +94,35 @@ def calculate_baseline_score(value: BaselineScoreInput) -> BaselineScoreOutput:
         trend = ZERO
     else:
         trend = clamp(spread / value.atr_14, -ONE, ONE)
-    rsi = clamp((value.rsi_14 - Decimal(50)) / Decimal(20), -ONE, ONE)
-    return_1 = clamp(value.return_1 / Decimal("0.0025"), -ONE, ONE)
-    return_12 = clamp(value.return_12 / Decimal("0.01"), -ONE, ONE)
-    momentum = (
+    trend = quantize_score(trend)
+    rsi = quantize_score(clamp((value.rsi_14 - Decimal(50)) / Decimal(20), -ONE, ONE))
+    return_1 = quantize_score(clamp(value.return_1 / Decimal("0.0025"), -ONE, ONE))
+    return_12 = quantize_score(clamp(value.return_12 / Decimal("0.01"), -ONE, ONE))
+    momentum = quantize_score(
         Decimal("0.35") * rsi + Decimal("0.20") * return_1 + Decimal("0.45") * return_12
     )
-    volume = clamp(
-        (value.relative_volume_20 - Decimal("0.5")) / Decimal("1.5"), ZERO, ONE
+    volume = quantize_score(
+        clamp(
+            (value.relative_volume_20 - Decimal("0.5")) / Decimal("1.5"),
+            ZERO,
+            ONE,
+        )
     )
-    volatility = value.atr_14 / value.close_price
-    trend_contribution = Decimal("0.55") * trend
-    rsi_contribution = Decimal("0.45") * Decimal("0.35") * rsi
-    return_1_contribution = Decimal("0.45") * Decimal("0.20") * return_1
-    return_12_contribution = Decimal("0.45") * Decimal("0.45") * return_12
-    directional = (
+    volatility = quantize_score(value.atr_14 / value.close_price)
+    trend_contribution = quantize_score(Decimal("0.55") * trend)
+    rsi_contribution = quantize_score(Decimal("0.45") * Decimal("0.35") * rsi)
+    return_1_contribution = quantize_score(Decimal("0.45") * Decimal("0.20") * return_1)
+    return_12_contribution = quantize_score(
+        Decimal("0.45") * Decimal("0.45") * return_12
+    )
+    directional = quantize_score(
         trend_contribution
         + rsi_contribution
         + return_1_contribution
         + return_12_contribution
     )
-    confirmation = Decimal("0.75") + Decimal("0.25") * volume
-    overall = directional * confirmation
+    confirmation = quantize_score(Decimal("0.75") + Decimal("0.25") * volume)
+    overall = quantize_score(directional * confirmation)
     return BaselineScoreOutput(
         trend,
         rsi,

@@ -136,7 +136,7 @@ formulas, warm-up periods, interpretations, limitations, and versions.
 
 After committing features, the ingestion job calculates and commits the
 `baseline_technical` version-1 score for complete same-candle feature sets. The
-three transactions are explicit: candles â†’ features â†’ scores. A later-stage
+three transactions are explicit: candles -> features -> scores. A later-stage
 failure preserves earlier committed stages, and repeated execution recovers
 missing immutable rows idempotently.
 
