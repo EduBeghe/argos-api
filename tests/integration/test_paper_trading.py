@@ -164,10 +164,13 @@ async def test_concurrent_resets_leave_exactly_one_active_run(
             await reset_paper_account(session=concurrent_session, started_at=moment)
             await concurrent_session.commit()
 
-    await asyncio.gather(
+    outcomes = await asyncio.gather(
         reset_at(NOW + timedelta(hours=1)),
         reset_at(NOW + timedelta(hours=2)),
+        return_exceptions=True,
     )
+    assert sum(isinstance(outcome, IntegrityError) for outcome in outcomes) <= 1
+    assert sum(outcome is None for outcome in outcomes) >= 1
     async with factory() as verification:
         active_ids = (
             await verification.scalars(
