@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -191,3 +193,27 @@ def test_result_rejects_invalid_action_or_sizing(
             applied_rule="invalid",
             explanation="Invalid test result.",
         )
+
+
+@pytest.mark.parametrize(
+    "construct_invalid",
+    [
+        lambda value: replace(value, strategy_name="other_strategy"),
+        lambda value: replace(value, strategy_version=2),
+        lambda value: replace(value, configuration_version=2),
+        lambda value: replace(value, required_score_model_name="other_model"),
+        lambda value: replace(value, required_score_model_version=2),
+        lambda value: replace(value, applied_rule="open_position_retained"),
+        lambda value: replace(value, applied_rule=""),
+        lambda value: replace(value, explanation=""),
+    ],
+)
+def test_direct_construction_rejects_impossible_metadata_or_rules(
+    construct_invalid: Callable[[StrategyDecision], StrategyDecision],
+) -> None:
+    valid = evaluate_baseline_long_only(
+        overall_score=Decimal("0.60"), position_is_open=False
+    )
+
+    with pytest.raises(ValueError):
+        construct_invalid(valid)

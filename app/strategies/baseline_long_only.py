@@ -31,6 +31,13 @@ _EMITTED_ACTIONS = frozenset(
         StrategyAction.NO_ACTION,
     }
 )
+_APPLIED_RULES_BY_ACTION = {
+    StrategyAction.OPEN_POSITION: frozenset({"entry_threshold_met"}),
+    StrategyAction.SELL_ALL: frozenset({"exit_threshold_breached"}),
+    StrategyAction.NO_ACTION: frozenset(
+        {"entry_threshold_not_met", "open_position_retained"}
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,12 +54,22 @@ class StrategyDecision:
     explanation: str
 
     def __post_init__(self) -> None:
-        if self.strategy_version <= 0 or self.configuration_version <= 0:
-            raise ValueError("strategy and configuration versions must be positive")
-        if self.required_score_model_version <= 0:
-            raise ValueError("required score model version must be positive")
+        if (
+            self.strategy_name != STRATEGY_NAME
+            or self.strategy_version != STRATEGY_VERSION
+            or self.configuration_version != CONFIGURATION_VERSION
+            or self.required_score_model_name != REQUIRED_SCORE_MODEL_NAME
+            or self.required_score_model_version != REQUIRED_SCORE_MODEL_VERSION
+        ):
+            raise ValueError("metadata must match baseline_long_only version 1")
         if self.action not in _EMITTED_ACTIONS:
             raise ValueError("action is not emitted by baseline_long_only version 1")
+        if not isinstance(self.applied_rule, str) or not self.applied_rule.strip():
+            raise ValueError("applied_rule must be a non-empty string")
+        if not isinstance(self.explanation, str) or not self.explanation.strip():
+            raise ValueError("explanation must be a non-empty string")
+        if self.applied_rule not in _APPLIED_RULES_BY_ACTION[self.action]:
+            raise ValueError("applied_rule is inconsistent with action")
         if self.action is StrategyAction.OPEN_POSITION:
             valid_sizing = (
                 self.requested_target_portfolio_percentage
