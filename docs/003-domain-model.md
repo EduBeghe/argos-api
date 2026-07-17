@@ -105,7 +105,7 @@ A Decision Snapshot is an immutable historical record created every time Argos g
 - Strategy version; and
 - model and configuration versions.
 
-Its purpose is traceability, reproducibility, debugging, audits, comparison between model versions, and later model and Strategy evaluation. A Decision Snapshot is a persisted historical record, not an analytical engine.
+Its purpose is traceability, reproducibility, debugging, audits, comparison between model versions, and later model and Strategy evaluation. A persisted snapshot retains the immutable source Score identity and value, source candle and price, supplied `position_is_open` state, requested sizing, rule, explanation, and applicable versions. It records intent, not execution; an earlier `OPEN_POSITION` Decision is not evidence that a Paper Position exists. A Decision Snapshot is a persisted historical record, not an analytical engine.
 
 ### Paper Account
 

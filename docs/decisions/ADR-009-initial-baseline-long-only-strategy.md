@@ -16,6 +16,8 @@ The Strategy is provider-independent and long-only, with no shorts or leverage a
 
 Evaluate every 30 minutes as established by ADR-006. The eligible five-minute candle is the final closed candle for the corresponding UTC `:00` or `:30` boundary. Intermediate five-minute Scores do not automatically generate Decisions. The external Railway cron continues to run every five minutes; Argos introduces no internal scheduler.
 
+Decision generation is a separate future Railway one-shot process, not another ingestion transaction. The planned `python -m app.jobs.generate_market_decisions` command must not be enabled until a persisted Paper Position adapter can supply real `position_is_open` state. Decision history cannot substitute for execution state, so the command fails closed rather than assuming no position is open.
+
 When no position is open:
 
 - `overall_score >= 0.60` produces `OPEN_POSITION`;
