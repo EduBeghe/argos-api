@@ -73,7 +73,8 @@ docker compose stop postgres
 ### One-shot closed-candle ingestion
 
 With PostgreSQL migrated and the environment configured, run the latest fully
-closed five-minute Binance Spot candle ingestion and EMA 20 calculation once:
+closed five-minute Binance Spot candle ingestion, complete Feature pack, and
+baseline technical Score calculation once:
 
 ```sh
 python -m app.jobs.ingest_closed_candles
@@ -81,10 +82,10 @@ python -m app.jobs.ingest_closed_candles
 
 `BINANCE_INGESTION_LIMIT` controls the requested candles per asset and defaults
 to 12 (one hour of five-minute candles). The command processes BTC/USDT followed
-by ETH/USDT and commits those candles atomically. It then calculates EMA 20 for
-both assets in a separate atomic transaction before closing its resources and
-exiting. A feature failure preserves committed candles and can recover on the
-next run. It never ingests the current open candle. Repeated
+by ETH/USDT and commits candles, Features, and Scores in three explicit
+transactions before closing its resources and exiting. A later-stage failure
+preserves earlier committed stages and can recover on the next run. It never
+ingests the current open candle. Repeated
 execution must be scheduled by the external deployment platform; Argos embeds
 no scheduler.
 
@@ -123,12 +124,12 @@ candles exist, run the standalone command:
 python -m app.jobs.calculate_market_features
 ```
 
-Repeated execution is idempotent. Fetch the latest same-candle snapshot with:
-
 Feature calculation retains complete candle history for deterministic indicators,
 filters identities already persisted, and sends only missing values to PostgreSQL.
 Large historical reconstruction is split into bounded 1,000-row inserts while the
 caller continues to own the transaction.
+
+Repeated execution is idempotent. Fetch the latest same-candle snapshot with:
 
 ```sh
 curl "http://localhost:8000/market/features/latest?asset=BTC%2FUSDT&interval=5m"
@@ -166,6 +167,34 @@ The pure, provider-independent `baseline_long_only` version-1 policy is
 implemented in `app.strategies.baseline_long_only`. It converts a validated
 `baseline_technical` version-1 overall score and open-position state into typed
 Decision intent without persistence, execution, scheduling, or provider access.
+
+### Decision Snapshots
+
+Decision generation is a separate responsibility from ingestion. The planned
+Railway one-shot command is:
+
+```sh
+python -m app.jobs.generate_market_decisions
+```
+
+It is intended to run every 30 minutes and contains no internal scheduler. It
+currently fails closed because no persisted Paper Position source exists; the
+Railway decision service must not be enabled until that real portfolio-state
+adapter is available. It never defaults `position_is_open` to false and never
+infers execution from an earlier Decision.
+
+Persisted Decision Snapshots retain the source Score, market evidence, supplied
+position state, Strategy and configuration versions, requested sizing, applied
+rule, and explanation. `OPEN_POSITION` requests a 15% target allocation,
+`SELL_ALL` requests 100% liquidation of an existing position, and `NO_ACTION`
+leaves the portfolio unchanged. These are requested intents, not executed
+trades; `HOLD` is not an action.
+
+Read the latest persisted snapshot without triggering generation:
+
+```sh
+curl "http://localhost:8000/market/decisions/latest?asset=BTC%2FUSDT&interval=5m"
+```
 
 ## Production deployment
 

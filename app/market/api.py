@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
+from app.decisions.persistence import get_latest_decision_snapshot
+from app.decisions.schemas import DecisionSnapshotResponse
 from app.features.calculation import FEATURE_VERSION
 from app.features.persistence import get_latest_feature_snapshot
 from app.features.schemas import MarketFeatureResponse
@@ -162,3 +164,25 @@ async def latest_score(
     if score is None:
         raise HTTPException(status_code=404, detail="Market score not found")
     return MarketScoreResponse.from_domain(score)
+
+
+@router.get(
+    "/decisions/latest",
+    response_model=DecisionSnapshotResponse,
+    summary="Get the latest persisted Decision Snapshot",
+)
+async def latest_decision(
+    session: SessionDependency,
+    asset: Annotated[Asset, Query(description="Market asset.")],
+    interval: Annotated[Interval, Query(description="Candle interval.")],
+) -> DecisionSnapshotResponse:
+    snapshot = await get_latest_decision_snapshot(
+        session=session,
+        asset=asset,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=interval,
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Decision Snapshot not found")
+    return DecisionSnapshotResponse.from_domain(snapshot)

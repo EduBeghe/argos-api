@@ -70,9 +70,11 @@ The Decision Engine combines normalized, persisted Scores with portfolio state, 
 
 Its inputs are persisted evidence and account context. Its output is one of `OPEN_POSITION`, `INCREASE_POSITION`, `SELL_PARTIAL`, `SELL_ALL`, or `NO_ACTION`, with requested sizing where required. `NO_ACTION` intentionally leaves the portfolio unchanged; `HOLD` is not a Decision action. The initial `baseline_long_only` version 1 emits only `OPEN_POSITION`, `SELL_ALL`, and `NO_ACTION`. It does not interact with a real exchange in the MVP.
 
+Decision generation is separate from the five-minute ingestion pipeline. A future Railway one-shot process will evaluate every 30 minutes through `python -m app.jobs.generate_market_decisions`. It must receive persisted Paper Position state through an explicit adapter and currently fails closed because that source does not exist. It never assumes that no position is open or treats an earlier Decision as proof of execution. Argos contains no internal scheduler.
+
 ### Decision Snapshot
 
-A Decision Snapshot is an immutable historical record created whenever Argos generates a decision. It stores the timestamp, asset, price, market inputs, Features, every Score actually used, Decision and requested sizing, applied rules, and model, Strategy, and configuration versions. An aggregated Argos Score is included only when available and used. A calibrated confidence value may be absent or null; `signal_strength` is score magnitude, not probability or confidence.
+A Decision Snapshot is an immutable historical record created whenever Argos generates a decision. The persisted baseline snapshot stores the supplied position state, source candle and market price, immutable source Score identity and value, Decision and requested sizing, applied rule and explanation, and model, Strategy, and configuration versions. An aggregated Argos Score is included only when available and used. A calibrated confidence value may be absent or null; `signal_strength` is score magnitude, not probability or confidence.
 
 Snapshots allow the team to reconstruct why a decision was made and support debugging, model-version comparisons, audits, and later model evaluation. This module persists records; it is not an analytical engine.
 
@@ -90,7 +92,7 @@ This module consumes persisted decisions and paper-trading outcomes and produces
 
 ### API
 
-The API exposes system information and actions to the frontend. It provides read-only access to persisted market candles and ingestion freshness for the Web application; these endpoints never trigger ingestion, which remains a separate one-shot job. It may later provide access to current scores, score explanations, decisions, snapshots, simulated positions, simulated account state, performance metrics, and backtest execution.
+The API exposes system information and actions to the frontend. It provides read-only access to persisted market candles, ingestion freshness, Scores, and Decision Snapshots; these endpoints never trigger ingestion or Decision generation. It may later provide access to simulated positions, simulated account state, performance metrics, and backtest execution.
 
 The API orchestrates application use cases and maps them to explicit module interfaces. It does not contain core analytical or trading logic.
 
