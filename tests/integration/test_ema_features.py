@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import get_settings
 from app.features.calculation import FeatureCalculationResult, calculate_ema_20_features
+from app.features.models import FeatureName
 from app.features.persistence import MarketFeatureRecord
 from app.jobs.calculate_market_features import run as run_feature_job
 from app.market.enums import Asset, Interval, MarketType, Provider
@@ -166,6 +167,49 @@ async def test_fifty_candles_persist_complete_feature_pack(
         "relative_volume_20",
     }
     assert calculated.values_inserted == calculated.values_calculated
+
+
+async def test_large_reconstruction_is_batched_incremental_and_gap_safe(
+    session: AsyncSession,
+) -> None:
+    await add_candles(session, 500, Asset.BTC_USDT)
+
+    first = await calculate(session)
+    await session.commit()
+    assert first.values_calculated > 3276
+    assert first.values_inserted == first.values_calculated
+
+    repeated = await calculate(session)
+    await session.commit()
+    assert repeated.values_inserted == 0
+    assert repeated.duplicates == repeated.values_calculated
+
+    historical = await session.scalar(
+        select(MarketFeatureRecord)
+        .where(MarketFeatureRecord.feature_name == FeatureName.RETURN_1.value)
+        .order_by(MarketFeatureRecord.candle_open_time.asc())
+        .limit(1)
+    )
+    assert historical is not None
+    historical_identity = (
+        historical.candle_open_time,
+        historical.feature_name,
+        historical.value,
+    )
+    await session.delete(historical)
+    await session.commit()
+
+    rebuilt = await calculate(session)
+    await session.commit()
+    assert rebuilt.values_inserted == 1
+    reconstructed = await session.scalar(
+        select(MarketFeatureRecord).where(
+            MarketFeatureRecord.candle_open_time == historical_identity[0],
+            MarketFeatureRecord.feature_name == historical_identity[1],
+        )
+    )
+    assert reconstructed is not None
+    assert reconstructed.value == historical_identity[2]
 
 
 async def test_feature_job_rolls_back_btc_when_eth_fails(session: AsyncSession) -> None:

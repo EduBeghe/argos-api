@@ -125,6 +125,11 @@ python -m app.jobs.calculate_market_features
 
 Repeated execution is idempotent. Fetch the latest same-candle snapshot with:
 
+Feature calculation retains complete candle history for deterministic indicators,
+filters identities already persisted, and sends only missing values to PostgreSQL.
+Large historical reconstruction is split into bounded 1,000-row inserts while the
+caller continues to own the transaction.
+
 ```sh
 curl "http://localhost:8000/market/features/latest?asset=BTC%2FUSDT&interval=5m"
 ```

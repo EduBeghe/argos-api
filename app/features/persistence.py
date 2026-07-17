@@ -21,6 +21,9 @@ from app.core.database.base import Base
 from app.features.models import FeatureName, MarketFeature
 from app.market.enums import Asset, Interval, MarketType, Provider
 
+FEATURE_INSERT_BATCH_SIZE = 1000
+FeatureIdentity = tuple[datetime, FeatureName, int]
+
 
 class MarketFeatureRecord(Base):
     __tablename__ = "market_features"
@@ -72,23 +75,60 @@ async def insert_market_features(
 ) -> list[FeatureName]:
     if not features:
         return []
-    statement = (
-        insert(MarketFeatureRecord)
-        .values([feature.model_dump(mode="python") for feature in features])
-        .on_conflict_do_nothing(
-            index_elements=[
-                "asset",
-                "provider",
-                "market_type",
-                "interval",
-                "candle_open_time",
-                "feature_name",
-                "feature_version",
-            ]
+    inserted_names: list[FeatureName] = []
+    # Ten bound values per row keeps each statement well below asyncpg's limit.
+    for start in range(0, len(features), FEATURE_INSERT_BATCH_SIZE):
+        batch = features[start : start + FEATURE_INSERT_BATCH_SIZE]
+        statement = (
+            insert(MarketFeatureRecord)
+            .values([feature.model_dump(mode="python") for feature in batch])
+            .on_conflict_do_nothing(
+                index_elements=[
+                    "asset",
+                    "provider",
+                    "market_type",
+                    "interval",
+                    "candle_open_time",
+                    "feature_name",
+                    "feature_version",
+                ]
+            )
+            .returning(MarketFeatureRecord.feature_name)
         )
-        .returning(MarketFeatureRecord.feature_name)
-    )
-    return [FeatureName(value) for value in (await session.scalars(statement)).all()]
+        inserted_names.extend(
+            FeatureName(value) for value in (await session.scalars(statement)).all()
+        )
+    return inserted_names
+
+
+async def get_existing_feature_identities(
+    *,
+    session: AsyncSession,
+    asset: Asset,
+    provider: Provider,
+    market_type: MarketType,
+    interval: Interval,
+    feature_version: int,
+) -> set[FeatureIdentity]:
+    rows = (
+        await session.execute(
+            select(
+                MarketFeatureRecord.candle_open_time,
+                MarketFeatureRecord.feature_name,
+                MarketFeatureRecord.feature_version,
+            ).where(
+                MarketFeatureRecord.asset == asset.value,
+                MarketFeatureRecord.provider == provider.value,
+                MarketFeatureRecord.market_type == market_type.value,
+                MarketFeatureRecord.interval == interval.value,
+                MarketFeatureRecord.feature_version == feature_version,
+            )
+        )
+    ).tuples()
+    return {
+        (candle_open_time, FeatureName(feature_name), version)
+        for candle_open_time, feature_name, version in rows
+    }
 
 
 async def get_latest_feature(
