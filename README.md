@@ -157,6 +157,11 @@ Interpretations are `strongly_bearish`, `bearish`, `neutral`, `bullish`, and
 See [the score-model reference](docs/006-baseline-score-model.md) for formulas,
 weights, boundaries, explanations, and limitations.
 
+The pure, provider-independent `baseline_long_only` version-1 policy is
+implemented in `app.strategies.baseline_long_only`. It converts a validated
+`baseline_technical` version-1 overall score and open-position state into typed
+Decision intent without persistence, execution, scheduling, or provider access.
+
 ## Production deployment
 
 Provide `DATABASE_URL` and review the production values for `BINANCE_BASE_URL`,
