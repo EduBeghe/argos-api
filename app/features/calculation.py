@@ -14,7 +14,10 @@ from app.features.indicators import (
     calculate_rsi,
 )
 from app.features.models import FeatureName, MarketFeature
-from app.features.persistence import insert_market_features
+from app.features.persistence import (
+    get_existing_feature_identities,
+    insert_market_features,
+)
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord
 
@@ -114,7 +117,31 @@ async def calculate_market_features(
         for name, calculated_points in points
         for point in calculated_points
     ]
-    inserted_names = await insert_market_features(session, values) if values else []
+    existing_identities = (
+        await get_existing_feature_identities(
+            session=session,
+            asset=asset,
+            provider=provider,
+            market_type=market_type,
+            interval=interval,
+            feature_version=FEATURE_VERSION,
+        )
+        if values
+        else set()
+    )
+    missing_values = [
+        value
+        for value in values
+        if (
+            value.candle_open_time,
+            value.feature_name,
+            value.feature_version,
+        )
+        not in existing_identities
+    ]
+    inserted_names = (
+        await insert_market_features(session, missing_values) if missing_values else []
+    )
     inserted_counts = Counter(inserted_names)
     per_feature = tuple(
         PerFeatureCalculationResult(
