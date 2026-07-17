@@ -83,8 +83,17 @@ async def test_complete_features_generate_idempotent_score() -> None:
         await session.commit()
         records = (await session.scalars(select(MarketScoreRecord))).all()
         assert first.scores_inserted == 1
-        assert (second.candidate_candles_read, second.scores_calculated) == (0, 0)
-        assert second.duplicates == 0
+        assert second.candidate_candles_read == first.candidate_candles_read - 1
+        assert (
+            second.scores_calculated,
+            second.scores_inserted,
+            second.duplicates,
+        ) == (
+            0,
+            0,
+            0,
+        )
+        assert reconstructed.candidate_candles_read == first.candidate_candles_read
         assert reconstructed.scores_inserted == 1
         assert len(records) == 1
         assert records[0].candle_open_time == START + timedelta(minutes=245)
