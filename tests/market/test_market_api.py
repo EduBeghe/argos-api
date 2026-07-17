@@ -13,6 +13,8 @@ from app.market.api import build_market_status
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.queries import MarketStatusAggregate
 from app.market.schemas import CandleOrder, MarketCandleQuery, MarketCandleResponse
+from app.scores.calculator import ScoreInterpretation
+from app.scores.models import MarketScore
 from main import app
 from tests.market.factories import make_candle
 
@@ -274,3 +276,64 @@ def test_latest_feature_endpoint_returns_404_without_calculation(
     assert response.status_code == 404
     query.assert_awaited_once()
     assert "/market/features/latest" in client.get("/openapi.json").json()["paths"]
+
+
+def score(asset: Asset = Asset.BTC_USDT) -> MarketScore:
+    return MarketScore(
+        asset=asset,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
+        candle_open_time=datetime(2026, 7, 15, 12, tzinfo=UTC),
+        model_name="baseline_technical",
+        model_version=1,
+        calculated_at=datetime(2026, 7, 16, tzinfo=UTC),
+        trend_score=Decimal("0.5"),
+        momentum_score=Decimal("0.25"),
+        volume_activity=Decimal("0.333333333333333333"),
+        volatility_ratio=Decimal("0.002"),
+        directional_score=Decimal("0.3875"),
+        volume_confirmation_factor=Decimal("0.83333333333333333325"),
+        overall_score=Decimal("0.322916666666666666634375"),
+        signal_strength=Decimal("0.322916666666666666634375"),
+        trend_contribution=Decimal("0.275"),
+        rsi_contribution=Decimal("0.05"),
+        return_1_contribution=Decimal("0.02"),
+        return_12_contribution=Decimal("0.0425"),
+        interpretation=ScoreInterpretation.BULLISH,
+    )
+
+
+def test_latest_score_returns_exact_explainable_snapshot(client: TestClient) -> None:
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch(
+            "app.market.api.get_latest_market_score", AsyncMock(return_value=score())
+        ):
+            response = client.get(
+                "/market/scores/latest", params={"asset": "BTC/USDT", "interval": "5m"}
+            )
+    finally:
+        app.dependency_overrides.clear()
+    body = response.json()
+    assert response.status_code == 200
+    assert body["overall_score"] == "0.322916666666666666634375"
+    assert body["contributions"]["trend"] == "0.275"
+    assert body["interpretation"] == "bullish"
+    assert set(body["explanations"]) == {"trend", "momentum", "volume", "volatility"}
+    assert "action" not in body
+    assert "/market/scores/latest" in client.get("/openapi.json").json()["paths"]
+
+
+def test_latest_score_returns_404_without_persisted_score(client: TestClient) -> None:
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch(
+            "app.market.api.get_latest_market_score", AsyncMock(return_value=None)
+        ):
+            response = client.get(
+                "/market/scores/latest", params={"asset": "ETH/USDT", "interval": "5m"}
+            )
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 404

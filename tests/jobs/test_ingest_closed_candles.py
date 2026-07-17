@@ -13,9 +13,11 @@ from app.ingestion.orchestration import (
 )
 from app.jobs import ingest_closed_candles as job
 from app.market.enums import Asset, Interval
+from app.scores.calculation import ScoreCalculationResult
 
 INGESTED_AT = datetime(2026, 7, 16, 12, 7, tzinfo=UTC)
 CALCULATED_AT = datetime(2026, 7, 16, 12, 8, tzinfo=UTC)
+SCORED_AT = datetime(2026, 7, 16, 12, 9, tzinfo=UTC)
 
 
 def settings() -> Settings:
@@ -49,6 +51,12 @@ def feature_result(asset: Asset) -> FeatureCalculationResult:
     return FeatureCalculationResult(asset, 20, 0, 0, 0, None, None, ())
 
 
+def score_result(asset: Asset) -> ScoreCalculationResult:
+    return ScoreCalculationResult(
+        asset, "baseline_technical", 1, 0, 0, 0, 0, 0, None, None
+    )
+
+
 def resources() -> tuple[MagicMock, AsyncMock, MagicMock, MagicMock]:
     engine = MagicMock()
     engine.dispose = AsyncMock()
@@ -68,6 +76,7 @@ async def test_run_commits_ingestion_then_features_and_closes_resources() -> Non
     events: list[str] = []
     ingestion = ingestion_result()
     features = (feature_result(Asset.BTC_USDT), feature_result(Asset.ETH_USDT))
+    scores = (score_result(Asset.BTC_USDT), score_result(Asset.ETH_USDT))
 
     async def stage_ingestion(**_: object) -> ClosedCandleIngestionResult:
         events.append("ingest")
@@ -77,10 +86,15 @@ async def test_run_commits_ingestion_then_features_and_closes_resources() -> Non
         events.append("features")
         return features
 
+    async def stage_scores(**_: object) -> tuple[ScoreCalculationResult, ...]:
+        events.append("scores")
+        return scores
+
     ingest = AsyncMock(side_effect=stage_ingestion)
     calculate = AsyncMock(side_effect=stage_features)
+    calculate_scores = AsyncMock(side_effect=stage_scores)
     session.commit.side_effect = lambda: events.append("commit")
-    clock = Mock(side_effect=[INGESTED_AT, CALCULATED_AT])
+    clock = Mock(side_effect=[INGESTED_AT, CALCULATED_AT, SCORED_AT])
 
     with (
         patch.object(job, "configure_logging"),
@@ -92,12 +106,15 @@ async def test_run_commits_ingestion_then_features_and_closes_resources() -> Non
         patch.object(job, "BinanceClient", return_value=client_context),
         patch.object(job, "ingest_latest_closed_klines", ingest),
         patch.object(job, "calculate_all_market_features", calculate),
+        patch.object(job, "calculate_all_market_scores", calculate_scores),
     ):
         result = await job.run(settings=settings(), clock=clock, engine=engine)
 
-    assert events == ["ingest", "commit", "features", "commit"]
-    assert result == job.IngestionPipelineResult(ingestion, CALCULATED_AT, features)
-    assert clock.call_count == 2
+    assert events == ["ingest", "commit", "features", "commit", "scores", "commit"]
+    assert result == job.IngestionPipelineResult(
+        ingestion, CALCULATED_AT, features, SCORED_AT, scores
+    )
+    assert clock.call_count == 3
     ingest.assert_awaited_once_with(
         session=session,
         client=client_context.__aenter__.return_value,
@@ -107,7 +124,8 @@ async def test_run_commits_ingestion_then_features_and_closes_resources() -> Non
         limit=18,
     )
     calculate.assert_awaited_once_with(session=session, calculated_at=CALCULATED_AT)
-    assert session.commit.await_count == 2
+    calculate_scores.assert_awaited_once_with(session=session, calculated_at=SCORED_AT)
+    assert session.commit.await_count == 3
     session.rollback.assert_not_awaited()
     engine.dispose.assert_awaited_once_with()
 
@@ -180,6 +198,8 @@ def test_completion_log_contains_both_stage_fields(
         ingestion_result(),
         CALCULATED_AT,
         (feature_result(Asset.BTC_USDT), feature_result(Asset.ETH_USDT)),
+        SCORED_AT,
+        (score_result(Asset.BTC_USDT), score_result(Asset.ETH_USDT)),
     )
     with caplog.at_level(logging.INFO, logger=job.__name__):
         job._log_completion(result)

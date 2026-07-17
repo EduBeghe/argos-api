@@ -20,6 +20,9 @@ from app.market.schemas import (
     MarketCandleResponse,
     MarketStatusResponse,
 )
+from app.scores.calculation import MODEL_NAME, MODEL_VERSION
+from app.scores.persistence import get_latest_market_score
+from app.scores.schemas import MarketScoreResponse
 
 router = APIRouter(prefix="/market", tags=["market"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
@@ -135,3 +138,27 @@ async def latest_feature(
     if not features:
         raise HTTPException(status_code=404, detail="Feature snapshot not found")
     return MarketFeatureResponse.from_features(features)
+
+
+@router.get(
+    "/scores/latest",
+    response_model=MarketScoreResponse,
+    summary="Get the latest persisted baseline technical score",
+)
+async def latest_score(
+    session: SessionDependency,
+    asset: Annotated[Asset, Query(description="Market asset.")],
+    interval: Annotated[Interval, Query(description="Candle interval.")],
+) -> MarketScoreResponse:
+    score = await get_latest_market_score(
+        session=session,
+        asset=asset,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=interval,
+        model_name=MODEL_NAME,
+        model_version=MODEL_VERSION,
+    )
+    if score is None:
+        raise HTTPException(status_code=404, detail="Market score not found")
+    return MarketScoreResponse.from_domain(score)

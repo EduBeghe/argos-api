@@ -132,6 +132,31 @@ curl "http://localhost:8000/market/features/latest?asset=BTC%2FUSDT&interval=5m"
 See [the analytical feature reference](docs/005-analytical-features.md) for exact
 formulas, warm-up periods, interpretations, limitations, and versions.
 
+### Baseline technical score
+
+After committing features, the ingestion job calculates and commits the
+`baseline_technical` version-1 score for complete same-candle feature sets. The
+three transactions are explicit: candles -> features -> scores. A later-stage
+failure preserves earlier committed stages, and repeated execution recovers
+missing immutable rows idempotently.
+
+Reconstruct missing scores explicitly with:
+
+```sh
+python -m app.jobs.calculate_market_scores
+```
+
+Read the latest persisted score with:
+
+```sh
+curl "http://localhost:8000/market/scores/latest?asset=BTC%2FUSDT&interval=5m"
+```
+
+Interpretations are `strongly_bearish`, `bearish`, `neutral`, `bullish`, and
+`strongly_bullish`. They describe analytical direction, not a trading action.
+See [the score-model reference](docs/006-baseline-score-model.md) for formulas,
+weights, boundaries, explanations, and limitations.
+
 ## Production deployment
 
 Provide `DATABASE_URL` and review the production values for `BINANCE_BASE_URL`,

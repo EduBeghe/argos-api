@@ -8,16 +8,16 @@ The frontend is a responsive Angular application maintained in the separate `arg
 
 ```text
 External data source
-â†’ Ingestion
-â†’ Storage
-â†’ Feature Engine
-â†’ Scoring
-â†’ Decision Engine
-â†’ Decision Snapshot
-â†’ Paper Trading
-â†’ Metrics
-â†’ API
-â†’ Web
+→ Ingestion
+→ Storage
+→ Feature Engine
+→ Scoring
+→ Decision Engine
+→ Decision Snapshot
+→ Paper Trading
+→ Metrics
+→ API
+→ Web
 ```
 
 The analytical pipeline runs independently of its presentation layers. The API exposes system information and actions; the Web application visualizes them and supports user interaction.
@@ -52,12 +52,14 @@ The first feature pack persists EMA 20, EMA 50, RSI 14, ATR 14, one-candle retur
 
 Scoring executes independent analytical models using available features and context. It produces explicit component scores such as technical, momentum, volatility, market context, news, sentiment, and machine-learning scores. Every result must be measurable and persist both its score and explanation. Scoring does not execute trades.
 
+The first persisted model is the deterministic `baseline_technical` version 1 score. It reads complete same-candle feature sets and their exact candle close, persists explicit weighted contributions, and generates deterministic explanations at the presentation boundary. The production pipeline commits candles, features, and scores in three separate transactions so a score failure preserves committed observations and features. Missing scores are recoverable idempotently through the existing ingestion command or the standalone score reconstruction command.
+
 Illustrative output:
 
 ```text
-technical: 0.65 â€” price is above the selected moving average
-momentum: 0.40 â€” recent returns are positive but weakening
-volatility: 0.25 â€” current volatility increases downside uncertainty
+technical: 0.65 — price is above the selected moving average
+momentum: 0.40 — recent returns are positive but weakening
+volatility: 0.25 — current volatility increases downside uncertainty
 ```
 
 The score ranges, formulas, and explanations above are illustrative rather than selected model definitions.
