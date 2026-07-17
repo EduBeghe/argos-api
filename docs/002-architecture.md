@@ -84,7 +84,11 @@ Paper Trading is a virtual brokerage account that uses simulated money. It recei
 
 Version 1 starts with 10,000 USDT by default, charges a 0.10% fee on executed notional, and applies 0.05% adverse slippage. In plain language, the simulation assumes a slightly worse execution price than the observed market price: buys cost more and sells receive less. Calculations use Decimal values quantized to 18 fractional digits with round-half-even. These are versioned simulation hypotheses, not guaranteed Binance execution costs.
 
-Resetting closes the active run and creates a linked successor without deleting historical Positions or Trades. The reusable reset use case is exposed only through an administrative CLI until authenticated mutation endpoints exist.
+Resetting administratively stops the active run and creates a linked successor without deleting or modifying historical Positions or Trades. A STOPPED run is not liquidated: an open Position remains historically open-at-stop, and only a simulated SELL_ALL closes a Position. Reset creates no synthetic Trade. Historical runs, Positions, and Trades are queryable by run identity.
+
+Before opening a Position, Paper Trading values every existing open Position with the latest eligible persisted closed-candle price at or before the Decision timestamp. It never substitutes entry price for current market evidence and fails closed when valuation evidence is missing. The persisted candles and immutable Decision timestamp make the valuation reproducible.
+
+The reusable reset use case is exposed only through an administrative CLI until authenticated mutation endpoints exist. A future authenticated frontend reset must call the same use case.
 
 ### Metrics
 

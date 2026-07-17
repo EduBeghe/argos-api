@@ -260,4 +260,4 @@ Start or reset the active simulated account without deleting prior experiments:
 python -m app.jobs.reset_paper_account --initial-cash 10000 --reason "baseline before feature X"
 ```
 
-The command parses money as `Decimal`, closes the active run, and creates a fresh run in one transaction. Paper state is read-only over `GET /paper/account`, `GET /paper/positions`, and `GET /paper/trades`. Reset remains CLI-only until authenticated mutation endpoints exist.
+The command parses money as `Decimal`, stops the active experiment, and creates a fresh linked run in one transaction. Stopping a run does not liquidate it: open Positions retain their quantity and entry state, and no synthetic Trade is created. Historical runs are queryable through `GET /paper/runs` and `GET /paper/runs/{run_id}`; positions and trades accept an optional `run_id`. Reset remains CLI-only until authenticated mutation endpoints exist, and a future authenticated frontend action must reuse this use case.

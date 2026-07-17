@@ -20,6 +20,9 @@ class PaperAccountResponse(BaseModel):
     fee_rate: Decimal
     slippage_rate: Decimal
     started_at: datetime
+    stopped_at: datetime | None
+    stop_reason: str | None
+    predecessor_run_id: UUID | None
 
     @classmethod
     def from_domain(cls, run: PaperTradingRun) -> "PaperAccountResponse":
@@ -29,6 +32,7 @@ class PaperAccountResponse(BaseModel):
 class PaperPositionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    run_id: UUID
     asset: Asset
     provider: Provider
     market_type: MarketType
@@ -48,6 +52,7 @@ class PaperPositionResponse(BaseModel):
 class PaperTradeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    run_id: UUID
     decision_snapshot_id: UUID
     position_id: UUID
     side: str
@@ -65,6 +70,7 @@ class PaperTradeResponse(BaseModel):
     cash_impact: Decimal
     executed_at: datetime
     configuration_version: int
+    equity_before: Decimal | None
 
     @classmethod
     def from_record(cls, record: PaperTradeRecord) -> "PaperTradeResponse":

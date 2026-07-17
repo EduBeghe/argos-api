@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.decisions.models import DecisionSnapshot
+from app.decisions.persistence import DecisionSnapshotRecord
+from app.market.persistence import MarketCandleRecord
 from app.paper.calculation import (
     PaperExecutionError,
     calculate_no_action,
@@ -36,6 +38,10 @@ class UnsupportedPaperActionError(PaperExecutionError):
     pass
 
 
+class PaperValuationError(PaperExecutionError):
+    """Raised when persisted evidence cannot value every open position."""
+
+
 async def execute_decision(
     *, session: AsyncSession, decision: DecisionSnapshot, executed_at: datetime
 ) -> PaperTradeRecord | NoTrade:
@@ -50,6 +56,22 @@ async def execute_decision(
     run = await get_active_run(session, currency=DEFAULT_ACCOUNT_CURRENCY, lock=True)
     if run is None:
         raise PaperExecutionError("active Paper Trading run not found")
+    persisted_decision = await session.scalar(
+        select(DecisionSnapshotRecord).where(DecisionSnapshotRecord.id == decision.id)
+    )
+    if persisted_decision is None:
+        raise PaperExecutionError(
+            "Decision Snapshot must be persisted before execution"
+        )
+    if (
+        persisted_decision.asset != decision.asset.value
+        or persisted_decision.provider != decision.provider.value
+        or persisted_decision.market_type != decision.market_type.value
+        or persisted_decision.interval != decision.interval.value
+        or persisted_decision.action != decision.action.value
+        or persisted_decision.source_market_price != decision.source_market_price
+    ):
+        raise PaperExecutionError("Decision Snapshot does not match persisted intent")
     if decision.action is StrategyAction.NO_ACTION:
         return calculate_no_action()
     existing_trade = await session.scalar(
@@ -123,7 +145,17 @@ async def execute_decision(
         position.gross_realized_pnl = calculation.gross_realized_pnl
         position.net_realized_pnl = calculation.net_realized_pnl
     run.current_cash = calculation.resulting_cash
-    trade = _trade(run.id, decision, position.id, calculation, executed_at, config)
+    trade = _trade(
+        run.id,
+        decision,
+        position.id,
+        calculation,
+        executed_at,
+        config,
+        equity_before=(
+            total_equity if decision.action is StrategyAction.OPEN_POSITION else None
+        ),
+    )
     session.add(trade)
     await session.flush()
     return trade
@@ -146,18 +178,23 @@ async def _total_equity(
     ).all()
     value = cash
     for position in positions:
-        same_instrument = (
-            position.asset == decision.asset.value
-            and position.provider == decision.provider.value
-            and position.market_type == decision.market_type.value
-            and position.interval == decision.interval.value
+        price = await session.scalar(
+            select(MarketCandleRecord.close_price)
+            .where(
+                MarketCandleRecord.asset == position.asset,
+                MarketCandleRecord.provider == position.provider,
+                MarketCandleRecord.market_type == position.market_type,
+                MarketCandleRecord.interval == position.interval,
+                MarketCandleRecord.close_time <= decision.decision_timestamp,
+            )
+            .order_by(MarketCandleRecord.close_time.desc())
+            .limit(1)
         )
-        valuation_price = (
-            decision.source_market_price
-            if same_instrument
-            else position.average_entry_price
-        )
-        value += position.quantity * valuation_price
+        if price is None:
+            raise PaperValuationError(
+                f"persisted valuation price not found for {position.asset}"
+            )
+        value += position.quantity * price
     return quantize_financial(value)
 
 
@@ -174,6 +211,7 @@ def _trade(
     result: ExecutionCalculation,
     executed_at: datetime,
     config: SimulationConfiguration,
+    equity_before: Decimal | None,
 ) -> PaperTradeRecord:
     return PaperTradeRecord(
         id=uuid4(),
@@ -195,4 +233,5 @@ def _trade(
         cash_impact=result.cash_impact,
         executed_at=executed_at,
         configuration_version=config.version,
+        equity_before=equity_before,
     )

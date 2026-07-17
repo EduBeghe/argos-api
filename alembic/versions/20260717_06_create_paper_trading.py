@@ -30,15 +30,18 @@ def upgrade() -> None:
         sa.Column("fee_rate", numeric, nullable=False),
         sa.Column("slippage_rate", numeric, nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("ended_at", sa.DateTime(timezone=True)),
-        sa.Column("reset_reason", sa.String(512)),
+        sa.Column("stopped_at", sa.DateTime(timezone=True)),
+        sa.Column("stop_reason", sa.String(512)),
         sa.Column(
             "predecessor_run_id",
             postgresql.UUID(as_uuid=True),
             sa.ForeignKey("paper_trading_runs.id"),
         ),
         sa.CheckConstraint(
-            "status IN ('active', 'closed')", name="ck_paper_runs_status"
+            "status IN ('active', 'stopped')", name="ck_paper_runs_status"
+        ),
+        sa.CheckConstraint(
+            "length(btrim(account_currency)) > 0", name="ck_paper_runs_currency"
         ),
         sa.CheckConstraint("initial_cash > 0", name="ck_paper_runs_initial_cash"),
         sa.CheckConstraint("current_cash >= 0", name="ck_paper_runs_current_cash"),
@@ -50,9 +53,18 @@ def upgrade() -> None:
             name="ck_paper_runs_slippage_rate",
         ),
         sa.CheckConstraint(
-            "(status = 'active' AND ended_at IS NULL) OR "
-            "(status = 'closed' AND ended_at IS NOT NULL)",
+            "(status = 'active' AND stopped_at IS NULL) OR "
+            "(status = 'stopped' AND stopped_at IS NOT NULL)",
             name="ck_paper_runs_lifecycle",
+        ),
+        sa.CheckConstraint("configuration_version > 0", name="ck_paper_runs_version"),
+        sa.CheckConstraint(
+            "predecessor_run_id IS NULL OR predecessor_run_id <> id",
+            name="ck_paper_runs_predecessor",
+        ),
+        sa.CheckConstraint(
+            "stopped_at IS NULL OR stopped_at >= started_at",
+            name="ck_paper_runs_timestamps",
         ),
     )
     op.create_index(
@@ -89,6 +101,11 @@ def upgrade() -> None:
             "status IN ('open', 'closed')", name="ck_paper_positions_status"
         ),
         sa.CheckConstraint(
+            "length(btrim(asset)) > 0 AND length(btrim(provider)) > 0 AND "
+            "length(btrim(market_type)) > 0 AND length(btrim(interval)) > 0",
+            name="ck_paper_positions_identity",
+        ),
+        sa.CheckConstraint(
             "quantity >= 0 AND average_entry_price > 0 AND "
             "total_entry_notional > 0 AND accumulated_entry_fees >= 0",
             name="ck_paper_positions_amounts",
@@ -100,6 +117,10 @@ def upgrade() -> None:
             "closed_at IS NOT NULL AND exit_price > 0 AND "
             "gross_realized_pnl IS NOT NULL AND net_realized_pnl IS NOT NULL)",
             name="ck_paper_positions_lifecycle",
+        ),
+        sa.CheckConstraint(
+            "closed_at IS NULL OR closed_at >= opened_at",
+            name="ck_paper_positions_timestamps",
         ),
     )
     op.create_index(
@@ -145,7 +166,13 @@ def upgrade() -> None:
         sa.Column("cash_impact", numeric, nullable=False),
         sa.Column("executed_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("configuration_version", sa.Integer(), nullable=False),
+        sa.Column("equity_before", numeric),
         sa.CheckConstraint("side IN ('buy', 'sell')", name="ck_paper_trades_side"),
+        sa.CheckConstraint(
+            "length(btrim(asset)) > 0 AND length(btrim(provider)) > 0 AND "
+            "length(btrim(market_type)) > 0 AND length(btrim(interval)) > 0",
+            name="ck_paper_trades_identity",
+        ),
         sa.CheckConstraint(
             "observed_market_price > 0 AND execution_price > 0 AND quantity > 0 AND "
             "executed_notional > 0 AND fee_amount >= 0",
@@ -155,6 +182,11 @@ def upgrade() -> None:
             "fee_rate >= 0 AND fee_rate < 1 AND slippage_rate >= 0 AND "
             "slippage_rate < 1",
             name="ck_paper_trades_rates",
+        ),
+        sa.CheckConstraint("configuration_version > 0", name="ck_paper_trades_version"),
+        sa.CheckConstraint(
+            "(side = 'buy' AND cash_impact < 0) OR (side = 'sell' AND cash_impact > 0)",
+            name="ck_paper_trades_cash_direction",
         ),
     )
     op.create_index(

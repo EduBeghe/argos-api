@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -8,6 +10,8 @@ from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
 from app.paper.reset import reset_paper_account
+
+logger = logging.getLogger(__name__)
 
 
 def decimal_argument(value: str) -> Decimal:
@@ -26,7 +30,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def run(*, initial_cash: Decimal, reason: str | None) -> None:
+async def run(
+    *,
+    initial_cash: Decimal,
+    reason: str | None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     engine = create_database_engine(settings)
@@ -36,13 +45,15 @@ async def run(*, initial_cash: Decimal, reason: str | None) -> None:
             try:
                 await reset_paper_account(
                     session=session,
-                    started_at=datetime.now(UTC),
+                    started_at=clock(),
                     initial_cash=initial_cash,
                     reason=reason,
                 )
                 await session.commit()
+                logger.info("Paper Trading experiment reset")
             except Exception:
                 await session.rollback()
+                logger.exception("Paper Trading experiment reset failed")
                 raise
     finally:
         await engine.dispose()

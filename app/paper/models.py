@@ -9,7 +9,7 @@ from app.market.enums import Asset, Interval, MarketType, Provider
 
 class PaperRunStatus(StrEnum):
     ACTIVE = "active"
-    CLOSED = "closed"
+    STOPPED = "stopped"
 
 
 class PaperPositionStatus(StrEnum):
@@ -33,8 +33,8 @@ class PaperTradingRun:
     fee_rate: Decimal
     slippage_rate: Decimal
     started_at: datetime
-    ended_at: datetime | None
-    reset_reason: str | None
+    stopped_at: datetime | None
+    stop_reason: str | None
     predecessor_run_id: UUID | None
 
 

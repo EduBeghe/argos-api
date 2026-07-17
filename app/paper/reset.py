@@ -24,9 +24,9 @@ async def reset_paper_account(
     predecessor = None
     if current is not None:
         predecessor = current.id
-        current.status = PaperRunStatus.CLOSED.value
-        current.ended_at = started_at
-        current.reset_reason = normalized_reason
+        current.status = PaperRunStatus.STOPPED.value
+        current.stopped_at = started_at
+        current.stop_reason = normalized_reason
         await session.flush()
     created = await create_run(
         session,

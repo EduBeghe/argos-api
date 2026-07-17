@@ -33,7 +33,10 @@ from app.paper.models import (
 class PaperTradingRunRecord(Base):
     __tablename__ = "paper_trading_runs"
     __table_args__ = (
-        CheckConstraint("status IN ('active', 'closed')", name="ck_paper_runs_status"),
+        CheckConstraint("status IN ('active', 'stopped')", name="ck_paper_runs_status"),
+        CheckConstraint(
+            "length(btrim(account_currency)) > 0", name="ck_paper_runs_currency"
+        ),
         CheckConstraint("initial_cash > 0", name="ck_paper_runs_initial_cash"),
         CheckConstraint("current_cash >= 0", name="ck_paper_runs_current_cash"),
         CheckConstraint(
@@ -44,9 +47,18 @@ class PaperTradingRunRecord(Base):
             name="ck_paper_runs_slippage_rate",
         ),
         CheckConstraint(
-            "(status = 'active' AND ended_at IS NULL) OR "
-            "(status = 'closed' AND ended_at IS NOT NULL)",
+            "(status = 'active' AND stopped_at IS NULL) OR "
+            "(status = 'stopped' AND stopped_at IS NOT NULL)",
             name="ck_paper_runs_lifecycle",
+        ),
+        CheckConstraint("configuration_version > 0", name="ck_paper_runs_version"),
+        CheckConstraint(
+            "predecessor_run_id IS NULL OR predecessor_run_id <> id",
+            name="ck_paper_runs_predecessor",
+        ),
+        CheckConstraint(
+            "stopped_at IS NULL OR stopped_at >= started_at",
+            name="ck_paper_runs_timestamps",
         ),
         Index(
             "uq_paper_runs_active_currency",
@@ -66,8 +78,8 @@ class PaperTradingRunRecord(Base):
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    reset_reason: Mapped[str | None] = mapped_column(String(512))
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stop_reason: Mapped[str | None] = mapped_column(String(512))
     predecessor_run_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("paper_trading_runs.id")
     )
@@ -78,6 +90,11 @@ class PaperPositionRecord(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('open', 'closed')", name="ck_paper_positions_status"
+        ),
+        CheckConstraint(
+            "length(btrim(asset)) > 0 AND length(btrim(provider)) > 0 AND "
+            "length(btrim(market_type)) > 0 AND length(btrim(interval)) > 0",
+            name="ck_paper_positions_identity",
         ),
         CheckConstraint(
             "quantity >= 0 AND average_entry_price > 0 AND "
@@ -91,6 +108,10 @@ class PaperPositionRecord(Base):
             "closed_at IS NOT NULL AND exit_price > 0 AND "
             "gross_realized_pnl IS NOT NULL AND net_realized_pnl IS NOT NULL)",
             name="ck_paper_positions_lifecycle",
+        ),
+        CheckConstraint(
+            "closed_at IS NULL OR closed_at >= opened_at",
+            name="ck_paper_positions_timestamps",
         ),
         Index(
             "uq_paper_positions_open_identity",
@@ -136,6 +157,11 @@ class PaperTradeRecord(Base):
     __table_args__ = (
         CheckConstraint("side IN ('buy', 'sell')", name="ck_paper_trades_side"),
         CheckConstraint(
+            "length(btrim(asset)) > 0 AND length(btrim(provider)) > 0 AND "
+            "length(btrim(market_type)) > 0 AND length(btrim(interval)) > 0",
+            name="ck_paper_trades_identity",
+        ),
+        CheckConstraint(
             "observed_market_price > 0 AND execution_price > 0 AND quantity > 0 AND "
             "executed_notional > 0 AND fee_amount >= 0",
             name="ck_paper_trades_amounts",
@@ -144,6 +170,11 @@ class PaperTradeRecord(Base):
             "fee_rate >= 0 AND fee_rate < 1 AND slippage_rate >= 0 AND "
             "slippage_rate < 1",
             name="ck_paper_trades_rates",
+        ),
+        CheckConstraint("configuration_version > 0", name="ck_paper_trades_version"),
+        CheckConstraint(
+            "(side = 'buy' AND cash_impact < 0) OR (side = 'sell' AND cash_impact > 0)",
+            name="ck_paper_trades_cash_direction",
         ),
         Index("uq_paper_trades_decision", "decision_snapshot_id", unique=True),
         Index("ix_paper_trades_run_executed", "run_id", "executed_at", "id"),
@@ -181,6 +212,7 @@ class PaperTradeRecord(Base):
         DateTime(timezone=True), nullable=False
     )
     configuration_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    equity_before: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
 
 
 def _run(record: PaperTradingRunRecord) -> PaperTradingRun:
@@ -194,8 +226,8 @@ def _run(record: PaperTradingRunRecord) -> PaperTradingRun:
         record.fee_rate,
         record.slippage_rate,
         record.started_at,
-        record.ended_at,
-        record.reset_reason,
+        record.stopped_at,
+        record.stop_reason,
         record.predecessor_run_id,
     )
 
@@ -233,6 +265,34 @@ async def get_active_run(
     return cast(PaperTradingRunRecord | None, await session.scalar(statement))
 
 
+async def get_run(
+    session: AsyncSession, *, run_id: UUID
+) -> PaperTradingRunRecord | None:
+    return cast(
+        PaperTradingRunRecord | None,
+        await session.scalar(
+            select(PaperTradingRunRecord).where(PaperTradingRunRecord.id == run_id)
+        ),
+    )
+
+
+async def list_runs(
+    session: AsyncSession, *, limit: int, offset: int
+) -> list[PaperTradingRun]:
+    records = (
+        await session.scalars(
+            select(PaperTradingRunRecord)
+            .order_by(
+                PaperTradingRunRecord.started_at.desc(),
+                PaperTradingRunRecord.id.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    return [_run(record) for record in records]
+
+
 async def create_run(
     session: AsyncSession,
     *,
@@ -251,8 +311,8 @@ async def create_run(
         fee_rate=configuration.fee_rate,
         slippage_rate=configuration.slippage_rate,
         started_at=started_at,
-        ended_at=None,
-        reset_reason=None,
+        stopped_at=None,
+        stop_reason=None,
         predecessor_run_id=predecessor_run_id,
     )
     session.add(record)
@@ -284,12 +344,19 @@ async def get_open_position(
 
 
 async def list_positions(
-    session: AsyncSession, *, run_id: UUID, status: PaperPositionStatus | None = None
+    session: AsyncSession,
+    *,
+    run_id: UUID,
+    status: PaperPositionStatus | None = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[PaperPosition]:
     statement = (
         select(PaperPositionRecord)
         .where(PaperPositionRecord.run_id == run_id)
-        .order_by(PaperPositionRecord.opened_at.desc(), PaperPositionRecord.id)
+        .order_by(PaperPositionRecord.opened_at.desc(), PaperPositionRecord.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     if status is not None:
         statement = statement.where(PaperPositionRecord.status == status.value)
