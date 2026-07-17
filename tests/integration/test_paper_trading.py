@@ -232,6 +232,9 @@ async def test_database_rejects_invalid_run_position_and_trade_rows(
     )
     assert isinstance(trade, PaperTradeRecord)
     await session.commit()
+    trade_id = trade.id
+    position_id = trade.position_id
+    run_id = run.id
 
     async def rejects(record: object, attribute: str, value: object) -> None:
         setattr(record, attribute, value)
@@ -239,40 +242,40 @@ async def test_database_rejects_invalid_run_position_and_trade_rows(
             await session.flush()
         await session.rollback()
 
-    persisted_trade = await session.get(PaperTradeRecord, trade.id)
+    persisted_trade = await session.get(PaperTradeRecord, trade_id)
     assert persisted_trade is not None
     await rejects(persisted_trade, "cash_impact", Decimal("1"))
-    persisted_trade = await session.get(PaperTradeRecord, trade.id)
+    persisted_trade = await session.get(PaperTradeRecord, trade_id)
     assert persisted_trade is not None
     persisted_trade.side = "sell"
     persisted_trade.cash_impact = Decimal("-1")
     with pytest.raises(IntegrityError):
         await session.flush()
     await session.rollback()
-    persisted_trade = await session.get(PaperTradeRecord, trade.id)
+    persisted_trade = await session.get(PaperTradeRecord, trade_id)
     assert persisted_trade is not None
     await rejects(persisted_trade, "asset", "")
-    persisted_trade = await session.get(PaperTradeRecord, trade.id)
+    persisted_trade = await session.get(PaperTradeRecord, trade_id)
     assert persisted_trade is not None
     await rejects(persisted_trade, "configuration_version", 0)
 
-    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    persisted_run = await session.get(PaperTradingRunRecord, run_id)
     assert persisted_run is not None
     await rejects(persisted_run, "account_currency", "")
-    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    persisted_run = await session.get(PaperTradingRunRecord, run_id)
     assert persisted_run is not None
     await rejects(persisted_run, "configuration_version", 0)
-    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    persisted_run = await session.get(PaperTradingRunRecord, run_id)
     assert persisted_run is not None
     await rejects(persisted_run, "status", "stopped")
-    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    persisted_run = await session.get(PaperTradingRunRecord, run_id)
     assert persisted_run is not None
     await rejects(persisted_run, "stopped_at", NOW + timedelta(hours=1))
-    persisted_run = await session.get(PaperTradingRunRecord, run.id)
+    persisted_run = await session.get(PaperTradingRunRecord, run_id)
     assert persisted_run is not None
     await rejects(persisted_run, "predecessor_run_id", persisted_run.id)
 
-    position = await session.get(PaperPositionRecord, trade.position_id)
+    position = await session.get(PaperPositionRecord, position_id)
     assert position is not None
     await rejects(position, "status", "closed")
 
