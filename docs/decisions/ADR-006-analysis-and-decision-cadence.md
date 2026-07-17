@@ -20,5 +20,4 @@ Decisions use only closed candles and persisted analytical data. Strategies must
 
 Each Decision may use up to six newly closed five-minute candles since the previous decision cycle. Scores may change between decision cycles without automatically producing a new Decision. The cadence must be configurable so future Strategies can be evaluated under different intervals.
 
-The MVP does not support multiple simultaneous candle intervals or per-Strategy decision cadences. This decision does not introduce Decision lifecycle states; MVP Decision values remain `BUY`, `SELL`, `CLOSE_POSITION`, and `NO_ACTION`.
-
+The MVP does not support multiple simultaneous candle intervals or per-Strategy decision cadences. This decision does not introduce Decision lifecycle states. Decision actions are `OPEN_POSITION`, `INCREASE_POSITION`, `SELL_PARTIAL`, `SELL_ALL`, and `NO_ACTION`; ADR-009 defines which actions the initial Strategy emits.

@@ -4,8 +4,8 @@ All features use Decimal arithmetic, Binance Spot five-minute candles, and versi
 
 | Feature | Formula | Inputs | First eligible candle | Intuition | Principal limitation |
 | --- | --- | --- | --- | --- | --- |
-| EMA 20 | SMA seed over 20 closes; then `EMA = (2 / 21) Ã— close + (19 / 21) Ã— prior EMA` | close | index 19 | Smoothed recent price level | Lagging and sensitive to the selected period |
-| EMA 50 | SMA seed over 50 closes; then `EMA = (2 / 51) Ã— close + (49 / 51) Ã— prior EMA` | close | index 49 | Slower price trend context | Responds slowly to regime changes |
+| EMA 20 | SMA seed over 20 closes; then `EMA = (2 / 21) x close + (19 / 21) x prior EMA` | close | index 19 | Smoothed recent price level | Lagging and sensitive to the selected period |
+| EMA 50 | SMA seed over 50 closes; then `EMA = (2 / 51) x close + (49 / 51) x prior EMA` | close | index 49 | Slower price trend context | Responds slowly to regime changes |
 | RSI 14 | Wilder averages of 14 close changes; `100 - 100 / (1 + average gain / average loss)` | close | index 14 | Balance of recent gains and losses | Extreme values do not guarantee reversal |
 | ATR 14 | Wilder average of true range, where true range includes intrabar range and gaps from the prior close | high, low, close | index 13 | Absolute price volatility | Not directional and scale-dependent |
 | Return 1 | `close[t] / close[t-1] - 1` | close | index 1 | One-candle fractional price change | No context beyond one interval |
