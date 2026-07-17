@@ -95,6 +95,17 @@ class DecisionSnapshotRecord(Base):
             name="ck_decisions_action_sizing",
         ),
         CheckConstraint(
+            "(action = 'open_position' AND NOT position_is_open AND "
+            "applied_rule = 'entry_threshold_met') OR "
+            "(action IN ('increase_position', 'sell_partial', 'sell_all') AND "
+            "position_is_open) OR "
+            "(action = 'no_action' AND NOT position_is_open AND "
+            "applied_rule = 'entry_threshold_not_met') OR "
+            "(action = 'no_action' AND position_is_open AND "
+            "applied_rule = 'open_position_retained')",
+            name="ck_decisions_action_state_rule",
+        ),
+        CheckConstraint(
             "length(btrim(applied_rule)) > 0", name="ck_decisions_applied_rule"
         ),
         CheckConstraint(
