@@ -1,0 +1,1 @@
+"""Persisted paper-trading simulation."""
