@@ -88,11 +88,15 @@ class DecisionSnapshot(BaseModel):
                 and self.applied_rule == "exit_threshold_breached"
             )
         elif self.action is StrategyAction.NO_ACTION:
+            expected_rule = (
+                "open_position_retained"
+                if self.position_is_open
+                else "entry_threshold_not_met"
+            )
             valid = (
                 self.requested_target_portfolio_percentage is None
                 and self.requested_position_percentage is None
-                and self.applied_rule
-                in {"entry_threshold_not_met", "open_position_retained"}
+                and self.applied_rule == expected_rule
             )
         else:
             valid = False
