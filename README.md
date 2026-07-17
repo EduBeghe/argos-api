@@ -251,3 +251,13 @@ make docker
 ```
 
 The API starts independently of PostgreSQL readiness. Its database health endpoint returns HTTP 503 while PostgreSQL is unavailable.
+
+### Paper Trading administration
+
+Start or reset the active simulated account without deleting prior experiments:
+
+```sh
+python -m app.jobs.reset_paper_account --initial-cash 10000 --reason "baseline before feature X"
+```
+
+The command parses money as `Decimal`, closes the active run, and creates a fresh run in one transaction. Paper state is read-only over `GET /paper/account`, `GET /paper/positions`, and `GET /paper/trades`. Reset remains CLI-only until authenticated mutation endpoints exist.

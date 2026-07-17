@@ -80,9 +80,11 @@ Snapshots allow the team to reconstruct why a decision was made and support debu
 
 ### Paper Trading
 
-Paper Trading is a virtual brokerage account that uses simulated money. It receives requested intent from the Decision Engine and later determines the executed asset quantity, execution price, notional, fees, simulated slippage, and resulting cash and position changes. Requested percentages are not executed quantities. Paper Trading manages virtual cash, holdings, open positions, average entry price, and realized and unrealized P&L. It never sends orders to a real exchange in the MVP.
+Paper Trading is a virtual brokerage account that uses simulated money. It receives requested intent from the Decision Engine and determines the executed asset quantity, execution price, notional, fees, simulated slippage, and resulting cash and position changes. Requested percentages are not executed quantities. Paper Trading manages versioned experiment runs, virtual cash, positions, immutable Trades, average entry price, and realized P&L. It never sends orders to a real exchange in the MVP.
 
-Illustrative example: a simulated account starts with USD 1,000 and buys 0.25 ETH at USD 2,000. The notional purchase is USD 500; a USD 1 fee and USD 1 simulated slippage cost leave USD 498 in virtual cash. Selling 0.25 ETH later at USD 2,100 produces USD 525 before costs. After another USD 1 fee and USD 1 slippage cost, the account ends with USD 1,021, a net simulated profit of USD 21. The USD 1 simulated slippage on each side is a simplified illustrative execution cost, not the final slippage model. These costs are illustrative; the fee and slippage models remain open decisions.
+Version 1 starts with 10,000 USDT by default, charges a 0.10% fee on executed notional, and applies 0.05% adverse slippage. In plain language, the simulation assumes a slightly worse execution price than the observed market price: buys cost more and sells receive less. Calculations use Decimal values quantized to 18 fractional digits with round-half-even. These are versioned simulation hypotheses, not guaranteed Binance execution costs.
+
+Resetting closes the active run and creates a linked successor without deleting historical Positions or Trades. The reusable reset use case is exposed only through an administrative CLI until authenticated mutation endpoints exist.
 
 ### Metrics
 
@@ -133,10 +135,6 @@ The following remain unresolved:
 
 - future Feature sets and Score models;
 - future Argos Score aggregation;
-- simulated fee model;
-- simulated slippage model;
-- initial Paper Account cash balance;
-- Paper Trading execution details;
 - stop-loss and take-profit rules;
 - future Strategy types;
 - calibrated confidence;
