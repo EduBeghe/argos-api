@@ -21,4 +21,3 @@ async def dashboard_overview(session: Session) -> DashboardOverviewResponse:
         )
     except PaperPortfolioValuationError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-

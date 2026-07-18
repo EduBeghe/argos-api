@@ -114,4 +114,3 @@ async def test_visible_non_ingested_catalog_card_does_not_affect_freshness() -> 
     assert result.system.instruments_total == 3
     assert result.system.instruments_fresh == 2
     assert result.system.market_data_fresh is True
-

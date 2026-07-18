@@ -179,4 +179,3 @@ async def build_dashboard_overview(
         paper=paper,
         instruments=cards,
     )
-

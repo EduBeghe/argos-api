@@ -132,4 +132,3 @@ async def get_open_positions_batch(
             )
         ).all()
     )
-

@@ -166,4 +166,3 @@ The following remain unresolved:
 ## Architectural Principle
 
 > Argos does not attempt to predict the future with certainty. It estimates probabilities using measurable evidence, records why every decision was made, and evaluates those decisions through simulated results.
-

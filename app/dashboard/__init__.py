@@ -1,2 +1,1 @@
 """Read-only dashboard composition."""
-

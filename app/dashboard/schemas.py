@@ -41,4 +41,3 @@ class DashboardOverviewResponse(BaseModel):
     system: DashboardSystemResponse
     paper: DashboardPaperResponse
     instruments: list[DashboardInstrumentResponse]
-
