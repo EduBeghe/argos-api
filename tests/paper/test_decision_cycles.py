@@ -68,4 +68,3 @@ def test_cycle_start_rejects_execution_before_boundary() -> None:
             boundary=datetime(2026, 7, 17, 12, 30, tzinfo=UTC),
             execution_time=datetime(2026, 7, 17, 12, 29, tzinfo=UTC),
         )
-

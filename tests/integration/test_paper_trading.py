@@ -1090,4 +1090,3 @@ async def test_paper_decision_cycle_database_constraints(session: AsyncSession) 
         )
         await session.flush()
     await session.rollback()
-

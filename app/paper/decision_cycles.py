@@ -333,4 +333,3 @@ async def list_cycles(
     if asset is not None:
         statement = statement.where(PaperDecisionCycleRecord.asset == asset.value)
     return list((await session.scalars(statement)).all())
-

@@ -131,4 +131,3 @@ def _result(cycle: PaperDecisionCycleRecord, *, skipped: bool) -> CycleResult:
         action=cycle.result,
         skipped=skipped,
     )
-
