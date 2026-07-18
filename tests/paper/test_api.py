@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.core.database.session import get_db_session
 from app.market.enums import Asset
 from app.paper.models import PaperRunStatus, PaperTradingRun
+from app.paper.portfolio import PaperPortfolioValuationError
 from main import app
 
 
@@ -49,6 +50,31 @@ def test_account_returns_active_run_and_404(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["account_currency"] == "USDT"
     assert missing.status_code == 404
+
+
+def test_portfolio_selects_run_and_maps_missing_mark_to_conflict(
+    client: TestClient,
+) -> None:
+    selected = AsyncMock()
+    selected.id = uuid4()
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with (
+            patch("app.paper.api.get_run", AsyncMock(return_value=selected)),
+            patch(
+                "app.paper.api.value_paper_run",
+                AsyncMock(side_effect=PaperPortfolioValuationError("mark missing")),
+            ) as valuation,
+        ):
+            response = client.get(f"/paper/portfolio?run_id={selected.id}")
+        with patch("app.paper.api.get_run", AsyncMock(return_value=None)):
+            missing = client.get(f"/paper/portfolio?run_id={uuid4()}")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 409
+    assert response.json() == {"detail": "mark missing"}
+    assert missing.status_code == 404
+    valuation.assert_awaited_once()
 
 
 def test_run_history_is_ordered_paginated_and_unknown_is_404(

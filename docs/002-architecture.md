@@ -8,16 +8,16 @@ The frontend is a responsive Angular application maintained in the separate `arg
 
 ```text
 External data source
-→ Ingestion
-→ Storage
-→ Feature Engine
-→ Scoring
-→ Decision Engine
-→ Decision Snapshot
-→ Paper Trading
-→ Metrics
-→ API
-→ Web
+â†’ Ingestion
+â†’ Storage
+â†’ Feature Engine
+â†’ Scoring
+â†’ Decision Engine
+â†’ Decision Snapshot
+â†’ Paper Trading
+â†’ Metrics
+â†’ API
+â†’ Web
 ```
 
 The analytical pipeline runs independently of its presentation layers. The API exposes system information and actions; the Web application visualizes them and supports user interaction.
@@ -57,9 +57,9 @@ The first persisted model is the deterministic `baseline_technical` version 1 sc
 Illustrative output:
 
 ```text
-technical: 0.65 — price is above the selected moving average
-momentum: 0.40 — recent returns are positive but weakening
-volatility: 0.25 — current volatility increases downside uncertainty
+technical: 0.65 â€” price is above the selected moving average
+momentum: 0.40 â€” recent returns are positive but weakening
+volatility: 0.25 â€” current volatility increases downside uncertainty
 ```
 
 The score ranges, formulas, and explanations above are illustrative rather than selected model definitions.
@@ -87,6 +87,8 @@ Version 1 starts with 10,000 USDT by default, charges a 0.10% fee on executed no
 Resetting administratively stops the active run and creates a linked successor without deleting or modifying historical Positions or Trades. A STOPPED run is not liquidated: an open Position remains historically open-at-stop, and only a simulated SELL_ALL closes a Position. Reset creates no synthetic Trade. Historical runs, Positions, and Trades are queryable by run identity.
 
 Before opening a Position, Paper Trading values every existing open Position with the latest eligible persisted closed-candle price at or before the Decision timestamp. It never substitutes entry price for current market evidence and fails closed when valuation evidence is missing. The persisted candles and immutable Decision timestamp make the valuation reproducible.
+
+The read-only Paper portfolio API values any active or historical run from persisted candles using the complete Position instrument identity. It reports each candle timestamp independently and defines `valued_at` as the UTC response-assembly time. Market value is quantity multiplied by mark price; cost basis includes entry notional and entry fees; unrealized P&L is market value minus cost basis; equity is current cash plus Position market values; and total P&L is equity minus initial cash. Version 1 does not estimate hypothetical exit fees or slippage. Configured MVP assets are not special cases in this calculation.
 
 Paper execution also enforces an experiment boundary: the Decision timestamp and execution timestamp must not predate the active run, and execution must not predate the Decision. A Decision created during a STOPPED predecessor run cannot execute against its successor. Timestamp eligibility is sufficient before the modules are wired; the wiring change will evaluate an explicit execution-context identity.
 

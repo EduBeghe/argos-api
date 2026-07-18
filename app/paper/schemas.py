@@ -96,3 +96,35 @@ class PaperDecisionCycleResponse(BaseModel):
     started_at: datetime
     completed_at: datetime | None
     status: str
+
+
+class ValuedPaperPositionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    position_id: UUID
+    asset: Asset
+    provider: Provider
+    market_type: MarketType
+    interval: Interval
+    quantity: Decimal
+    average_entry_price: Decimal
+    cost_basis: Decimal
+    mark_price: Decimal
+    market_value: Decimal
+    unrealized_pnl: Decimal
+    unrealized_return: Decimal | None
+    mark_candle_open_time: datetime
+
+
+class PaperPortfolioResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    run_id: UUID
+    status: str
+    account_currency: str
+    initial_cash: Decimal
+    current_cash: Decimal
+    positions_market_value: Decimal
+    equity: Decimal
+    total_pnl: Decimal
+    total_return: Decimal | None
+    valued_at: datetime
+    positions: tuple[ValuedPaperPositionResponse, ...]
