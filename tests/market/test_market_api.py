@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from app.core.database.session import get_db_session
 from app.features.models import FeatureName, MarketFeature
 from app.market.api import build_market_status
+from app.market.catalog import Instrument, MarketCatalogError
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.queries import MarketStatusAggregate
 from app.market.schemas import CandleOrder, MarketCandleQuery, MarketCandleResponse
@@ -244,6 +245,76 @@ def test_instruments_endpoint_is_static_ordered_and_complete(
         },
         "display_order": 1,
     }
+
+
+def test_market_status_uses_only_binance_ingestion_projection(
+    client: TestClient,
+) -> None:
+    btc = Instrument(
+        Asset.BTC_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )
+    query = AsyncMock(return_value=[])
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with (
+            patch(
+                "app.market.api.binance_spot_five_minute_ingestion_instruments",
+                return_value=(btc,),
+            ),
+            patch("app.market.api.get_market_status_aggregates", query),
+        ):
+            response = client.get("/market/status")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert [item["asset"] for item in response.json()] == ["BTC/USDT"]
+    query.assert_awaited_once_with(
+        session=ANY,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/market/candles?asset=BTC%2FUSDT&interval=5m",
+        "/market/features/latest?asset=BTC%2FUSDT&interval=5m",
+        "/market/scores/latest?asset=BTC%2FUSDT&interval=5m",
+        "/market/decisions/latest?asset=BTC%2FUSDT&interval=5m",
+    ],
+)
+def test_unconfigured_instrument_fails_before_database_query(
+    client: TestClient, path: str
+) -> None:
+    queries = {
+        "app.market.api.list_market_candles": AsyncMock(),
+        "app.market.api.get_latest_feature_snapshot": AsyncMock(),
+        "app.market.api.get_latest_market_score": AsyncMock(),
+        "app.market.api.get_latest_decision_snapshot": AsyncMock(),
+    }
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with (
+            patch(
+                "app.market.api.resolve_instrument",
+                side_effect=MarketCatalogError("instrument not configured"),
+            ),
+            patch(next(iter(queries)), next(iter(queries.values()))),
+            patch(list(queries)[1], list(queries.values())[1]),
+            patch(list(queries)[2], list(queries.values())[2]),
+            patch(list(queries)[3], list(queries.values())[3]),
+        ):
+            response = client.get(path)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 404
+    for query in queries.values():
+        query.assert_not_awaited()
 
 
 def test_latest_feature_endpoint_returns_exact_ema(client: TestClient) -> None:

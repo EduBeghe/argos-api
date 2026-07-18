@@ -101,7 +101,7 @@ async def test_run_commits_ingestion_then_features_and_closes_resources() -> Non
         patch.object(job, "configure_logging"),
         patch.object(
             job,
-            "enabled_ingestion_instruments",
+            "binance_spot_five_minute_ingestion_instruments",
             return_value=(
                 Instrument(
                     Asset.BTC_USDT,

@@ -118,14 +118,18 @@ curl "http://localhost:8000/market/instruments"
 An asset is Argos's canonical market identity; an instrument combines that asset
 with provider, market type, interval, provider symbol, presentation metadata,
 and enabled capabilities. The immutable in-code catalog is the MVP source of
-truth. Ingestion, feature/score calculation, and Decision jobs discover work
-through its capabilities, while the API exposes the same metadata for a
-data-driven frontend. Paper Trading capability is derived from Decision
+truth. The current argos-ingest job consumes only the validated Binance Spot
+five-minute projection; it fails before I/O if that projection is empty, mixed,
+duplicated, or incompatible. Feature/score calculation and Decision jobs
+discover work through their capabilities, while existing read endpoints resolve
+provider and market type from the same catalog. The API exposes the metadata for
+a data-driven frontend. Paper Trading capability is derived from Decision
 capability in the MVP.
 
 BTC/USDT and ETH/USDT are current configuration, not special application or
 frontend entities. SPY and Alpaca are outside the current MVP. A future equity
-source will require its own provider adapter/job and market-session rules, but
+source will require its own catalog projection, provider adapter/job, and
+market-session rules, but
 not symbol-specific UI components. The catalog can move to persistence without
 changing its read contract if instrument volume or dynamic administration later
 justifies it.

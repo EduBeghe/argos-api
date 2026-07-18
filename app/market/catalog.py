@@ -1,10 +1,17 @@
 from dataclasses import dataclass
+from enum import StrEnum
 
 from app.market.enums import Asset, Interval, MarketType, Provider
 
 
 class MarketCatalogError(ValueError):
     """Raised when the configured market instrument catalog is invalid."""
+
+
+class InstrumentCapability(StrEnum):
+    INGESTION = "ingestion"
+    SCORING = "scoring"
+    DECISION = "decision"
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,14 +137,36 @@ def market_instruments(
     return tuple(sorted(definitions, key=lambda item: item.display_order))
 
 
-def enabled_ingestion_instruments(
+def binance_spot_five_minute_ingestion_instruments(
     definitions: tuple[MarketInstrumentDefinition, ...] = MARKET_INSTRUMENTS,
 ) -> tuple[Instrument, ...]:
-    return tuple(
-        item.instrument
-        for item in market_instruments(definitions)
-        if item.ingestion_enabled
+    enabled = tuple(
+        item for item in market_instruments(definitions) if item.ingestion_enabled
     )
+    if not enabled:
+        raise MarketCatalogError(
+            "Binance Spot 5m ingestion requires at least one enabled instrument"
+        )
+    identities: set[Instrument] = set()
+    for definition in enabled:
+        if definition.provider is not Provider.BINANCE:
+            raise MarketCatalogError(
+                "Binance Spot 5m ingestion received an incompatible provider"
+            )
+        if definition.market_type is not MarketType.SPOT:
+            raise MarketCatalogError(
+                "Binance Spot 5m ingestion received an incompatible market type"
+            )
+        if definition.interval is not Interval.FIVE_MINUTES:
+            raise MarketCatalogError(
+                "Binance Spot 5m ingestion received an incompatible interval"
+            )
+        if definition.instrument in identities:
+            raise MarketCatalogError(
+                "Binance Spot 5m ingestion contains a duplicate instrument identity"
+            )
+        identities.add(definition.instrument)
+    return tuple(item.instrument for item in enabled)
 
 
 def enabled_scoring_instruments(
@@ -165,6 +194,29 @@ def provider_symbol(instrument: Instrument) -> str:
         if definition.instrument == instrument:
             return definition.provider_symbol
     raise MarketCatalogError("instrument is not configured in the market catalog")
+
+
+def resolve_instrument(
+    *,
+    asset: Asset,
+    interval: Interval,
+    capability: InstrumentCapability,
+    definitions: tuple[MarketInstrumentDefinition, ...] = MARKET_INSTRUMENTS,
+) -> MarketInstrumentDefinition:
+    for definition in definitions:
+        if definition.asset is not asset or definition.interval is not interval:
+            continue
+        enabled = {
+            InstrumentCapability.INGESTION: definition.ingestion_enabled,
+            InstrumentCapability.SCORING: definition.scoring_enabled,
+            InstrumentCapability.DECISION: definition.decision_enabled,
+        }[capability]
+        if enabled:
+            return definition
+    raise MarketCatalogError(
+        f"instrument is not configured for {capability.value}: "
+        f"{asset.value} {interval.value}"
+    )
 
 
 validate_catalog(MARKET_INSTRUMENTS)
