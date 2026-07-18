@@ -159,6 +159,34 @@ class SnapshotWriteResult:
     created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedPositionSnapshot:
+    position_id: UUID
+    asset: str
+    provider: str
+    market_type: str
+    interval: str
+    quantity: Decimal
+    average_entry_price: Decimal
+    cost_basis: Decimal
+    mark_price: Decimal
+    market_value: Decimal
+    unrealized_pnl: Decimal
+    unrealized_return: Decimal | None
+    mark_candle_open_time: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedPortfolioSnapshot:
+    initial_cash: Decimal
+    current_cash: Decimal
+    positions_market_value: Decimal
+    equity: Decimal
+    total_pnl: Decimal
+    total_return: Decimal | None
+    positions: tuple[PreparedPositionSnapshot, ...]
+
+
 async def persist_equity_snapshot(
     *,
     session: AsyncSession,
@@ -174,11 +202,14 @@ async def persist_equity_snapshot(
     valuation = await value_paper_run(
         session=session, run=run, valued_at=scheduled_boundary
     )
+    prepared = prepare_snapshot_values(valuation)
     snapshot_id = uuid4()
     inserted_id = await session.scalar(
         insert(PaperPortfolioSnapshotRecord)
         .values(
-            _parent_values(snapshot_id, run, valuation, scheduled_boundary, recorded_at)
+            _parent_values(
+                snapshot_id, run, valuation, prepared, scheduled_boundary, recorded_at
+            )
         )
         .on_conflict_do_nothing(constraint="uq_portfolio_snapshots_run_boundary")
         .returning(PaperPortfolioSnapshotRecord.id)
@@ -196,24 +227,20 @@ async def persist_equity_snapshot(
                 id=uuid4(),
                 portfolio_snapshot_id=snapshot_id,
                 position_id=position.position_id,
-                asset=position.asset.value,
-                provider=position.provider.value,
-                market_type=position.market_type.value,
-                interval=position.interval.value,
-                quantity=quantize_financial(position.quantity),
-                average_entry_price=quantize_financial(position.average_entry_price),
-                cost_basis=quantize_financial(position.cost_basis),
-                mark_price=quantize_financial(position.mark_price),
-                market_value=quantize_financial(position.market_value),
-                unrealized_pnl=quantize_financial(position.unrealized_pnl),
-                unrealized_return=(
-                    quantize_financial(position.unrealized_return)
-                    if position.unrealized_return is not None
-                    else None
-                ),
+                asset=position.asset,
+                provider=position.provider,
+                market_type=position.market_type,
+                interval=position.interval,
+                quantity=position.quantity,
+                average_entry_price=position.average_entry_price,
+                cost_basis=position.cost_basis,
+                mark_price=position.mark_price,
+                market_value=position.market_value,
+                unrealized_pnl=position.unrealized_pnl,
+                unrealized_return=position.unrealized_return,
                 mark_candle_open_time=position.mark_candle_open_time,
             )
-            for position in valuation.positions
+            for position in prepared.positions
         ]
     )
     await session.flush()
@@ -227,6 +254,7 @@ def _parent_values(
     snapshot_id: UUID,
     run: PaperTradingRunRecord,
     valuation: PaperPortfolioValuation,
+    prepared: PreparedPortfolioSnapshot,
     scheduled_boundary: datetime,
     recorded_at: datetime,
 ) -> dict[str, object]:
@@ -236,18 +264,66 @@ def _parent_values(
         "scheduled_boundary": scheduled_boundary,
         "recorded_at": recorded_at,
         "account_currency": valuation.account_currency,
-        "initial_cash": quantize_financial(valuation.initial_cash),
-        "current_cash": quantize_financial(valuation.current_cash),
-        "positions_market_value": quantize_financial(valuation.positions_market_value),
-        "equity": quantize_financial(valuation.equity),
-        "total_pnl": quantize_financial(valuation.total_pnl),
-        "total_return": (
-            quantize_financial(valuation.total_return)
-            if valuation.total_return is not None
-            else None
-        ),
+        "initial_cash": prepared.initial_cash,
+        "current_cash": prepared.current_cash,
+        "positions_market_value": prepared.positions_market_value,
+        "equity": prepared.equity,
+        "total_pnl": prepared.total_pnl,
+        "total_return": prepared.total_return,
         "configuration_version": run.configuration_version,
     }
+
+
+def prepare_snapshot_values(
+    valuation: PaperPortfolioValuation,
+) -> PreparedPortfolioSnapshot:
+    positions: list[PreparedPositionSnapshot] = []
+    for position in valuation.positions:
+        quantity = quantize_financial(position.quantity)
+        average_entry_price = quantize_financial(position.average_entry_price)
+        cost_basis = quantize_financial(position.cost_basis)
+        mark_price = quantize_financial(position.mark_price)
+        market_value = quantize_financial(quantity * mark_price)
+        unrealized_pnl = quantize_financial(market_value - cost_basis)
+        unrealized_return = (
+            quantize_financial(unrealized_pnl / cost_basis) if cost_basis > 0 else None
+        )
+        positions.append(
+            PreparedPositionSnapshot(
+                position_id=position.position_id,
+                asset=position.asset.value,
+                provider=position.provider.value,
+                market_type=position.market_type.value,
+                interval=position.interval.value,
+                quantity=quantity,
+                average_entry_price=average_entry_price,
+                cost_basis=cost_basis,
+                mark_price=mark_price,
+                market_value=market_value,
+                unrealized_pnl=unrealized_pnl,
+                unrealized_return=unrealized_return,
+                mark_candle_open_time=position.mark_candle_open_time,
+            )
+        )
+    initial_cash = quantize_financial(valuation.initial_cash)
+    current_cash = quantize_financial(valuation.current_cash)
+    positions_market_value = sum(
+        (position.market_value for position in positions), start=Decimal(0)
+    )
+    equity = quantize_financial(current_cash + positions_market_value)
+    total_pnl = quantize_financial(equity - initial_cash)
+    total_return = (
+        quantize_financial(total_pnl / initial_cash) if initial_cash > 0 else None
+    )
+    return PreparedPortfolioSnapshot(
+        initial_cash=initial_cash,
+        current_cash=current_cash,
+        positions_market_value=positions_market_value,
+        equity=equity,
+        total_pnl=total_pnl,
+        total_return=total_return,
+        positions=tuple(positions),
+    )
 
 
 async def get_equity_snapshot(

@@ -182,6 +182,7 @@ async def test_instrument_failure_rolls_back_without_undoing_success() -> None:
     btc_session = AsyncMock()
     eth_session = AsyncMock()
     failure = RuntimeError("BTC evidence unavailable")
+    persist_snapshot = AsyncMock()
     with (
         patch.object(job, "configure_logging"),
         patch.object(job, "create_database_engine", return_value=engine),
@@ -196,6 +197,7 @@ async def test_instrument_failure_rolls_back_without_undoing_success() -> None:
             AsyncMock(side_effect=[failure, result(Asset.ETH_USDT)]),
         ),
         patch.object(job.logger, "exception"),
+        patch.object(job, "persist_equity_snapshot", persist_snapshot),
         pytest.raises(ExceptionGroup),
     ):
         await job.run(clock=lambda: NOW, instruments=(BTC, ETH))
@@ -203,4 +205,5 @@ async def test_instrument_failure_rolls_back_without_undoing_success() -> None:
     btc_session.commit.assert_not_awaited()
     eth_session.commit.assert_awaited_once_with()
     eth_session.rollback.assert_not_awaited()
+    persist_snapshot.assert_not_awaited()
     engine.dispose.assert_awaited_once_with()
