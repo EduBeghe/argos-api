@@ -405,7 +405,27 @@ async def test_execution_rollback_restores_cash_position_and_trade(
     await session.rollback()
     await session.refresh(await session.get(PaperTradingRunRecord, run.id))
     persisted = await session.get(PaperTradingRunRecord, run.id)
-    assert persisted is not None and €]Ì¢Gß≤⁄Óù∆≠yﬂexperiment_boundary_rejection_leaves_no_mutation(
+    assert persisted is not None and persisted.current_cash == Decimal(
+        "10000.000000000000000000"
+    )
+    assert await session.scalar(select(PaperPositionRecord.id)) is None
+    assert await session.scalar(select(PaperTradeRecord.id)) is None
+
+
+@pytest.mark.parametrize(
+    ("run_start", "decision_offset", "executed_at", "message"),
+    [
+        (NOW, -10, NOW + timedelta(minutes=1), "predates the active"),
+        (NOW, 0, NOW + timedelta(minutes=1), "predates the Decision"),
+        (
+            NOW + timedelta(minutes=10),
+            10,
+            NOW + timedelta(minutes=9),
+            "predates the active run",
+        ),
+    ],
+)
+async def test_experiment_boundary_rejection_leaves_no_mutation(
     session: AsyncSession,
     run_start: datetime,
     decision_offset: int,
