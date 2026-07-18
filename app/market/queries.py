@@ -1,9 +1,11 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import asc, desc, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.models import MarketCandle
 from app.market.persistence import MarketCandleRecord, to_domain
@@ -12,9 +14,12 @@ from app.market.schemas import CandleOrder
 
 @dataclass(frozen=True, slots=True)
 class MarketStatusAggregate:
-    """Grouped persistence values for one asset."""
+    """Grouped persistence values for one complete instrument identity."""
 
     asset: Asset
+    provider: Provider
+    market_type: MarketType
+    interval: Interval
     candle_count: int
     latest_open_time: datetime
     latest_close_time: datetime
@@ -82,6 +87,9 @@ async def get_market_status_aggregates(
     return [
         MarketStatusAggregate(
             asset=Asset(asset),
+            provider=provider,
+            market_type=market_type,
+            interval=interval,
             candle_count=candle_count,
             latest_open_time=latest_open_time,
             latest_close_time=latest_close_time,
@@ -95,3 +103,70 @@ async def get_market_status_aggregates(
             latest_ingested_at,
         ) in rows
     ]
+
+
+async def get_market_status_aggregates_batch(
+    *, session: AsyncSession, instruments: Sequence[Instrument]
+) -> tuple[MarketStatusAggregate, ...]:
+    """Read status only for requested complete identities in one query."""
+
+    if not instruments:
+        return ()
+    identities = [
+        (
+            item.asset.value,
+            item.provider.value,
+            item.market_type.value,
+            item.interval.value,
+        )
+        for item in instruments
+    ]
+    statement = (
+        select(
+            MarketCandleRecord.asset,
+            MarketCandleRecord.provider,
+            MarketCandleRecord.market_type,
+            MarketCandleRecord.interval,
+            func.count(MarketCandleRecord.id),
+            func.max(MarketCandleRecord.open_time),
+            func.max(MarketCandleRecord.close_time),
+            func.max(MarketCandleRecord.ingested_at),
+        )
+        .where(
+            tuple_(
+                MarketCandleRecord.asset,
+                MarketCandleRecord.provider,
+                MarketCandleRecord.market_type,
+                MarketCandleRecord.interval,
+            ).in_(identities)
+        )
+        .group_by(
+            MarketCandleRecord.asset,
+            MarketCandleRecord.provider,
+            MarketCandleRecord.market_type,
+            MarketCandleRecord.interval,
+        )
+    )
+    rows = (await session.execute(statement)).tuples().all()
+    return tuple(
+        MarketStatusAggregate(
+            asset=Asset(asset),
+            provider=Provider(provider),
+            market_type=MarketType(market_type),
+            interval=Interval(interval),
+            candle_count=candle_count,
+            latest_open_time=latest_open_time,
+            latest_close_time=latest_close_time,
+            latest_ingested_at=latest_ingested_at,
+        )
+        for (
+            asset,
+            provider,
+            market_type,
+            interval,
+            candle_count,
+            latest_open_time,
+            latest_close_time,
+            latest_ingested_at,
+        ) in rows
+    )

@@ -16,16 +16,16 @@ from app.dashboard.schemas import (
     DashboardSystemResponse,
 )
 from app.decisions.schemas import DecisionSnapshotResponse
-from app.market.api import build_market_status
 from app.market.catalog import (
-    binance_spot_five_minute_ingestion_instruments,
     enabled_decision_instruments,
     enabled_scoring_instruments,
+    ingestion_enabled_instruments,
     market_instruments,
 )
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.market.queries import get_market_status_aggregates
+from app.market.queries import get_market_status_aggregates_batch
 from app.market.schemas import MarketInstrumentResponse
+from app.market.status import build_market_statuses
 from app.paper.config import DEFAULT_ACCOUNT_CURRENCY
 from app.paper.performance import calculate_performance, get_performance_points
 from app.paper.persistence import get_active_run, run_domain
@@ -68,14 +68,11 @@ async def build_dashboard_overview(
     *, session: AsyncSession, generated_at: datetime
 ) -> DashboardOverviewResponse:
     definitions = market_instruments()
-    ingestion = binance_spot_five_minute_ingestion_instruments()
-    first = ingestion[0]
-    statuses = build_market_status(
-        aggregates=await get_market_status_aggregates(
-            session=session,
-            provider=first.provider,
-            market_type=first.market_type,
-            interval=first.interval,
+    ingestion = ingestion_enabled_instruments()
+    status_by_identity = build_market_statuses(
+        instruments=ingestion,
+        aggregates=await get_market_status_aggregates_batch(
+            session=session, instruments=ingestion
         ),
         now=generated_at,
     )
@@ -95,12 +92,6 @@ async def build_dashboard_overview(
         if run is not None
         else ()
     )
-    ingestion_by_asset = {item.asset: item for item in ingestion}
-    status_by_identity = {
-        _identity(ingestion_by_asset[item.asset]): item
-        for item in statuses
-        if item.asset in ingestion_by_asset
-    }
     score_by_identity = {_identity(item): item for item in scores}
     decision_by_identity = {_identity(item): item for item in decisions}
     position_by_identity = {
@@ -147,7 +138,7 @@ async def build_dashboard_overview(
             DashboardInstrumentResponse(
                 instrument=MarketInstrumentResponse.from_definition(definition),
                 market_status=(
-                    status_by_identity.get(identity)
+                    status_by_identity.get(definition.instrument)
                     if definition.ingestion_enabled
                     else None
                 ),
@@ -168,11 +159,13 @@ async def build_dashboard_overview(
                 ),
             )
         )
-    fresh = sum(item.is_fresh for item in statuses)
+    fresh = sum(item.is_fresh for item in status_by_identity.values())
     return DashboardOverviewResponse(
         generated_at=generated_at,
         system=DashboardSystemResponse(
-            market_data_fresh=all(item.is_fresh for item in statuses),
+            market_data_fresh=all(
+                item.is_fresh for item in status_by_identity.values()
+            ),
             instruments_total=len(definitions),
             instruments_fresh=fresh,
         ),

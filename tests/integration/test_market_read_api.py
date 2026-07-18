@@ -8,9 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import get_settings
 from app.market.api import build_market_status
+from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord, to_record
-from app.market.queries import get_market_status_aggregates, list_market_candles
+from app.market.queries import (
+    get_market_status_aggregates,
+    get_market_status_aggregates_batch,
+    list_market_candles,
+)
 from app.market.schemas import CandleOrder
 from tests.market.factories import make_candle
 
@@ -112,3 +117,33 @@ async def test_grouped_status_supports_missing_asset_and_freshness(
     assert statuses[0].is_fresh is True
     assert statuses[1].candle_count == 0
     assert statuses[1].is_fresh is False
+
+
+async def test_batch_status_returns_only_requested_complete_identities(
+    session: AsyncSession,
+) -> None:
+    await insert_btc_candles(session)
+    btc = Instrument(
+        Asset.BTC_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )
+
+    aggregates = await get_market_status_aggregates_batch(
+        session=session, instruments=(btc,)
+    )
+
+    assert len(aggregates) == 1
+    aggregate = aggregates[0]
+    assert (
+        aggregate.asset,
+        aggregate.provider,
+        aggregate.market_type,
+        aggregate.interval,
+    ) == (
+        Asset.BTC_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )

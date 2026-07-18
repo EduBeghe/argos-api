@@ -1,4 +1,5 @@
-from datetime import UTC, datetime, timedelta
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,7 +11,6 @@ from app.decisions.schemas import DecisionSnapshotResponse
 from app.features.calculation import FEATURE_VERSION
 from app.features.persistence import get_latest_feature_snapshot
 from app.features.schemas import MarketFeatureResponse
-from app.ingestion.time_windows import latest_closed_five_minute_open_time
 from app.market.catalog import (
     InstrumentCapability,
     MarketCatalogError,
@@ -22,7 +22,7 @@ from app.market.catalog import (
 from app.market.enums import Asset, Interval
 from app.market.queries import (
     MarketStatusAggregate,
-    get_market_status_aggregates,
+    get_market_status_aggregates_batch,
     list_market_candles,
 )
 from app.market.schemas import (
@@ -31,6 +31,7 @@ from app.market.schemas import (
     MarketInstrumentResponse,
     MarketStatusResponse,
 )
+from app.market.status import build_market_statuses
 from app.scores.calculation import MODEL_NAME, MODEL_VERSION
 from app.scores.persistence import get_latest_market_score
 from app.scores.schemas import MarketScoreResponse
@@ -38,7 +39,6 @@ from app.scores.schemas import MarketScoreResponse
 router = APIRouter(prefix="/market", tags=["market"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 QueryDependency = Annotated[MarketCandleQuery, Query()]
-_UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @router.get(
@@ -88,58 +88,24 @@ async def market_status(session: SessionDependency) -> list[MarketStatusResponse
 
     now = datetime.now(UTC)
     instruments = binance_spot_five_minute_ingestion_instruments()
-    first = instruments[0]
-    aggregates = await get_market_status_aggregates(
-        session=session,
-        provider=first.provider,
-        market_type=first.market_type,
-        interval=first.interval,
+    aggregates = await get_market_status_aggregates_batch(
+        session=session, instruments=instruments
     )
     return build_market_status(aggregates=aggregates, now=now)
 
 
 def build_market_status(
-    *, aggregates: list[MarketStatusAggregate], now: datetime
+    *, aggregates: Sequence[MarketStatusAggregate], now: datetime
 ) -> list[MarketStatusResponse]:
     """Build ordered asset status from grouped persistence values and one UTC clock."""
 
-    expected_open_time = _UNIX_EPOCH + timedelta(
-        milliseconds=latest_closed_five_minute_open_time(now)
+    instruments = binance_spot_five_minute_ingestion_instruments()
+    statuses = build_market_statuses(
+        instruments=instruments,
+        aggregates=tuple(aggregates),
+        now=now,
     )
-    by_asset = {aggregate.asset: aggregate for aggregate in aggregates}
-    statuses: list[MarketStatusResponse] = []
-    for asset in tuple(
-        item.asset for item in binance_spot_five_minute_ingestion_instruments()
-    ):
-        aggregate = by_asset.get(asset)
-        if aggregate is None:
-            statuses.append(
-                MarketStatusResponse(
-                    asset=asset,
-                    interval=Interval.FIVE_MINUTES,
-                    candle_count=0,
-                    latest_open_time=None,
-                    latest_close_time=None,
-                    latest_ingested_at=None,
-                    age_seconds=None,
-                    is_fresh=False,
-                )
-            )
-            continue
-        age = now - aggregate.latest_close_time
-        statuses.append(
-            MarketStatusResponse(
-                asset=asset,
-                interval=Interval.FIVE_MINUTES,
-                candle_count=aggregate.candle_count,
-                latest_open_time=aggregate.latest_open_time,
-                latest_close_time=aggregate.latest_close_time,
-                latest_ingested_at=aggregate.latest_ingested_at,
-                age_seconds=age.days * 86_400 + age.seconds,
-                is_fresh=aggregate.latest_open_time >= expected_open_time,
-            )
-        )
-    return statuses
+    return [statuses[instrument] for instrument in instruments]
 
 
 @router.get(
