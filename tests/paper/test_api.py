@@ -169,3 +169,53 @@ def test_decision_cycle_api_filters_paginates_and_returns_404(
         offset=2,
     )
     assert missing.status_code == 404
+
+
+def equity_snapshot() -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        run_id=uuid4(),
+        scheduled_boundary=datetime(2026, 7, 18, 12, 30, tzinfo=UTC),
+        recorded_at=datetime(2026, 7, 18, 12, 32, tzinfo=UTC),
+        account_currency="USDT",
+        initial_cash=Decimal("10000"),
+        current_cash=Decimal("9000"),
+        positions_market_value=Decimal("1200"),
+        equity=Decimal("10200"),
+        total_pnl=Decimal("200"),
+        total_return=Decimal("0.02"),
+        configuration_version=1,
+        positions=[],
+    )
+
+
+def test_equity_snapshot_api_filters_orders_and_returns_404(
+    client: TestClient,
+) -> None:
+    snapshot = equity_snapshot()
+    selected = AsyncMock()
+    selected.id = snapshot.run_id
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        query = AsyncMock(return_value=[snapshot])
+        with (
+            patch("app.paper.api.get_run", AsyncMock(return_value=selected)),
+            patch("app.paper.api.list_equity_snapshots", query),
+        ):
+            response = client.get(
+                f"/paper/equity-snapshots?run_id={snapshot.run_id}"
+                "&limit=1&offset=2&order=asc"
+            )
+        with patch("app.paper.api.get_equity_snapshot", AsyncMock(return_value=None)):
+            missing = client.get(f"/paper/equity-snapshots/{uuid4()}")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200 and response.json()[0]["equity"] == "10200"
+    query.assert_awaited_once_with(
+        session=ANY,
+        run_id=snapshot.run_id,
+        limit=1,
+        offset=2,
+        order="asc",
+    )
+    assert missing.status_code == 404

@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +9,7 @@ from app.core.database.session import get_db_session
 from app.market.enums import Asset
 from app.paper.config import DEFAULT_ACCOUNT_CURRENCY
 from app.paper.decision_cycles import get_cycle, list_cycles
+from app.paper.equity_snapshots import get_equity_snapshot, list_equity_snapshots
 from app.paper.models import PaperPositionStatus
 from app.paper.persistence import (
     PaperTradingRunRecord,
@@ -24,6 +25,7 @@ from app.paper.schemas import (
     PaperAccountResponse,
     PaperDecisionCycleResponse,
     PaperPortfolioResponse,
+    PaperPortfolioSnapshotResponse,
     PaperPositionResponse,
     PaperTradeResponse,
 )
@@ -70,6 +72,37 @@ async def paper_portfolio(
     except PaperPortfolioValuationError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return PaperPortfolioResponse.model_validate(valuation)
+
+
+@router.get("/equity-snapshots", response_model=list[PaperPortfolioSnapshotResponse])
+async def paper_equity_snapshots(
+    session: Session,
+    run_id: Annotated[UUID | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    order: Annotated[Literal["asc", "desc"], Query()] = "desc",
+) -> list[PaperPortfolioSnapshotResponse]:
+    run = await _selected_run(session, run_id)
+    records = await list_equity_snapshots(
+        session=session,
+        run_id=run.id,
+        limit=limit,
+        offset=offset,
+        order=order,
+    )
+    return [PaperPortfolioSnapshotResponse.model_validate(record) for record in records]
+
+
+@router.get(
+    "/equity-snapshots/{snapshot_id}", response_model=PaperPortfolioSnapshotResponse
+)
+async def paper_equity_snapshot(
+    snapshot_id: UUID, session: Session
+) -> PaperPortfolioSnapshotResponse:
+    record = await get_equity_snapshot(session, snapshot_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Paper equity snapshot not found")
+    return PaperPortfolioSnapshotResponse.model_validate(record)
 
 
 @router.get("/runs", response_model=list[PaperAccountResponse])
