@@ -15,6 +15,7 @@ from app.paper.decision_cycles import (
     claim_cycle,
     get_boundary_score_evidence,
     get_cycle_by_identity,
+    validate_cycle_start,
 )
 from app.paper.execution import execute_decision
 from app.paper.models import NoTrade
@@ -46,6 +47,7 @@ async def run_instrument_cycle(
     boundary: datetime,
     execution_time: datetime,
 ) -> CycleResult:
+    validate_cycle_start(boundary=boundary, execution_time=execution_time)
     run = await get_active_run(session, currency=DEFAULT_ACCOUNT_CURRENCY, lock=True)
     if run is None:
         raise PaperExecutionError("active Paper Trading run not found")
@@ -129,3 +131,4 @@ def _result(cycle: PaperDecisionCycleRecord, *, skipped: bool) -> CycleResult:
         action=cycle.result,
         skipped=skipped,
     )
+

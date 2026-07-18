@@ -31,6 +31,7 @@ from app.strategies.baseline_long_only import (
 )
 
 MAX_EVIDENCE_AGE = timedelta(minutes=10)
+MAX_CYCLE_START_DELAY = timedelta(minutes=10)
 
 
 class DecisionCycleStatus(StrEnum):
@@ -44,6 +45,10 @@ class DecisionCycleError(RuntimeError):
 
 class DecisionEvidenceUnavailableError(DecisionCycleError):
     """Raised when the boundary has no eligible fresh score evidence."""
+
+
+class DecisionCycleStartDelayError(DecisionCycleError):
+    """Raised when a Decision Cycle starts outside its execution window."""
 
 
 class PaperDecisionCycleRecord(Base):
@@ -63,16 +68,29 @@ class PaperDecisionCycleRecord(Base):
             name="ck_paper_cycles_identity",
         ),
         CheckConstraint(
-            "completed_at IS NULL OR completed_at >= started_at",
+            "started_at >= scheduled_boundary AND "
+            "(completed_at IS NULL OR completed_at >= started_at)",
             name="ck_paper_cycles_timestamps",
         ),
         CheckConstraint(
-            "(status = 'processing' AND completed_at IS NULL AND result IS NULL) OR "
-            "(status = 'completed' AND completed_at IS NOT NULL AND "
-            "result IS NOT NULL AND source_score_id IS NOT NULL AND "
-            "decision_snapshot_id IS NOT NULL)",
+            "result IS NULL OR result IN ('open_position', 'sell_all', 'no_action')",
+            name="ck_paper_cycles_result",
+        ),
+        CheckConstraint(
+            "(status = 'processing' AND completed_at IS NULL AND result IS NULL AND "
+            "source_score_id IS NULL AND decision_snapshot_id IS NULL AND "
+            "paper_trade_id IS NULL) OR (status = 'completed' AND "
+            "completed_at IS NOT NULL AND result IS NOT NULL AND "
+            "source_score_id IS NOT NULL AND decision_snapshot_id IS NOT NULL AND "
+            "((result = 'no_action' AND paper_trade_id IS NULL) OR "
+            "(result IN ('open_position', 'sell_all') AND "
+            "paper_trade_id IS NOT NULL)))",
             name="ck_paper_cycles_lifecycle",
         ),
+        UniqueConstraint(
+            "decision_snapshot_id", name="uq_paper_cycles_decision_snapshot"
+        ),
+        UniqueConstraint("paper_trade_id", name="uq_paper_cycles_paper_trade"),
         UniqueConstraint(
             "paper_run_id",
             "asset",
@@ -146,6 +164,20 @@ def latest_completed_boundary(moment: datetime) -> datetime:
     utc = moment.astimezone(UTC)
     minute = 30 if utc.minute >= 30 else 0
     return utc.replace(minute=minute, second=0, microsecond=0)
+
+
+def validate_cycle_start(*, boundary: datetime, execution_time: datetime) -> None:
+    if boundary.tzinfo is None or execution_time.tzinfo is None:
+        raise ValueError("boundary and execution time must be timezone-aware")
+    delay = execution_time.astimezone(UTC) - boundary.astimezone(UTC)
+    if delay < timedelta(0):
+        raise DecisionCycleStartDelayError(
+            "execution time must not precede the scheduled boundary"
+        )
+    if delay > MAX_CYCLE_START_DELAY:
+        raise DecisionCycleStartDelayError(
+            "Decision Cycle start exceeds the 10-minute maximum delay"
+        )
 
 
 async def claim_cycle(
@@ -301,3 +333,4 @@ async def list_cycles(
     if asset is not None:
         statement = statement.where(PaperDecisionCycleRecord.asset == asset.value)
     return list((await session.scalars(statement)).all())
+

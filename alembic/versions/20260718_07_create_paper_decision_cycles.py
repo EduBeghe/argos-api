@@ -68,16 +68,29 @@ def upgrade() -> None:
             name="ck_paper_cycles_identity",
         ),
         sa.CheckConstraint(
-            "completed_at IS NULL OR completed_at >= started_at",
+            "started_at >= scheduled_boundary AND "
+            "(completed_at IS NULL OR completed_at >= started_at)",
             name="ck_paper_cycles_timestamps",
         ),
         sa.CheckConstraint(
-            "(status = 'processing' AND completed_at IS NULL AND result IS NULL) OR "
-            "(status = 'completed' AND completed_at IS NOT NULL AND "
-            "result IS NOT NULL AND source_score_id IS NOT NULL AND "
-            "decision_snapshot_id IS NOT NULL)",
+            "result IS NULL OR result IN ('open_position', 'sell_all', 'no_action')",
+            name="ck_paper_cycles_result",
+        ),
+        sa.CheckConstraint(
+            "(status = 'processing' AND completed_at IS NULL AND result IS NULL AND "
+            "source_score_id IS NULL AND decision_snapshot_id IS NULL AND "
+            "paper_trade_id IS NULL) OR (status = 'completed' AND "
+            "completed_at IS NOT NULL AND result IS NOT NULL AND "
+            "source_score_id IS NOT NULL AND decision_snapshot_id IS NOT NULL AND "
+            "((result = 'no_action' AND paper_trade_id IS NULL) OR "
+            "(result IN ('open_position', 'sell_all') AND "
+            "paper_trade_id IS NOT NULL)))",
             name="ck_paper_cycles_lifecycle",
         ),
+        sa.UniqueConstraint(
+            "decision_snapshot_id", name="uq_paper_cycles_decision_snapshot"
+        ),
+        sa.UniqueConstraint("paper_trade_id", name="uq_paper_cycles_paper_trade"),
         sa.UniqueConstraint(
             "paper_run_id",
             "asset",
@@ -100,3 +113,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("paper_decision_cycles")
+
