@@ -18,13 +18,12 @@ from app.ingestion.orchestration import (
     ClosedCandleIngestionResult,
     ingest_latest_closed_klines,
 )
-from app.market.enums import Asset, Interval
+from app.market.catalog import binance_spot_five_minute_ingestion_instruments
+from app.market.enums import Interval
 from app.scores.calculation import ScoreCalculationResult
 from app.scores.orchestration import calculate_all_market_scores
 
 JOB_NAME = "ingest_closed_candles"
-ASSETS = (Asset.BTC_USDT, Asset.ETH_USDT)
-
 logger = logging.getLogger(__name__)
 
 
@@ -63,11 +62,12 @@ async def run(
             BinanceClient(resolved_settings, transport=transport) as client,
         ):
             now = clock()
+            ingestion_instruments = binance_spot_five_minute_ingestion_instruments()
             try:
                 ingestion = await ingest_latest_closed_klines(
                     session=session,
                     client=client,
-                    assets=ASSETS,
+                    assets=tuple(item.asset for item in ingestion_instruments),
                     interval=Interval.FIVE_MINUTES,
                     now=now,
                     limit=resolved_settings.binance_ingestion_limit,

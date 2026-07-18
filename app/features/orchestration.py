@@ -3,9 +3,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.calculation import FeatureCalculationResult, calculate_market_features
-from app.market.enums import Asset, Interval, MarketType, Provider
-
-FEATURE_ASSETS = (Asset.BTC_USDT, Asset.ETH_USDT)
+from app.market.catalog import enabled_scoring_instruments
 
 
 async def calculate_all_market_features(
@@ -14,14 +12,14 @@ async def calculate_all_market_features(
     """Stage EMA 20 for both MVP assets without managing the transaction."""
 
     results: list[FeatureCalculationResult] = []
-    for asset in FEATURE_ASSETS:
+    for instrument in enabled_scoring_instruments():
         results.append(
             await calculate_market_features(
                 session=session,
-                asset=asset,
-                provider=Provider.BINANCE,
-                market_type=MarketType.SPOT,
-                interval=Interval.FIVE_MINUTES,
+                asset=instrument.asset,
+                provider=instrument.provider,
+                market_type=instrument.market_type,
+                interval=instrument.interval,
                 calculated_at=calculated_at,
             )
         )

@@ -2,10 +2,8 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.catalog import enabled_scoring_instruments
 from app.scores.calculation import ScoreCalculationResult, calculate_market_scores
-
-SCORE_ASSETS = (Asset.BTC_USDT, Asset.ETH_USDT)
 
 
 async def calculate_all_market_scores(
@@ -15,12 +13,12 @@ async def calculate_all_market_scores(
         [
             await calculate_market_scores(
                 session=session,
-                asset=asset,
-                provider=Provider.BINANCE,
-                market_type=MarketType.SPOT,
-                interval=Interval.FIVE_MINUTES,
+                asset=instrument.asset,
+                provider=instrument.provider,
+                market_type=instrument.market_type,
+                interval=instrument.interval,
                 calculated_at=calculated_at,
             )
-            for asset in SCORE_ASSETS
+            for instrument in enabled_scoring_instruments()
         ]
     )

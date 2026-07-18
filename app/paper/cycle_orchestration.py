@@ -5,12 +5,12 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.decisions.generation import generate_decision_from_evidence
+from app.market.catalog import Instrument
 from app.paper.calculation import PaperExecutionError
 from app.paper.config import DEFAULT_ACCOUNT_CURRENCY
 from app.paper.decision_cycles import (
     DecisionCycleError,
     DecisionCycleStatus,
-    Instrument,
     PaperDecisionCycleRecord,
     claim_cycle,
     get_boundary_score_evidence,

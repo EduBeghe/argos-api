@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.decisions.generation import PortfolioState, generate_decision_from_evidence
 from app.decisions.models import DecisionSnapshot
 from app.decisions.persistence import DecisionSnapshotRecord, ScoreEvidence
+from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord, to_record
 from app.paper.calculation import PaperExecutionError
@@ -21,7 +22,6 @@ from app.paper.cycle_orchestration import run_instrument_cycle
 from app.paper.decision_cycles import (
     DecisionCycleStartDelayError,
     DecisionEvidenceUnavailableError,
-    Instrument,
     PaperDecisionCycleRecord,
     get_boundary_score_evidence,
 )

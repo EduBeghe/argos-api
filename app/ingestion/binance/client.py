@@ -12,12 +12,8 @@ from app.ingestion.binance.errors import (
     BinanceTransportError,
 )
 from app.ingestion.binance.types import BinanceKlineResponse
-from app.market.enums import Asset, Interval
-
-_ASSET_SYMBOLS: dict[Asset, str] = {
-    Asset.BTC_USDT: "BTCUSDT",
-    Asset.ETH_USDT: "ETHUSDT",
-}
+from app.market.catalog import Instrument, provider_symbol
+from app.market.enums import Asset, Interval, MarketType, Provider
 
 
 class BinanceClient:
@@ -52,7 +48,14 @@ class BinanceClient:
 
         self._validate_request(start_time=start_time, end_time=end_time, limit=limit)
         params: dict[str, str | int] = {
-            "symbol": _ASSET_SYMBOLS[asset],
+            "symbol": provider_symbol(
+                Instrument(
+                    asset,
+                    Provider.BINANCE,
+                    MarketType.SPOT,
+                    interval,
+                )
+            ),
             "interval": interval.value,
         }
         if start_time is not None:

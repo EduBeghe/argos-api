@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import cast
@@ -21,7 +20,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database.base import Base
 from app.decisions.persistence import DecisionSnapshotRecord, ScoreEvidence
-from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.catalog import Instrument
+from app.market.enums import Asset
 from app.market.persistence import MarketCandleRecord
 from app.paper.persistence import PaperTradeRecord, PaperTradingRunRecord
 from app.scores.persistence import MarketScoreRecord
@@ -138,24 +138,6 @@ class PaperDecisionCycleRecord(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(16), nullable=False)
-
-
-@dataclass(frozen=True, slots=True)
-class Instrument:
-    asset: Asset
-    provider: Provider
-    market_type: MarketType
-    interval: Interval
-
-
-MVP_INSTRUMENTS = (
-    Instrument(
-        Asset.BTC_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
-    ),
-    Instrument(
-        Asset.ETH_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
-    ),
-)
 
 
 def latest_completed_boundary(moment: datetime) -> datetime:
