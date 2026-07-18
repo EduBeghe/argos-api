@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
+from app.market.enums import Asset
 from app.paper.config import DEFAULT_ACCOUNT_CURRENCY
+from app.paper.decision_cycles import get_cycle, list_cycles
 from app.paper.models import PaperPositionStatus
 from app.paper.persistence import (
     PaperTradingRunRecord,
@@ -18,6 +20,7 @@ from app.paper.persistence import (
 )
 from app.paper.schemas import (
     PaperAccountResponse,
+    PaperDecisionCycleResponse,
     PaperPositionResponse,
     PaperTradeResponse,
 )
@@ -105,3 +108,31 @@ async def paper_trades(
             session, run_id=run.id, limit=limit, offset=offset
         )
     ]
+
+
+@router.get("/decision-cycles", response_model=list[PaperDecisionCycleResponse])
+async def paper_decision_cycles(
+    session: Session,
+    run_id: Annotated[UUID | None, Query()] = None,
+    asset: Annotated[Asset | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[PaperDecisionCycleResponse]:
+    records = await list_cycles(
+        session=session,
+        run_id=run_id,
+        asset=asset,
+        limit=limit,
+        offset=offset,
+    )
+    return [PaperDecisionCycleResponse.model_validate(record) for record in records]
+
+
+@router.get("/decision-cycles/{cycle_id}", response_model=PaperDecisionCycleResponse)
+async def paper_decision_cycle(
+    cycle_id: UUID, session: Session
+) -> PaperDecisionCycleResponse:
+    record = await get_cycle(session, cycle_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Paper Decision Cycle not found")
+    return PaperDecisionCycleResponse.model_validate(record)

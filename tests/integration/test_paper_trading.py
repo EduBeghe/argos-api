@@ -17,6 +17,13 @@ from app.decisions.persistence import DecisionSnapshotRecord, ScoreEvidence
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord, to_record
 from app.paper.calculation import PaperExecutionError
+from app.paper.cycle_orchestration import run_instrument_cycle
+from app.paper.decision_cycles import (
+    DecisionEvidenceUnavailableError,
+    Instrument,
+    PaperDecisionCycleRecord,
+    get_boundary_score_evidence,
+)
 from app.paper.execution import execute_decision
 from app.paper.models import PaperPositionStatus, PaperRunStatus
 from app.paper.persistence import (
@@ -57,6 +64,7 @@ async def session() -> AsyncIterator[AsyncSession]:
 
 async def _clear(session: AsyncSession) -> None:
     for record in (
+        PaperDecisionCycleRecord,
         PaperTradeRecord,
         PaperPositionRecord,
         PaperTradingRunRecord,
@@ -70,6 +78,29 @@ async def _clear(session: AsyncSession) -> None:
         )
     )
     await session.commit()
+
+
+async def _cycle_evidence(
+    session: AsyncSession,
+    *,
+    asset: Asset,
+    score_value: Decimal,
+    boundary: datetime,
+    close_offset: timedelta = timedelta(microseconds=-1000),
+) -> None:
+    open_time = boundary - timedelta(minutes=5)
+    candle = make_candle(
+        asset=asset,
+        open_time=open_time,
+        close_time=boundary + close_offset,
+        ingested_at=PAPER_CANDLE_MARKER,
+    )
+    session.add(to_record(candle))
+    await session.flush()
+    score = make_score(overall_score=score_value).model_copy(
+        update={"id": uuid4(), "asset": asset, "candle_open_time": open_time}
+    )
+    assert await insert_market_scores(session, [score]) == 1
 
 
 async def _decision(
@@ -600,3 +631,151 @@ async def test_historical_queries_return_stopped_run_positions_trades_and_pages(
     assert historical is not None and historical.status == "stopped"
     assert len(positions) == 1 and positions[0].status == PaperPositionStatus.OPEN
     assert len(trades) == 1 and trades[0].id == trade.id
+
+
+async def test_boundary_evidence_rejects_future_missing_and_stale_scores(
+    session: AsyncSession,
+) -> None:
+    instrument = Instrument(
+        Asset.BTC_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )
+    boundary = NOW + timedelta(minutes=30)
+    with pytest.raises(DecisionEvidenceUnavailableError, match="not found"):
+        await get_boundary_score_evidence(
+            session=session,
+            instrument=instrument,
+            boundary=boundary,
+            run_started_at=NOW,
+        )
+    await _cycle_evidence(
+        session,
+        asset=Asset.BTC_USDT,
+        score_value=Decimal("0.60"),
+        boundary=boundary + timedelta(minutes=30),
+    )
+    with pytest.raises(DecisionEvidenceUnavailableError, match="not found"):
+        await get_boundary_score_evidence(
+            session=session,
+            instrument=instrument,
+            boundary=boundary,
+            run_started_at=NOW,
+        )
+    await session.rollback()
+    await _cycle_evidence(
+        session,
+        asset=Asset.BTC_USDT,
+        score_value=Decimal("0.60"),
+        boundary=boundary - timedelta(minutes=15),
+    )
+    with pytest.raises(DecisionEvidenceUnavailableError, match="stale"):
+        await get_boundary_score_evidence(
+            session=session,
+            instrument=instrument,
+            boundary=boundary,
+            run_started_at=NOW,
+        )
+
+
+async def test_decision_cycle_open_retry_and_no_action_are_auditable(
+    session: AsyncSession,
+) -> None:
+    await reset_paper_account(session=session, started_at=NOW)
+    boundary = NOW + timedelta(minutes=30)
+    btc = Instrument(
+        Asset.BTC_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )
+    eth = Instrument(
+        Asset.ETH_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )
+    await _cycle_evidence(
+        session,
+        asset=Asset.BTC_USDT,
+        score_value=Decimal("0.60"),
+        boundary=boundary,
+    )
+    await _cycle_evidence(
+        session,
+        asset=Asset.ETH_USDT,
+        score_value=Decimal("0.30"),
+        boundary=boundary,
+    )
+    opened = await run_instrument_cycle(
+        session=session,
+        instrument=btc,
+        boundary=boundary,
+        execution_time=boundary + timedelta(minutes=2),
+    )
+    no_action = await run_instrument_cycle(
+        session=session,
+        instrument=eth,
+        boundary=boundary,
+        execution_time=boundary + timedelta(minutes=2),
+    )
+    await session.commit()
+    retry = await run_instrument_cycle(
+        session=session,
+        instrument=btc,
+        boundary=boundary,
+        execution_time=boundary + timedelta(minutes=3),
+    )
+    assert opened.trade_id is not None and opened.action == "open_position"
+    assert no_action.trade_id is None and no_action.action == "no_action"
+    assert retry.skipped is True and retry.cycle_id == opened.cycle_id
+    assert len((await session.scalars(select(PaperDecisionCycleRecord.id))).all()) == 2
+
+
+async def test_concurrent_cycle_claim_executes_once(session: AsyncSession) -> None:
+    run = await reset_paper_account(session=session, started_at=NOW)
+    boundary = NOW + timedelta(minutes=30)
+    instrument = Instrument(
+        Asset.BTC_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )
+    await _cycle_evidence(
+        session,
+        asset=Asset.BTC_USDT,
+        score_value=Decimal("0.60"),
+        boundary=boundary,
+    )
+    await session.commit()
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def attempt() -> object:
+        async with factory() as concurrent_session:
+            result = await run_instrument_cycle(
+                session=concurrent_session,
+                instrument=instrument,
+                boundary=boundary,
+                execution_time=boundary + timedelta(minutes=2),
+            )
+            await concurrent_session.commit()
+            return result
+
+    outcomes = await asyncio.gather(attempt(), attempt(), return_exceptions=True)
+    assert all(not isinstance(outcome, BaseException) for outcome in outcomes)
+    async with factory() as verification:
+        assert (
+            len((await verification.scalars(select(PaperDecisionCycleRecord.id))).all())
+            == 1
+        )
+        assert len((await verification.scalars(select(PaperTradeRecord.id))).all()) == 1
+        assert (
+            len((await verification.scalars(select(PaperPositionRecord.id))).all()) == 1
+        )
+        persisted_run = await verification.get(PaperTradingRunRecord, run.id)
+        trade = await verification.scalar(select(PaperTradeRecord))
+        assert persisted_run is not None and trade is not None
+        assert persisted_run.current_cash == Decimal("10000") + trade.cash_impact
+    await engine.dispose()
