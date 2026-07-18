@@ -360,4 +360,3 @@ async def test_concurrent_persistence_creates_one_complete_snapshot(
         complete = await get_equity_snapshot(verification, parents[0])
         assert complete is not None and len(complete.positions) == 1
     await engine.dispose()
-
