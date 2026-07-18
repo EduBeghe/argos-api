@@ -405,27 +405,7 @@ async def test_execution_rollback_restores_cash_position_and_trade(
     await session.rollback()
     await session.refresh(await session.get(PaperTradingRunRecord, run.id))
     persisted = await session.get(PaperTradingRunRecord, run.id)
-    assert persisted is not None and persisted.current_cash == Decimal(
-        "10000.000000000000000000"
-    )
-    assert await session.scalar(select(PaperPositionRecord.id)) is None
-    assert await session.scalar(select(PaperTradeRecord.id)) is None
-
-
-@pytest.mark.parametrize(
-    ("run_start", "decision_offset", "executed_at", "message"),
-    [
-        (NOW, -10, NOW + timedelta(minutes=1), "predates the active"),
-        (NOW, 0, NOW + timedelta(minutes=1), "predates the Decision"),
-        (
-            NOW + timedelta(minutes=10),
-            10,
-            NOW + timedelta(minutes=9),
-            "predates the active run",
-        ),
-    ],
-)
-async def test_experiment_boundary_rejection_leaves_no_mutation(
+    assert persisted is not None and Û]í¢G§²ÚîÆ­yßexperiment_boundary_rejection_leaves_no_mutation(
     session: AsyncSession,
     run_start: datetime,
     decision_offset: int,
@@ -779,3 +759,78 @@ async def test_concurrent_cycle_claim_executes_once(session: AsyncSession) -> No
         assert persisted_run is not None and trade is not None
         assert persisted_run.current_cash == Decimal("10000") + trade.cash_impact
     await engine.dispose()
+
+
+async def test_failed_cycle_claim_rolls_back_and_retry_recovers(
+    session: AsyncSession,
+) -> None:
+    await reset_paper_account(session=session, started_at=NOW)
+    await session.commit()
+    boundary = NOW + timedelta(minutes=30)
+    instrument = Instrument(
+        Asset.BTC_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )
+    with pytest.raises(DecisionEvidenceUnavailableError):
+        await run_instrument_cycle(
+            session=session,
+            instrument=instrument,
+            boundary=boundary,
+            execution_time=boundary + timedelta(minutes=2),
+        )
+    await session.rollback()
+    assert await session.scalar(select(PaperDecisionCycleRecord.id)) is None
+    await _cycle_evidence(
+        session,
+        asset=Asset.BTC_USDT,
+        score_value=Decimal("0.60"),
+        boundary=boundary,
+    )
+    recovered = await run_instrument_cycle(
+        session=session,
+        instrument=instrument,
+        boundary=boundary,
+        execution_time=boundary + timedelta(minutes=3),
+    )
+    assert recovered.action == "open_position"
+
+
+async def test_following_cycle_executes_sell_all(session: AsyncSession) -> None:
+    await reset_paper_account(session=session, started_at=NOW)
+    instrument = Instrument(
+        Asset.BTC_USDT,
+        Provider.BINANCE,
+        MarketType.SPOT,
+        Interval.FIVE_MINUTES,
+    )
+    open_boundary = NOW + timedelta(minutes=30)
+    await _cycle_evidence(
+        session,
+        asset=Asset.BTC_USDT,
+        score_value=Decimal("0.60"),
+        boundary=open_boundary,
+    )
+    opened = await run_instrument_cycle(
+        session=session,
+        instrument=instrument,
+        boundary=open_boundary,
+        execution_time=open_boundary + timedelta(minutes=2),
+    )
+    await session.commit()
+    sell_boundary = open_boundary + timedelta(minutes=30)
+    await _cycle_evidence(
+        session,
+        asset=Asset.BTC_USDT,
+        score_value=Decimal("0.19"),
+        boundary=sell_boundary,
+    )
+    sold = await run_instrument_cycle(
+        session=session,
+        instrument=instrument,
+        boundary=sell_boundary,
+        execution_time=sell_boundary + timedelta(minutes=2),
+    )
+    assert opened.action == "open_position" and opened.trade_id is not None
+    assert sold.action == "sell_all" and sold.trade_id is not None
