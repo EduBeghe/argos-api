@@ -75,3 +75,24 @@ class PaperTradeResponse(BaseModel):
     @classmethod
     def from_record(cls, record: PaperTradeRecord) -> "PaperTradeResponse":
         return cls.model_validate(record)
+
+
+class PaperDecisionCycleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    paper_run_id: UUID
+    asset: Asset
+    provider: Provider
+    market_type: MarketType
+    interval: Interval
+    strategy_name: str
+    strategy_version: int
+    configuration_version: int
+    scheduled_boundary: datetime
+    source_score_id: UUID | None
+    decision_snapshot_id: UUID | None
+    paper_trade_id: UUID | None
+    result: str | None
+    started_at: datetime
+    completed_at: datetime | None
+    status: str

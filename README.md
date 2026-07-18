@@ -177,11 +177,12 @@ Railway one-shot command is:
 python -m app.jobs.generate_market_decisions
 ```
 
-It is intended to run every 30 minutes and contains no internal scheduler. It
-currently fails closed because no persisted Paper Position source exists; the
-Railway decision service must not be enabled until that real portfolio-state
-adapter is available. It never defaults `position_is_open` to false and never
-infers execution from an earlier Decision.
+It runs one persisted Paper Decision Cycle for each configured instrument and
+contains no internal scheduler. The external Railway cron is `2,32 * * * *`:
+minute 02 evaluates the completed :00 UTC boundary and minute 32 evaluates :30.
+This delay allows the separate five-minute ingestion job to persist closed-candle
+Features and Scores first. It never defaults `position_is_open` to false and
+never infers execution from an earlier Decision.
 
 Persisted Decision Snapshots retain the source Score, market evidence, supplied
 position state, Strategy and configuration versions, requested sizing, applied
@@ -226,6 +227,17 @@ The external platform should invoke it once every five minutes, shortly after a
 five-minute UTC boundary. The overlap window and PostgreSQL natural uniqueness
 make repeated or overlapping invocations idempotent; this is not an exactly-once
 scheduling guarantee. Argos contains no internal scheduler or infinite loop.
+
+Run Decision generation and Paper execution as a separate one-shot process:
+
+```sh
+python -m app.jobs.generate_market_decisions
+```
+
+Each instrument has an independently committed cycle. PostgreSQL uniqueness
+makes completed retries and overlapping invocations no-ops; this is not an
+exactly-once scheduling claim. `NO_ACTION` is a completed auditable cycle without
+a Trade. The job contacts no provider or exchange.
 
 Use `/health` for API liveness and `/health/database` for PostgreSQL readiness.
 Neither endpoint contacts Binance or exposes connection details.
