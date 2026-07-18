@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.core.database.session import get_db_session
 from app.market.enums import Asset
 from app.paper.models import PaperRunStatus, PaperTradingRun
+from app.paper.performance import EquityPoint
 from app.paper.portfolio import PaperPortfolioValuationError
 from main import app
 
@@ -75,6 +76,34 @@ def test_portfolio_selects_run_and_maps_missing_mark_to_conflict(
     assert response.json() == {"detail": "mark missing"}
     assert missing.status_code == 404
     valuation.assert_awaited_once()
+
+
+def test_performance_uses_selected_run_and_persisted_points(
+    client: TestClient,
+) -> None:
+    domain_run = run(status=PaperRunStatus.STOPPED)
+    selected = SimpleNamespace(
+        id=domain_run.id,
+        status=domain_run.status.value,
+        account_currency=domain_run.account_currency,
+    )
+    boundary = datetime(2026, 7, 17, 12, 30, tzinfo=UTC)
+    query = AsyncMock(return_value=(EquityPoint(boundary, Decimal("10100")),))
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with (
+            patch("app.paper.api.get_run", AsyncMock(return_value=selected)),
+            patch("app.paper.api.run_domain", return_value=domain_run),
+            patch("app.paper.api.get_performance_points", query),
+        ):
+            response = client.get(f"/paper/performance?run_id={domain_run.id}")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()["status"] == "stopped"
+    assert response.json()["latest_equity"] == "10100.000000000000000000"
+    assert Decimal(response.json()["current_drawdown"]) == 0
+    query.assert_awaited_once_with(ANY, run_id=domain_run.id)
 
 
 def test_run_history_is_ordered_paginated_and_unknown_is_404(
