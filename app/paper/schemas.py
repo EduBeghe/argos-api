@@ -128,3 +128,38 @@ class PaperPortfolioResponse(BaseModel):
     total_return: Decimal | None
     valued_at: datetime
     positions: tuple[ValuedPaperPositionResponse, ...]
+
+
+class PaperPositionSnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    position_id: UUID
+    asset: Asset
+    provider: Provider
+    market_type: MarketType
+    interval: Interval
+    quantity: Decimal
+    average_entry_price: Decimal
+    cost_basis: Decimal
+    mark_price: Decimal
+    market_value: Decimal
+    unrealized_pnl: Decimal
+    unrealized_return: Decimal | None
+    mark_candle_open_time: datetime
+
+
+class PaperPortfolioSnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    run_id: UUID
+    scheduled_boundary: datetime
+    recorded_at: datetime
+    account_currency: str
+    initial_cash: Decimal
+    current_cash: Decimal
+    positions_market_value: Decimal
+    equity: Decimal
+    total_pnl: Decimal
+    total_return: Decimal | None
+    configuration_version: int
+    positions: list[PaperPositionSnapshotResponse]

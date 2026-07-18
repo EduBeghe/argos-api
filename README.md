@@ -222,6 +222,28 @@ evidence fails explicitly. Unrealized P&L does not deduct hypothetical exit fees
 or slippage in version 1. BTC/USDT and ETH/USDT are current MVP configuration,
 not special cases in the valuation algorithm.
 
+After every successfully completed 30-minute Decision boundary, `argos-decide`
+persists one immutable equity snapshot for the Paper Run. The snapshot records
+cash, Position value, equity, P&L, return, and relational detail for every open
+Position. `scheduled_boundary` is the market boundary being valued;
+`recorded_at` is when the snapshot was persisted. Marks use only compatible
+persisted candles closed at or before the boundary.
+
+```sh
+curl "http://localhost:8000/paper/equity-snapshots"
+curl "http://localhost:8000/paper/equity-snapshots?run_id=<uuid>&order=asc"
+curl "http://localhost:8000/paper/equity-snapshots/<snapshot-id>"
+```
+
+Snapshots are unique by run and boundary, so retries are idempotent. Instrument
+cycles retain their independent commits; if any cycle fails, no aggregate
+snapshot is created. Snapshot persistence uses its own atomic transaction and a
+failure does not undo completed cycles, but it does fail the job for a later
+retry. The formulas match the live read-only valuation and do not estimate
+hypothetical exit fees or slippage. All instruments in a run must currently be
+valuable in its account currency; explicit multi-currency conversion is future
+work. Configured BTC and ETH instruments are not special cases.
+
 ## Production deployment
 
 Provide `DATABASE_URL` and review the production values for `BINANCE_BASE_URL`,

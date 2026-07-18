@@ -8,6 +8,7 @@ from alembic import context
 from app.core.config import get_settings
 from app.core.database.base import Base
 from app.market import persistence  # noqa: F401
+from app.paper import equity_snapshots  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

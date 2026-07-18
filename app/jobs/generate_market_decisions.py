@@ -2,6 +2,9 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.database.engine import create_database_engine
@@ -13,6 +16,8 @@ from app.paper.decision_cycles import (
     Instrument,
     latest_completed_boundary,
 )
+from app.paper.equity_snapshots import SnapshotWriteResult, persist_equity_snapshot
+from app.paper.persistence import get_run
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +77,18 @@ async def run(
                     )
         if failures:
             raise ExceptionGroup("one or more Paper Decision Cycles failed", failures)
+        if results:
+            run_ids = {result.run_id for result in results}
+            if len(run_ids) != 1:
+                raise RuntimeError(
+                    "Paper Decision Cycles completed across different Paper runs"
+                )
+            await _persist_snapshot(
+                factory=factory,
+                run_id=run_ids.pop(),
+                boundary=boundary,
+                recorded_at=clock(),
+            )
         return tuple(results)
     finally:
         await engine.dispose()
@@ -90,6 +107,51 @@ def _fields(instrument: Instrument, result: CycleResult) -> dict[str, object]:
         "decision_snapshot_id": str(result.decision_snapshot_id),
         "trade_id": str(result.trade_id) if result.trade_id else None,
         "status": "skipped" if result.skipped else "completed",
+    }
+
+
+async def _persist_snapshot(
+    *,
+    factory: async_sessionmaker[AsyncSession],
+    run_id: UUID,
+    boundary: datetime,
+    recorded_at: datetime,
+) -> None:
+    async with factory() as session:
+        try:
+            run = await get_run(session, run_id=run_id)
+            if run is None:
+                raise RuntimeError("Paper Trading run not found for equity snapshot")
+            result = await persist_equity_snapshot(
+                session=session,
+                run=run,
+                scheduled_boundary=boundary,
+                recorded_at=recorded_at,
+            )
+            await session.commit()
+        except Exception as error:
+            try:
+                await session.rollback()
+            except Exception as rollback_error:
+                error.add_note(f"Snapshot rollback also failed: {rollback_error!r}")
+            raise
+    logger.info(
+        "Paper portfolio snapshot persisted",
+        extra={"structured_fields": _snapshot_fields(result)},
+    )
+
+
+def _snapshot_fields(result: SnapshotWriteResult) -> dict[str, object]:
+    snapshot = result.snapshot
+    return {
+        "run_id": str(snapshot.run_id),
+        "snapshot_id": str(snapshot.id),
+        "scheduled_boundary": snapshot.scheduled_boundary.isoformat(),
+        "recorded_at": snapshot.recorded_at.isoformat(),
+        "positions_count": len(snapshot.positions),
+        "equity": str(snapshot.equity),
+        "total_pnl": str(snapshot.total_pnl),
+        "status": "created" if result.created else "existing",
     }
 
 
