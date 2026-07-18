@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -18,9 +19,11 @@ from app.paper.persistence import (
     list_trades,
     run_domain,
 )
+from app.paper.portfolio import PaperPortfolioValuationError, value_paper_run
 from app.paper.schemas import (
     PaperAccountResponse,
     PaperDecisionCycleResponse,
+    PaperPortfolioResponse,
     PaperPositionResponse,
     PaperTradeResponse,
 )
@@ -52,6 +55,21 @@ async def _selected_run(
 @router.get("/account", response_model=PaperAccountResponse)
 async def paper_account(session: Session) -> PaperAccountResponse:
     return PaperAccountResponse.from_domain(run_domain(await _active(session)))
+
+
+@router.get("/portfolio", response_model=PaperPortfolioResponse)
+async def paper_portfolio(
+    session: Session,
+    run_id: Annotated[UUID | None, Query()] = None,
+) -> PaperPortfolioResponse:
+    run = await _selected_run(session, run_id)
+    try:
+        valuation = await value_paper_run(
+            session=session, run=run, valued_at=datetime.now(UTC)
+        )
+    except PaperPortfolioValuationError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return PaperPortfolioResponse.model_validate(valuation)
 
 
 @router.get("/runs", response_model=list[PaperAccountResponse])

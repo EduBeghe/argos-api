@@ -39,7 +39,9 @@ from app.paper.persistence import (
 )
 from app.paper.portfolio import (
     PaperPortfolioUnavailableError,
+    PaperPortfolioValuationError,
     PersistedPaperPortfolioStateSource,
+    value_paper_run,
 )
 from app.paper.reset import reset_paper_account
 from app.scores.persistence import MarketScoreRecord, insert_market_scores
@@ -601,6 +603,127 @@ async def test_portfolio_source_uses_only_active_run(session: AsyncSession) -> N
             market_type=MarketType.SPOT,
             interval=Interval.FIVE_MINUTES,
         )
+
+
+async def test_read_only_portfolio_valuation_uses_latest_exact_persisted_mark(
+    session: AsyncSession,
+) -> None:
+    run = await reset_paper_account(session=session, started_at=NOW)
+    position = PaperPositionRecord(
+        id=uuid4(),
+        run_id=run.id,
+        asset=Asset.BTC_USDT.value,
+        provider=Provider.BINANCE.value,
+        market_type=MarketType.SPOT.value,
+        interval=Interval.FIVE_MINUTES.value,
+        status=PaperPositionStatus.OPEN.value,
+        quantity=Decimal("2"),
+        average_entry_price=Decimal("100"),
+        total_entry_notional=Decimal("200"),
+        accumulated_entry_fees=Decimal("1"),
+        opened_at=NOW,
+        closed_at=None,
+        exit_price=None,
+        gross_realized_pnl=None,
+        net_realized_pnl=None,
+    )
+    session.add(position)
+    for asset, open_time, close_price in (
+        (Asset.BTC_USDT, NOW, Decimal("110")),
+        (Asset.BTC_USDT, NOW + timedelta(minutes=5), Decimal("120")),
+        (Asset.ETH_USDT, NOW + timedelta(minutes=10), Decimal("999")),
+    ):
+        session.add(
+            to_record(
+                make_candle(
+                    asset=asset,
+                    open_time=open_time,
+                    close_time=open_time + timedelta(minutes=5),
+                    open_price=close_price,
+                    high_price=close_price,
+                    low_price=close_price,
+                    close_price=close_price,
+                    ingested_at=PAPER_CANDLE_MARKER,
+                )
+            )
+        )
+    await session.commit()
+    before = (
+        await session.scalar(
+            select(PaperTradingRunRecord.current_cash).where(
+                PaperTradingRunRecord.id == run.id
+            )
+        ),
+        await session.scalar(
+            select(PaperPositionRecord.quantity).where(
+                PaperPositionRecord.id == position.id
+            )
+        ),
+        await session.scalar(select(PaperTradeRecord.id)),
+    )
+    persisted_run = await get_run(session, run_id=run.id)
+    assert persisted_run is not None
+    valuation = await value_paper_run(
+        session=session,
+        run=persisted_run,
+        valued_at=NOW + timedelta(minutes=20),
+    )
+    after = (
+        await session.scalar(
+            select(PaperTradingRunRecord.current_cash).where(
+                PaperTradingRunRecord.id == run.id
+            )
+        ),
+        await session.scalar(
+            select(PaperPositionRecord.quantity).where(
+                PaperPositionRecord.id == position.id
+            )
+        ),
+        await session.scalar(select(PaperTradeRecord.id)),
+    )
+    valued = valuation.positions[0]
+    assert valued.mark_price == Decimal("120.000000000000000000")
+    assert valued.mark_candle_open_time == NOW + timedelta(minutes=5)
+    assert valued.cost_basis == Decimal("201.000000000000000000")
+    assert valued.market_value == Decimal("240.000000000000000000")
+    assert before == after
+
+
+async def test_historical_portfolio_and_incompatible_identity_fail_closed(
+    session: AsyncSession,
+) -> None:
+    historical = await reset_paper_account(session=session, started_at=NOW)
+    position = PaperPositionRecord(
+        id=uuid4(),
+        run_id=historical.id,
+        asset=Asset.BTC_USDT.value,
+        provider=Provider.BINANCE.value,
+        market_type=MarketType.SPOT.value,
+        interval=Interval.FIVE_MINUTES.value,
+        status=PaperPositionStatus.OPEN.value,
+        quantity=Decimal("1"),
+        average_entry_price=Decimal("100"),
+        total_entry_notional=Decimal("100"),
+        accumulated_entry_fees=Decimal("0"),
+        opened_at=NOW,
+        closed_at=None,
+        exit_price=None,
+        gross_realized_pnl=None,
+        net_realized_pnl=None,
+    )
+    session.add(position)
+    session.add(to_record(make_candle(ingested_at=PAPER_CANDLE_MARKER)))
+    await session.commit()
+    await reset_paper_account(session=session, started_at=NOW + timedelta(hours=1))
+    await session.commit()
+    persisted = await get_run(session, run_id=historical.id)
+    assert persisted is not None and persisted.status == PaperRunStatus.STOPPED.value
+    valuation = await value_paper_run(session=session, run=persisted, valued_at=NOW)
+    assert valuation.run_id == historical.id and len(valuation.positions) == 1
+    position.provider = "different-provider"
+    await session.flush()
+    with pytest.raises(PaperPortfolioValuationError, match="different-provider"):
+        await value_paper_run(session=session, run=persisted, valued_at=NOW)
 
 
 async def test_historical_queries_return_stopped_run_positions_trades_and_pages(

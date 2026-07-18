@@ -197,6 +197,31 @@ Read the latest persisted snapshot without triggering generation:
 curl "http://localhost:8000/market/decisions/latest?asset=BTC%2FUSDT&interval=5m"
 ```
 
+### Paper portfolio valuation
+
+Read the active Paper Trading portfolio, or select a historical run, without
+creating Decisions or Trades:
+
+```sh
+curl "http://localhost:8000/paper/portfolio"
+curl "http://localhost:8000/paper/portfolio?run_id=<uuid>"
+```
+
+The response is a read-only mark-to-market valuation from persisted closed
+candles. For each open Position, `cost_basis` is entry notional plus accumulated
+entry fees, `market_value` is quantity times the latest compatible candle close,
+and `unrealized_pnl` is market value minus cost basis. Portfolio `equity` is
+current cash plus all Position market values; `total_pnl` is equity minus initial
+cash. Returns divide their corresponding P&L by a positive cost basis or initial
+cash and are otherwise null.
+
+`valued_at` is the UTC time when Argos assembled the response. Each Position also
+reports the exact `mark_candle_open_time`, so prices from different candle times
+are never presented as simultaneous evidence. Missing compatible persisted
+evidence fails explicitly. Unrealized P&L does not deduct hypothetical exit fees
+or slippage in version 1. BTC/USDT and ETH/USDT are current MVP configuration,
+not special cases in the valuation algorithm.
+
 ## Production deployment
 
 Provide `DATABASE_URL` and review the production values for `BINANCE_BASE_URL`,

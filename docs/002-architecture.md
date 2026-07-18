@@ -88,6 +88,8 @@ Resetting administratively stops the active run and creates a linked successor w
 
 Before opening a Position, Paper Trading values every existing open Position with the latest eligible persisted closed-candle price at or before the Decision timestamp. It never substitutes entry price for current market evidence and fails closed when valuation evidence is missing. The persisted candles and immutable Decision timestamp make the valuation reproducible.
 
+The read-only Paper portfolio API values any active or historical run from persisted candles using the complete Position instrument identity. It reports each candle timestamp independently and defines `valued_at` as the UTC response-assembly time. Market value is quantity multiplied by mark price; cost basis includes entry notional and entry fees; unrealized P&L is market value minus cost basis; equity is current cash plus Position market values; and total P&L is equity minus initial cash. Version 1 does not estimate hypothetical exit fees or slippage. Configured MVP assets are not special cases in this calculation.
+
 Paper execution also enforces an experiment boundary: the Decision timestamp and execution timestamp must not predate the active run, and execution must not predate the Decision. A Decision created during a STOPPED predecessor run cannot execute against its successor. Timestamp eligibility is sufficient before the modules are wired; the wiring change will evaluate an explicit execution-context identity.
 
 The reusable reset use case is exposed only through an administrative CLI until authenticated mutation endpoints exist. A future authenticated frontend reset must call the same use case.
