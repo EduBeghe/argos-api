@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.market.catalog import MarketInstrumentDefinition
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.models import MarketCandle
 
@@ -91,3 +92,49 @@ class MarketStatusResponse(BaseModel):
     latest_ingested_at: datetime | None
     age_seconds: int | None
     is_fresh: bool
+
+
+class MarketInstrumentCapabilities(BaseModel):
+    ingestion: bool
+    scoring: bool
+    decision: bool
+    paper_trading: bool
+
+
+class MarketInstrumentResponse(BaseModel):
+    asset: Asset
+    display_symbol: str
+    display_name: str
+    asset_class: str
+    base_currency: str
+    quote_currency: str
+    provider: Provider
+    provider_symbol: str
+    market_type: MarketType
+    interval: Interval
+    capabilities: MarketInstrumentCapabilities
+    display_order: int
+
+    @classmethod
+    def from_definition(
+        cls, definition: MarketInstrumentDefinition
+    ) -> "MarketInstrumentResponse":
+        return cls(
+            asset=definition.asset,
+            display_symbol=definition.display_symbol,
+            display_name=definition.display_name,
+            asset_class=definition.asset_class,
+            base_currency=definition.base_currency,
+            quote_currency=definition.quote_currency,
+            provider=definition.provider,
+            provider_symbol=definition.provider_symbol,
+            market_type=definition.market_type,
+            interval=definition.interval,
+            capabilities=MarketInstrumentCapabilities(
+                ingestion=definition.ingestion_enabled,
+                scoring=definition.scoring_enabled,
+                decision=definition.decision_enabled,
+                paper_trading=definition.decision_enabled,
+            ),
+            display_order=definition.display_order,
+        )

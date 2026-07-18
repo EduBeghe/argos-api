@@ -217,6 +217,35 @@ def test_market_status_endpoint_and_openapi(client: TestClient) -> None:
     assert "/market/status" in paths
 
 
+def test_instruments_endpoint_is_static_ordered_and_complete(
+    client: TestClient,
+) -> None:
+    response = client.get("/market/instruments")
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["asset"] for item in payload] == ["BTC/USDT", "ETH/USDT"]
+    assert [item["display_order"] for item in payload] == [1, 2]
+    assert payload[0] == {
+        "asset": "BTC/USDT",
+        "display_symbol": "BTC/USDT",
+        "display_name": "Bitcoin / Tether",
+        "asset_class": "crypto",
+        "base_currency": "BTC",
+        "quote_currency": "USDT",
+        "provider": "binance",
+        "provider_symbol": "BTCUSDT",
+        "market_type": "spot",
+        "interval": "5m",
+        "capabilities": {
+            "ingestion": True,
+            "scoring": True,
+            "decision": True,
+            "paper_trading": True,
+        },
+        "display_order": 1,
+    }
+
+
 def test_latest_feature_endpoint_returns_exact_ema(client: TestClient) -> None:
     feature_time = datetime(2026, 7, 15, 12, tzinfo=UTC)
     feature = MarketFeature(

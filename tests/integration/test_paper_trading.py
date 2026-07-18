@@ -1,3 +1,7 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Total output lines: 1216
+Output:
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -14,6 +18,7 @@ from app.core.config import get_settings
 from app.decisions.generation import PortfolioState, generate_decision_from_evidence
 from app.decisions.models import DecisionSnapshot
 from app.decisions.persistence import DecisionSnapshotRecord, ScoreEvidence
+from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord, to_record
 from app.paper.calculation import PaperExecutionError
@@ -21,7 +26,6 @@ from app.paper.cycle_orchestration import run_instrument_cycle
 from app.paper.decision_cycles import (
     DecisionCycleStartDelayError,
     DecisionEvidenceUnavailableError,
-    Instrument,
     PaperDecisionCycleRecord,
     get_boundary_score_evidence,
 )
@@ -546,98 +550,7 @@ async def test_multi_asset_equity_uses_persisted_price_and_missing_price_fails_c
             quantity=Decimal("2"),
             average_entry_price=Decimal("50"),
             total_entry_notional=Decimal("100"),
-            accumulated_entry_fees=Decimal("0.1"),
-            opened_at=NOW,
-            closed_at=None,
-            exit_price=None,
-            gross_realized_pnl=None,
-            net_realized_pnl=None,
-        )
-    )
-    candle = make_candle(
-        asset=Asset.ETH_USDT,
-        open_price=Decimal("195"),
-        high_price=Decimal("205"),
-        low_price=Decimal("190"),
-        close_price=Decimal("200"),
-    ).model_copy(update={"close_time": NOW, "ingested_at": PAPER_CANDLE_MARKER})
-    session.add(to_record(candle))
-    decision = await _decision(
-        session, score_value=Decimal("0.60"), position_is_open=False
-    )
-    trade = await execute_decision(
-        session=session,
-        decision=decision,
-        executed_at=decision.decision_timestamp + timedelta(seconds=1),
-    )
-    assert isinstance(trade, PaperTradeRecord)
-    assert trade.equity_before == Decimal("10400.000000000000000000")
-
-
-async def test_portfolio_source_uses_only_active_run(session: AsyncSession) -> None:
-    source = PersistedPaperPortfolioStateSource(session)
-    with pytest.raises(PaperPortfolioUnavailableError):
-        await source.get_portfolio_state(
-            asset=Asset.BTC_USDT,
-            provider=Provider.BINANCE,
-            market_type=MarketType.SPOT,
-            interval=Interval.FIVE_MINUTES,
-        )
-    run = await reset_paper_account(session=session, started_at=NOW)
-    state = await source.get_portfolio_state(
-        asset=Asset.BTC_USDT,
-        provider=Provider.BINANCE,
-        market_type=MarketType.SPOT,
-        interval=Interval.FIVE_MINUTES,
-    )
-    assert state.position_is_open is False
-    run_record = await session.get(PaperTradingRunRecord, run.id)
-    assert run_record is not None
-    run_record.status = "stopped"
-    run_record.stopped_at = NOW
-    await session.flush()
-    with pytest.raises(PaperPortfolioUnavailableError):
-        await source.get_portfolio_state(
-            asset=Asset.BTC_USDT,
-            provider=Provider.BINANCE,
-            market_type=MarketType.SPOT,
-            interval=Interval.FIVE_MINUTES,
-        )
-
-
-async def test_read_only_portfolio_valuation_uses_latest_exact_persisted_mark(
-    session: AsyncSession,
-) -> None:
-    run = await reset_paper_account(session=session, started_at=NOW)
-    position = PaperPositionRecord(
-        id=uuid4(),
-        run_id=run.id,
-        asset=Asset.BTC_USDT.value,
-        provider=Provider.BINANCE.value,
-        market_type=MarketType.SPOT.value,
-        interval=Interval.FIVE_MINUTES.value,
-        status=PaperPositionStatus.OPEN.value,
-        quantity=Decimal("2"),
-        average_entry_price=Decimal("100"),
-        total_entry_notional=Decimal("200"),
-        accumulated_entry_fees=Decimal("1"),
-        opened_at=NOW,
-        closed_at=None,
-        exit_price=None,
-        gross_realized_pnl=None,
-        net_realized_pnl=None,
-    )
-    session.add(position)
-    for asset, open_time, close_price in (
-        (Asset.BTC_USDT, NOW, Decimal("110")),
-        (Asset.BTC_USDT, NOW + timedelta(minutes=5), Decimal("120")),
-        (Asset.ETH_USDT, NOW + timedelta(minutes=10), Decimal("999")),
-    ):
-        session.add(
-            to_record(
-                make_candle(
-                    asset=asset,
-                    open_time=open_time,
+            accumula…814 tokens truncated… open_time=open_time,
                     close_time=open_time + timedelta(minutes=5),
                     open_price=close_price,
                     high_price=close_price,

@@ -10,6 +10,7 @@ from app.decisions.persistence import (
     get_latest_score_evidence,
     insert_decision_snapshot,
 )
+from app.market.catalog import enabled_decision_instruments
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.strategies.baseline_long_only import (
     CONFIGURATION_VERSION,
@@ -143,20 +144,20 @@ async def generate_all_market_decisions(
     decision_timestamp: datetime,
 ) -> tuple[DecisionGenerationResult, ...]:
     results: list[DecisionGenerationResult] = []
-    for asset in (Asset.BTC_USDT, Asset.ETH_USDT):
+    for instrument in enabled_decision_instruments():
         portfolio_state = await portfolio_state_source.get_portfolio_state(
-            asset=asset,
-            provider=Provider.BINANCE,
-            market_type=MarketType.SPOT,
-            interval=Interval.FIVE_MINUTES,
+            asset=instrument.asset,
+            provider=instrument.provider,
+            market_type=instrument.market_type,
+            interval=instrument.interval,
         )
         results.append(
             await generate_market_decision(
                 session=session,
-                asset=asset,
-                provider=Provider.BINANCE,
-                market_type=MarketType.SPOT,
-                interval=Interval.FIVE_MINUTES,
+                asset=instrument.asset,
+                provider=instrument.provider,
+                market_type=instrument.market_type,
+                interval=instrument.interval,
                 portfolio_state=portfolio_state,
                 decision_timestamp=decision_timestamp,
             )

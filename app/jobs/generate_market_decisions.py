@@ -10,12 +10,9 @@ from app.core.config import Settings, get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
+from app.market.catalog import Instrument, enabled_decision_instruments
 from app.paper.cycle_orchestration import CycleResult, run_instrument_cycle
-from app.paper.decision_cycles import (
-    MVP_INSTRUMENTS,
-    Instrument,
-    latest_completed_boundary,
-)
+from app.paper.decision_cycles import latest_completed_boundary
 from app.paper.equity_snapshots import SnapshotWriteResult, persist_equity_snapshot
 from app.paper.persistence import get_run
 
@@ -30,7 +27,7 @@ async def run(
     *,
     settings: Settings | None = None,
     clock: Callable[[], datetime] = utc_now,
-    instruments: Sequence[Instrument] = MVP_INSTRUMENTS,
+    instruments: Sequence[Instrument] | None = None,
 ) -> tuple[CycleResult, ...]:
     resolved = settings or get_settings()
     configure_logging(resolved.log_level)
@@ -40,8 +37,11 @@ async def run(
     boundary = latest_completed_boundary(execution_time)
     results: list[CycleResult] = []
     failures: list[Exception] = []
+    selected_instruments = (
+        enabled_decision_instruments() if instruments is None else instruments
+    )
     try:
-        for instrument in instruments:
+        for instrument in selected_instruments:
             async with factory() as session:
                 try:
                     result = await run_instrument_cycle(

@@ -12,7 +12,8 @@ from app.ingestion.orchestration import (
     ClosedCandleIngestionResult,
 )
 from app.jobs import ingest_closed_candles as job
-from app.market.enums import Asset, Interval
+from app.market.catalog import Instrument
+from app.market.enums import Asset, Interval, MarketType, Provider
 from app.scores.calculation import ScoreCalculationResult
 
 INGESTED_AT = datetime(2026, 7, 16, 12, 7, tzinfo=UTC)
@@ -100,6 +101,24 @@ async def test_run_commits_ingestion_then_features_and_closes_resources() -> Non
         patch.object(job, "configure_logging"),
         patch.object(
             job,
+            "enabled_ingestion_instruments",
+            return_value=(
+                Instrument(
+                    Asset.BTC_USDT,
+                    Provider.BINANCE,
+                    MarketType.SPOT,
+                    Interval.FIVE_MINUTES,
+                ),
+                Instrument(
+                    Asset.ETH_USDT,
+                    Provider.BINANCE,
+                    MarketType.SPOT,
+                    Interval.FIVE_MINUTES,
+                ),
+            ),
+        ) as projected,
+        patch.object(
+            job,
             "create_session_factory",
             return_value=Mock(return_value=session_context),
         ),
@@ -126,6 +145,7 @@ async def test_run_commits_ingestion_then_features_and_closes_resources() -> Non
     calculate.assert_awaited_once_with(session=session, calculated_at=CALCULATED_AT)
     calculate_scores.assert_awaited_once_with(session=session, calculated_at=SCORED_AT)
     assert session.commit.await_count == 3
+    projected.assert_called_once_with()
     session.rollback.assert_not_awaited()
     engine.dispose.assert_awaited_once_with()
 

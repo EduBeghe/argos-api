@@ -11,6 +11,7 @@ from app.features.calculation import FEATURE_VERSION
 from app.features.persistence import get_latest_feature_snapshot
 from app.features.schemas import MarketFeatureResponse
 from app.ingestion.time_windows import latest_closed_five_minute_open_time
+from app.market.catalog import market_instruments
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.queries import (
     MarketStatusAggregate,
@@ -20,6 +21,7 @@ from app.market.queries import (
 from app.market.schemas import (
     MarketCandleQuery,
     MarketCandleResponse,
+    MarketInstrumentResponse,
     MarketStatusResponse,
 )
 from app.scores.calculation import MODEL_NAME, MODEL_VERSION
@@ -29,8 +31,19 @@ from app.scores.schemas import MarketScoreResponse
 router = APIRouter(prefix="/market", tags=["market"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 QueryDependency = Annotated[MarketCandleQuery, Query()]
-SUPPORTED_ASSETS = (Asset.BTC_USDT, Asset.ETH_USDT)
 _UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+@router.get(
+    "/instruments",
+    response_model=list[MarketInstrumentResponse],
+    summary="List configured market instruments",
+)
+async def instruments() -> list[MarketInstrumentResponse]:
+    return [
+        MarketInstrumentResponse.from_definition(definition)
+        for definition in market_instruments()
+    ]
 
 
 @router.get(
@@ -85,7 +98,7 @@ def build_market_status(
     )
     by_asset = {aggregate.asset: aggregate for aggregate in aggregates}
     statuses: list[MarketStatusResponse] = []
-    for asset in SUPPORTED_ASSETS:
+    for asset in tuple(item.asset for item in market_instruments()):
         aggregate = by_asset.get(asset)
         if aggregate is None:
             statuses.append(
