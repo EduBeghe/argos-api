@@ -25,7 +25,13 @@ from app.paper.equity_snapshots import (
     prepare_snapshot_values,
 )
 from app.paper.models import PaperPositionStatus
-from app.paper.persistence import PaperPositionRecord, PaperTradingRunRecord, get_run
+from app.paper.performance import calculate_performance, get_performance_points
+from app.paper.persistence import (
+    PaperPositionRecord,
+    PaperTradingRunRecord,
+    get_run,
+    run_domain,
+)
 from app.paper.portfolio import PaperPortfolioValuation, PaperPortfolioValuationError
 from app.paper.reset import reset_paper_account
 from tests.market.factories import make_candle
@@ -360,3 +366,85 @@ async def test_concurrent_persistence_creates_one_complete_snapshot(
         complete = await get_equity_snapshot(verification, parents[0])
         assert complete is not None and len(complete.positions) == 1
     await engine.dispose()
+
+
+async def test_performance_reads_complete_ordered_run_history_without_positions(
+    session: AsyncSession,
+) -> None:
+    active = await reset_paper_account(session=session, started_at=NOW)
+    active_record = await get_run(session, run_id=active.id)
+    assert active_record is not None
+    stopped = PaperTradingRunRecord(
+        id=uuid4(),
+        status="stopped",
+        account_currency="EUR",
+        initial_cash=Decimal("5000"),
+        current_cash=Decimal("5100"),
+        configuration_version=1,
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        started_at=NOW - timedelta(days=1),
+        stopped_at=NOW,
+        stop_reason="integration test",
+        predecessor_run_id=None,
+    )
+    session.add(stopped)
+    await session.flush()
+    for index in range(501):
+        boundary = NOW + timedelta(minutes=30 * (index + 1))
+        session.add(
+            PaperPortfolioSnapshotRecord(
+                id=uuid4(),
+                run_id=active.id,
+                scheduled_boundary=boundary,
+                recorded_at=boundary + timedelta(minutes=2),
+                account_currency="USDT",
+                initial_cash=Decimal("10000"),
+                current_cash=Decimal("10000"),
+                positions_market_value=Decimal(index),
+                equity=Decimal(10000 + index),
+                total_pnl=Decimal(index),
+                total_return=Decimal(index) / Decimal(10000),
+                configuration_version=1,
+            )
+        )
+    other_boundary = NOW + timedelta(minutes=15)
+    session.add(
+        PaperPortfolioSnapshotRecord(
+            id=uuid4(),
+            run_id=stopped.id,
+            scheduled_boundary=other_boundary,
+            recorded_at=other_boundary + timedelta(minutes=2),
+            account_currency="EUR",
+            initial_cash=Decimal("5000"),
+            current_cash=Decimal("5100"),
+            positions_market_value=Decimal(0),
+            equity=Decimal("5100"),
+            total_pnl=Decimal("100"),
+            total_return=Decimal("0.02"),
+            configuration_version=1,
+        )
+    )
+    await session.commit()
+
+    active_points = await get_performance_points(session, run_id=active.id)
+    stopped_points = await get_performance_points(session, run_id=stopped.id)
+    active_performance = calculate_performance(
+        run=run_domain(active_record), snapshots=active_points
+    )
+    stopped_performance = calculate_performance(
+        run=run_domain(stopped), snapshots=stopped_points
+    )
+
+    assert len(active_points) == 501
+    assert [point.scheduled_boundary for point in active_points] == sorted(
+        point.scheduled_boundary for point in active_points
+    )
+    assert active_performance.latest_equity == Decimal("10500.000000000000000000")
+    assert active_performance.latest_snapshot_boundary == NOW + timedelta(
+        minutes=30 * 501
+    )
+    assert stopped_performance.snapshot_count == 1
+    assert stopped_performance.latest_equity == Decimal("5100.000000000000000000")
+    assert all(point.equity != Decimal("5100") for point in active_points)
+    assert active_record.current_cash == Decimal("10000")

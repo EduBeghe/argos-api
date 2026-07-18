@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
@@ -11,6 +12,7 @@ from app.paper.config import DEFAULT_ACCOUNT_CURRENCY
 from app.paper.decision_cycles import get_cycle, list_cycles
 from app.paper.equity_snapshots import get_equity_snapshot, list_equity_snapshots
 from app.paper.models import PaperPositionStatus
+from app.paper.performance import calculate_performance, get_performance_points
 from app.paper.persistence import (
     PaperTradingRunRecord,
     get_active_run,
@@ -24,6 +26,7 @@ from app.paper.portfolio import PaperPortfolioValuationError, value_paper_run
 from app.paper.schemas import (
     PaperAccountResponse,
     PaperDecisionCycleResponse,
+    PaperPerformanceResponse,
     PaperPortfolioResponse,
     PaperPortfolioSnapshotResponse,
     PaperPositionResponse,
@@ -72,6 +75,26 @@ async def paper_portfolio(
     except PaperPortfolioValuationError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return PaperPortfolioResponse.model_validate(valuation)
+
+
+@router.get("/performance", response_model=PaperPerformanceResponse)
+async def paper_performance(
+    session: Session,
+    run_id: Annotated[UUID | None, Query()] = None,
+) -> PaperPerformanceResponse:
+    run = await _selected_run(session, run_id)
+    performance = calculate_performance(
+        run=run_domain(run),
+        snapshots=await get_performance_points(session, run_id=run.id),
+    )
+    return PaperPerformanceResponse.model_validate(
+        {
+            "run_id": run.id,
+            "status": run.status,
+            "account_currency": run.account_currency,
+            **asdict(performance),
+        }
+    )
 
 
 @router.get("/equity-snapshots", response_model=list[PaperPortfolioSnapshotResponse])

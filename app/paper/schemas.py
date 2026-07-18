@@ -163,3 +163,23 @@ class PaperPortfolioSnapshotResponse(BaseModel):
     total_return: Decimal | None
     configuration_version: int
     positions: list[PaperPositionSnapshotResponse]
+
+
+class PaperPerformanceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    run_id: UUID
+    status: str
+    account_currency: str
+    snapshot_count: int
+    initial_equity: Decimal
+    latest_equity: Decimal
+    absolute_pnl: Decimal
+    total_return: Decimal | None
+    peak_equity: Decimal
+    lowest_equity: Decimal
+    current_drawdown: Decimal
+    max_drawdown: Decimal
+    first_snapshot_boundary: datetime | None
+    latest_snapshot_boundary: datetime | None
+    evaluated_from: datetime
+    evaluated_until: datetime

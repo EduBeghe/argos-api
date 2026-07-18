@@ -244,6 +244,28 @@ hypothetical exit fees or slippage. All instruments in a run must currently be
 valuable in its account currency; explicit multi-currency conversion is future
 work. Configured BTC and ETH instruments are not special cases.
 
+Read the historical performance summary for the active Paper Run or a selected
+active or stopped run:
+
+```sh
+curl "http://localhost:8000/paper/performance"
+curl "http://localhost:8000/paper/performance?run_id=<uuid>"
+```
+
+Performance is derived only from immutable equity snapshots. Its implicit first
+point is the run's initial cash at `started_at`. Equity is cash plus Position
+market value, and total return compares the latest equity with that initial
+capital. Current drawdown is the non-negative decline from the preceding running
+peak at the latest snapshot; maximum drawdown is the worst such decline observed
+in the run. These metrics are not annualized, predictive, or a guarantee of
+profitability. A run without snapshots returns a neutral baseline. Assets,
+including the currently configured BTC and ETH instruments, do not participate
+in the formulas.
+
+The MVP reads the complete aggregate snapshot history because it produces only
+two points per hour. A database aggregation or daily summaries can be introduced
+if volume later justifies them.
+
 ## Production deployment
 
 Provide `DATABASE_URL` and review the production values for `BINANCE_BASE_URL`,
