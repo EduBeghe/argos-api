@@ -115,6 +115,20 @@ List the configured market instruments and their enabled capabilities:
 curl "http://localhost:8000/market/instruments"
 ```
 
+Load the data needed for the initial dashboard in one read-only request:
+
+```sh
+curl "http://localhost:8000/dashboard/overview"
+```
+
+The overview builds instrument cards from catalog display order and returns
+market freshness, the latest persisted Score and Decision, and the active Paper
+Run summary when available. Missing market or analytical evidence is represented
+explicitly with null or stale fields. If an active Paper portfolio cannot be
+valued from persisted candles, the endpoint returns HTTP 409 instead of inventing
+a value. Detailed endpoints remain the source for equity history, trades, and
+other historical collections.
+
 An asset is Argos's canonical market identity; an instrument combines that asset
 with provider, market type, interval, provider symbol, presentation metadata,
 and enabled capabilities. The immutable in-code catalog is the MVP source of
@@ -133,6 +147,10 @@ market-session rules, but
 not symbol-specific UI components. The catalog can move to persistence without
 changing its read contract if instrument volume or dynamic administration later
 justifies it.
+
+The frontend should render dashboard cards from the catalog rather than contain
+BTC- or ETH-specific components. Adding a future catalog instrument does not
+change the dashboard response contract.
 
 These endpoints are read-only. They never trigger ingestion or calculations.
 

@@ -161,6 +161,9 @@ def test_build_status_returns_supported_assets_in_order_with_freshness() -> None
     now = datetime(2026, 7, 15, 12, 7, 30, tzinfo=UTC)
     btc = MarketStatusAggregate(
         asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
         candle_count=4,
         latest_open_time=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
         latest_close_time=datetime(2026, 7, 15, 12, 4, 59, tzinfo=UTC),
@@ -186,6 +189,9 @@ def test_build_status_marks_old_latest_candle_stale() -> None:
     now = datetime(2026, 7, 15, 12, 7, 30, tzinfo=UTC)
     aggregate = MarketStatusAggregate(
         asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
         candle_count=1,
         latest_open_time=datetime(2026, 7, 15, 11, 55, tzinfo=UTC),
         latest_close_time=datetime(2026, 7, 15, 11, 59, 59, tzinfo=UTC),
@@ -202,7 +208,7 @@ def test_market_status_endpoint_and_openapi(client: TestClient) -> None:
     query = AsyncMock(return_value=[])
     app.dependency_overrides[get_db_session] = fake_session
     try:
-        with patch("app.market.api.get_market_status_aggregates", query):
+        with patch("app.market.api.get_market_status_aggregates_batch", query):
             response = client.get("/market/status")
     finally:
         app.dependency_overrides.clear()
@@ -211,8 +217,20 @@ def test_market_status_endpoint_and_openapi(client: TestClient) -> None:
     assert [item["asset"] for item in response.json()] == ["BTC/USDT", "ETH/USDT"]
     query.assert_awaited_once()
     assert query.await_args is not None
-    assert query.await_args.kwargs["provider"] is Provider.BINANCE
-    assert query.await_args.kwargs["market_type"] is MarketType.SPOT
+    assert query.await_args.kwargs["instruments"] == (
+        Instrument(
+            Asset.BTC_USDT,
+            Provider.BINANCE,
+            MarketType.SPOT,
+            Interval.FIVE_MINUTES,
+        ),
+        Instrument(
+            Asset.ETH_USDT,
+            Provider.BINANCE,
+            MarketType.SPOT,
+            Interval.FIVE_MINUTES,
+        ),
+    )
     paths = client.get("/openapi.json").json()["paths"]
     assert "/market/candles" in paths
     assert "/market/status" in paths
@@ -264,7 +282,7 @@ def test_market_status_uses_only_binance_ingestion_projection(
                 "app.market.api.binance_spot_five_minute_ingestion_instruments",
                 return_value=(btc,),
             ),
-            patch("app.market.api.get_market_status_aggregates", query),
+            patch("app.market.api.get_market_status_aggregates_batch", query),
         ):
             response = client.get("/market/status")
     finally:
@@ -273,9 +291,7 @@ def test_market_status_uses_only_binance_ingestion_projection(
     assert [item["asset"] for item in response.json()] == ["BTC/USDT"]
     query.assert_awaited_once_with(
         session=ANY,
-        provider=Provider.BINANCE,
-        market_type=MarketType.SPOT,
-        interval=Interval.FIVE_MINUTES,
+        instruments=(btc,),
     )
 
 

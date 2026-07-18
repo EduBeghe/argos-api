@@ -179,6 +179,18 @@ def enabled_scoring_instruments(
     )
 
 
+def ingestion_enabled_instruments(
+    definitions: tuple[MarketInstrumentDefinition, ...] = MARKET_INSTRUMENTS,
+) -> tuple[Instrument, ...]:
+    """Return every catalog identity enabled for ingestion, in display order."""
+
+    return tuple(
+        item.instrument
+        for item in market_instruments(definitions)
+        if item.ingestion_enabled
+    )
+
+
 def enabled_decision_instruments(
     definitions: tuple[MarketInstrumentDefinition, ...] = MARKET_INSTRUMENTS,
 ) -> tuple[Instrument, ...]:

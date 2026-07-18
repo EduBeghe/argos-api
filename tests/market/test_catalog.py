@@ -10,6 +10,7 @@ from app.market.catalog import (
     binance_spot_five_minute_ingestion_instruments,
     enabled_decision_instruments,
     enabled_scoring_instruments,
+    ingestion_enabled_instruments,
     market_instruments,
     provider_symbol,
     validate_catalog,
@@ -29,6 +30,10 @@ def test_catalog_contains_current_instruments_in_stable_order() -> None:
     )
     assert (
         enabled_scoring_instruments()
+        == binance_spot_five_minute_ingestion_instruments()
+    )
+    assert (
+        ingestion_enabled_instruments()
         == binance_spot_five_minute_ingestion_instruments()
     )
     assert (
@@ -60,6 +65,9 @@ def test_capability_projections_exclude_disabled_instruments() -> None:
         MARKET_INSTRUMENTS[0].instrument,
     )
     assert enabled_decision_instruments(definitions) == (
+        MARKET_INSTRUMENTS[0].instrument,
+    )
+    assert ingestion_enabled_instruments(definitions) == (
         MARKET_INSTRUMENTS[0].instrument,
     )
 
