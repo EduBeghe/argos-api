@@ -389,6 +389,7 @@ async def test_performance_reads_complete_ordered_run_history_without_positions(
         predecessor_run_id=None,
     )
     session.add(stopped)
+    await session.flush()
     for index in range(501):
         boundary = NOW + timedelta(minutes=30 * (index + 1))
         session.add(
