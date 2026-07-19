@@ -82,7 +82,9 @@ async def test_evaluation_uses_latest_snapshot_boundary_and_performs_no_writes(
     )
     before = _closed_position(run.id, boundary - timedelta(minutes=1), Decimal("5"))
     after = _closed_position(run.id, boundary + timedelta(minutes=1), Decimal("99"))
-    session.add_all([run, snapshot, before, after])
+    session.add(run)
+    await session.flush()
+    session.add_all([snapshot, before, after])
     await session.commit()
     persisted = await get_run(session, run_id=run.id)
     assert persisted is not None
