@@ -7,6 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.history import HistoryWindow
+from app.paper.evaluation import (
+    BenchmarkMethod,
+    EvaluationStatus,
+    EvaluationUnavailableReason,
+)
 from app.paper.models import PaperPositionStatus, PaperTradingRun
 from app.paper.persistence import PaperTradeRecord
 
@@ -220,8 +225,8 @@ class PaperEvaluationRunResponse(BaseModel):
 
 
 class PaperStrategyEvaluationResponse(BaseModel):
-    status: str
-    unavailable_reason: str | None
+    status: EvaluationStatus
+    unavailable_reason: EvaluationUnavailableReason | None
     initial_equity: Decimal
     ending_equity: Decimal | None
     absolute_pnl: Decimal | None
@@ -253,8 +258,8 @@ class BenchmarkInstrumentResponse(BaseModel):
     provider: str
     market_type: str
     interval: str
-    status: str
-    unavailable_reason: str | None
+    status: EvaluationStatus
+    unavailable_reason: EvaluationUnavailableReason | None
     allocation: Decimal
     entry_candle_open_time: datetime | None
     entry_observed_price: Decimal | None
@@ -270,9 +275,9 @@ class BenchmarkInstrumentResponse(BaseModel):
 
 
 class PaperBenchmarkEvaluationResponse(BaseModel):
-    status: str
-    unavailable_reason: str | None
-    method: str
+    status: EvaluationStatus
+    unavailable_reason: EvaluationUnavailableReason | None
+    method: BenchmarkMethod
     instrument_count: int
     initial_equity: Decimal
     ending_asset_value: Decimal | None
@@ -286,8 +291,8 @@ class PaperBenchmarkEvaluationResponse(BaseModel):
 
 
 class PaperEvaluationComparisonResponse(BaseModel):
-    status: str
-    unavailable_reason: str | None
+    status: EvaluationStatus
+    unavailable_reason: EvaluationUnavailableReason | None
     strategy_excess_return: Decimal | None
     strategy_minus_benchmark_pnl: Decimal | None
 

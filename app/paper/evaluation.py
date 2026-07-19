@@ -2,11 +2,27 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
+from enum import StrEnum
 
 from app.paper.config import FINANCIAL_QUANTUM, quantize_financial
 from app.paper.performance import PaperRunPerformance
 
-BENCHMARK_METHOD = "equal_weight_buy_and_hold_v1"
+
+class EvaluationStatus(StrEnum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
+class EvaluationUnavailableReason(StrEnum):
+    NO_EQUITY_SNAPSHOT = "no_equity_snapshot"
+    NO_DECISION_UNIVERSE = "no_decision_universe"
+    MISSING_COMPATIBLE_CANDLE = "missing_compatible_candle"
+    INCOMPLETE_CANDLE_EVIDENCE = "incomplete_candle_evidence"
+    STRATEGY_OR_BENCHMARK_UNAVAILABLE = "strategy_or_benchmark_unavailable"
+
+
+class BenchmarkMethod(StrEnum):
+    EQUAL_WEIGHT_BUY_AND_HOLD_V1 = "equal_weight_buy_and_hold_v1"
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -122,7 +138,7 @@ def strategy_evaluation(
 ) -> dict[str, object]:
     closed = closed_position_statistics(closed_positions)
     return {
-        "status": "available",
+        "status": EvaluationStatus.AVAILABLE,
         "unavailable_reason": None,
         "initial_equity": performance.initial_equity,
         "ending_equity": performance.latest_equity,
@@ -163,8 +179,8 @@ def strategy_evaluation(
 
 def unavailable_strategy(initial_equity: Decimal) -> dict[str, object]:
     return {
-        "status": "unavailable",
-        "unavailable_reason": "no_equity_snapshot",
+        "status": EvaluationStatus.UNAVAILABLE,
+        "unavailable_reason": EvaluationUnavailableReason.NO_EQUITY_SNAPSHOT,
         "initial_equity": quantize_financial(initial_equity),
         **{
             name: None
@@ -285,7 +301,9 @@ def calculate_benchmark(
 ) -> dict[str, object]:
     initial = quantize_financial(initial_equity)
     if not universe:
-        return _unavailable_benchmark("no_decision_universe", initial, [])
+        return _unavailable_benchmark(
+            EvaluationUnavailableReason.NO_DECISION_UNIVERSE, initial, []
+        )
     allocation = (initial / Decimal(len(universe))).quantize(
         FINANCIAL_QUANTUM, rounding=ROUND_DOWN
     )
@@ -302,8 +320,10 @@ def calculate_benchmark(
             instruments.append(
                 {
                     **identity_fields(identity),
-                    "status": "unavailable",
-                    "unavailable_reason": "missing_compatible_candle",
+                    "status": EvaluationStatus.UNAVAILABLE,
+                    "unavailable_reason": (
+                        EvaluationUnavailableReason.MISSING_COMPATIBLE_CANDLE
+                    ),
                     "allocation": allocation,
                     **{name: None for name in _BENCHMARK_VALUE_FIELDS},
                 }
@@ -334,7 +354,7 @@ def calculate_benchmark(
         instruments.append(
             {
                 **identity_fields(identity),
-                "status": "available",
+                "status": EvaluationStatus.AVAILABLE,
                 "unavailable_reason": None,
                 "allocation": allocation,
                 "entry_candle_open_time": evidence.entry.open_time,
@@ -352,15 +372,17 @@ def calculate_benchmark(
         )
     if not complete:
         return _unavailable_benchmark(
-            "incomplete_candle_evidence", initial, instruments
+            EvaluationUnavailableReason.INCOMPLETE_CANDLE_EVIDENCE,
+            initial,
+            instruments,
         )
     remaining_cash = quantize_financial(initial - spent)
     ending_equity = quantize_financial(ending_assets + remaining_cash)
     pnl = quantize_financial(ending_equity - initial)
     return {
-        "status": "available",
+        "status": EvaluationStatus.AVAILABLE,
         "unavailable_reason": None,
-        "method": BENCHMARK_METHOD,
+        "method": BenchmarkMethod.EQUAL_WEIGHT_BUY_AND_HOLD_V1,
         "instrument_count": len(universe),
         "initial_equity": initial,
         "ending_asset_value": quantize_financial(ending_assets),
@@ -377,10 +399,15 @@ def calculate_benchmark(
 def comparison(
     strategy: dict[str, object], benchmark: dict[str, object]
 ) -> dict[str, object]:
-    if strategy["status"] != "available" or benchmark["status"] != "available":
+    if (
+        strategy["status"] != EvaluationStatus.AVAILABLE
+        or benchmark["status"] != EvaluationStatus.AVAILABLE
+    ):
         return {
-            "status": "unavailable",
-            "unavailable_reason": "strategy_or_benchmark_unavailable",
+            "status": EvaluationStatus.UNAVAILABLE,
+            "unavailable_reason": (
+                EvaluationUnavailableReason.STRATEGY_OR_BENCHMARK_UNAVAILABLE
+            ),
             "strategy_excess_return": None,
             "strategy_minus_benchmark_pnl": None,
         }
@@ -393,7 +420,7 @@ def comparison(
     assert isinstance(strategy_equity, Decimal)
     assert isinstance(benchmark_equity, Decimal)
     return {
-        "status": "available",
+        "status": EvaluationStatus.AVAILABLE,
         "unavailable_reason": None,
         "strategy_excess_return": quantize_financial(
             strategy_return - benchmark_return
@@ -429,12 +456,14 @@ _BENCHMARK_VALUE_FIELDS = (
 
 
 def _unavailable_benchmark(
-    reason: str, initial: Decimal, instruments: list[dict[str, object]]
+    reason: EvaluationUnavailableReason,
+    initial: Decimal,
+    instruments: list[dict[str, object]],
 ) -> dict[str, object]:
     return {
-        "status": "unavailable",
+        "status": EvaluationStatus.UNAVAILABLE,
         "unavailable_reason": reason,
-        "method": BENCHMARK_METHOD,
+        "method": BenchmarkMethod.EQUAL_WEIGHT_BUY_AND_HOLD_V1,
         "instrument_count": len(instruments),
         "initial_equity": initial,
         "ending_asset_value": None,

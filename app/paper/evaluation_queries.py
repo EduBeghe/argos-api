@@ -128,14 +128,14 @@ async def benchmark_candles(
         MarketCandleRecord.provider == identity.provider,
         MarketCandleRecord.market_type == identity.market_type,
         MarketCandleRecord.interval == identity.interval,
-        MarketCandleRecord.open_time >= started_at,
+        MarketCandleRecord.close_time >= started_at,
         MarketCandleRecord.close_time <= evaluated_until,
     )
     entry = (
         await session.execute(
             select(MarketCandleRecord.open_time, MarketCandleRecord.close_price)
             .where(*filters)
-            .order_by(MarketCandleRecord.open_time.asc(), MarketCandleRecord.id.asc())
+            .order_by(MarketCandleRecord.close_time.asc(), MarketCandleRecord.id.asc())
             .limit(1)
         )
     ).first()
@@ -143,7 +143,9 @@ async def benchmark_candles(
         await session.execute(
             select(MarketCandleRecord.open_time, MarketCandleRecord.close_price)
             .where(*filters)
-            .order_by(MarketCandleRecord.open_time.desc(), MarketCandleRecord.id.desc())
+            .order_by(
+                MarketCandleRecord.close_time.desc(), MarketCandleRecord.id.desc()
+            )
             .limit(1)
         )
     ).first()

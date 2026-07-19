@@ -89,16 +89,22 @@ def calculate_performance(
 
 
 async def get_performance_points(
-    session: AsyncSession, *, run_id: UUID
+    session: AsyncSession,
+    *,
+    run_id: UUID,
+    evaluated_until: datetime | None = None,
 ) -> tuple[EquityPoint, ...]:
+    statement = select(
+        PaperPortfolioSnapshotRecord.scheduled_boundary,
+        PaperPortfolioSnapshotRecord.equity,
+    ).where(PaperPortfolioSnapshotRecord.run_id == run_id)
+    if evaluated_until is not None:
+        statement = statement.where(
+            PaperPortfolioSnapshotRecord.scheduled_boundary <= evaluated_until
+        )
     rows = (
         await session.execute(
-            select(
-                PaperPortfolioSnapshotRecord.scheduled_boundary,
-                PaperPortfolioSnapshotRecord.equity,
-            )
-            .where(PaperPortfolioSnapshotRecord.run_id == run_id)
-            .order_by(
+            statement.order_by(
                 PaperPortfolioSnapshotRecord.scheduled_boundary.asc(),
                 PaperPortfolioSnapshotRecord.id.asc(),
             )

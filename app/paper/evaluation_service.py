@@ -101,9 +101,16 @@ async def evaluate_paper_run(
         OpenPositionEvidence(_identity(record), record.unrealized_pnl)
         for record in snapshot.positions
     )
+    performance_points = await get_performance_points(
+        session, run_id=run.id, evaluated_until=boundary
+    )
     performance = calculate_performance(
         run=run_domain(run),
-        snapshots=await get_performance_points(session, run_id=run.id),
+        snapshots=tuple(
+            point
+            for point in performance_points
+            if point.scheduled_boundary <= boundary
+        ),
     )
     strategy = strategy_evaluation(
         performance=performance,

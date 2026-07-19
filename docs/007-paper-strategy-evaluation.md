@@ -59,15 +59,18 @@ assets.
 
 The benchmark divides initial cash equally across the complete universe. Each
 allocation is an all-in cash budget. Entry uses the first compatible persisted
-closed candle at or after Run start and no later than the boundary. Its close is
-the observed price; persisted Run slippage and fee rates determine simulated
-entry execution, quantity, fee, and slippage cost. Quantity is rounded down at
+candle whose `close_time` is at or after Run start and no later than the
+boundary. A candle may therefore open before the Run and still qualify when it
+closes after the Run starts. Its close is the observed price; persisted Run
+slippage and fee rates determine simulated entry execution, quantity, fee, and
+slippage cost. Quantity is rounded down at
 18 Decimal places so notional plus fee cannot exceed the allocation. Decimal
 remainders remain benchmark cash.
 
-Ending value uses the latest compatible persisted closed candle through the
-same boundary. No hypothetical exit fee or exit slippage is deducted, matching
-the mark-to-market convention for open Paper Positions. If any universe member
+Ending value uses the latest compatible persisted candle ordered by
+`close_time` through the same boundary. No hypothetical exit fee or exit
+slippage is deducted, matching the mark-to-market convention for open Paper
+Positions. If any universe member
 lacks required candle evidence, that instrument reports a typed reason and the
 aggregate benchmark is unavailable. Argos never silently removes it or
 redistributes its weight.
