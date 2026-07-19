@@ -328,6 +328,22 @@ curl "http://localhost:8000/paper/performance"
 curl "http://localhost:8000/paper/performance?run_id=<uuid>"
 ```
 
+Evaluate the active Paper Run, or one preserved historical run, using only
+persisted evidence through the latest successful Equity Snapshot:
+
+```sh
+curl "http://localhost:8000/paper/evaluation"
+curl "http://localhost:8000/paper/evaluation?run_id=<uuid>"
+```
+
+The response separates run metadata, Strategy results, the
+`equal_weight_buy_and_hold_v1` benchmark, their comparison, and deterministic
+per-instrument results keyed by asset, provider, market type, and interval.
+Missing snapshots or benchmark candles return HTTP 200 with typed unavailable
+reasons; unknown Runs retain the existing HTTP 404 behavior. See
+[`docs/007-paper-strategy-evaluation.md`](docs/007-paper-strategy-evaluation.md)
+for the complete metric and benchmark contract.
+
 Performance is derived only from immutable equity snapshots. Its implicit first
 point is the run's initial cash at `started_at`. Equity is cash plus Position
 market value, and total return compares the latest equity with that initial

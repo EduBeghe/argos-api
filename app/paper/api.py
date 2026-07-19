@@ -17,6 +17,7 @@ from app.market.enums import Asset
 from app.paper.config import DEFAULT_ACCOUNT_CURRENCY
 from app.paper.decision_cycles import get_cycle, list_cycles
 from app.paper.equity_snapshots import get_equity_snapshot, list_equity_snapshots
+from app.paper.evaluation_service import evaluate_paper_run
 from app.paper.models import PaperPositionStatus
 from app.paper.performance import calculate_performance, get_performance_points
 from app.paper.persistence import (
@@ -32,6 +33,7 @@ from app.paper.portfolio import PaperPortfolioValuationError, value_paper_run
 from app.paper.schemas import (
     PaperAccountResponse,
     PaperDecisionCycleResponse,
+    PaperEvaluationResponse,
     PaperPerformanceResponse,
     PaperPortfolioResponse,
     PaperPortfolioSnapshotResponse,
@@ -102,6 +104,17 @@ async def paper_performance(
             "account_currency": run.account_currency,
             **asdict(performance),
         }
+    )
+
+
+@router.get("/evaluation", response_model=PaperEvaluationResponse)
+async def paper_evaluation(
+    session: Session,
+    run_id: Annotated[UUID | None, Query()] = None,
+) -> PaperEvaluationResponse:
+    run = await _selected_run(session, run_id)
+    return PaperEvaluationResponse.model_validate(
+        await evaluate_paper_run(session=session, run=run)
     )
 
 
