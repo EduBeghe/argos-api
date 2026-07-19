@@ -750,11 +750,24 @@ async def test_historical_queries_return_stopped_run_positions_trades_and_pages(
     historical = await get_run(session, run_id=first.id)
     positions = await list_positions(session, run_id=first.id, limit=10, offset=0)
     trades = await list_trades(session, run_id=first.id, limit=10, offset=0)
+    filtered_trades = await list_trades(
+        session,
+        run_id=first.id,
+        asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
+        from_time=trade.executed_at,
+        to_time=trade.executed_at,
+        limit=1,
+        offset=0,
+    )
     assert [item.id for item in runs] == [second.id, first.id]
     assert [item.id for item in page] == [first.id]
     assert historical is not None and historical.status == "stopped"
     assert len(positions) == 1 and positions[0].status == PaperPositionStatus.OPEN
     assert len(trades) == 1 and trades[0].id == trade.id
+    assert len(filtered_trades) == 1 and filtered_trades[0].id == trade.id
 
 
 async def test_boundary_evidence_rejects_future_missing_and_stale_scores(

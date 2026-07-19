@@ -1,6 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
-from enum import StrEnum
 from typing import Self
 from uuid import UUID
 
@@ -8,49 +7,66 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.market.catalog import MarketInstrumentDefinition
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.history import HistoryOrder, HistoryWindow
 from app.market.models import MarketCandle
 
-
-class CandleOrder(StrEnum):
-    """Supported chronological candle orderings."""
-
-    ASC = "asc"
-    DESC = "desc"
+CandleOrder = HistoryOrder
 
 
-class MarketCandleQuery(BaseModel):
+class InstrumentHistoryQuery(HistoryWindow):
+    """Complete or catalog-resolvable market identity with a history window."""
+
+    asset: Asset
+    interval: Interval
+    provider: Provider | None = None
+    market_type: MarketType | None = None
+
+
+class MarketCandleQuery(InstrumentHistoryQuery):
     """Validated filters for persisted market candles."""
 
-    asset: Asset = Field(description="Market asset to return.")
-    interval: Interval = Field(description="Market candle interval to return.")
     start_time: datetime | None = Field(
         default=None, description="Inclusive UTC candle open-time lower bound."
     )
     end_time: datetime | None = Field(
         default=None, description="Inclusive UTC candle open-time upper bound."
     )
-    limit: int = Field(default=100, ge=1, le=1000, description="Maximum rows.")
-    order: CandleOrder = Field(
-        default=CandleOrder.DESC, description="Chronological result order."
-    )
 
     @model_validator(mode="after")
     def validate_time_range(self) -> Self:
-        for field_name, value in (
-            ("start_time", self.start_time),
-            ("end_time", self.end_time),
-        ):
-            if value is not None and (
-                value.tzinfo is None or value.utcoffset() != timedelta(0)
-            ):
-                raise ValueError(f"{field_name} must be a timezone-aware UTC datetime")
-        if (
-            self.start_time is not None
-            and self.end_time is not None
-            and self.end_time < self.start_time
-        ):
-            raise ValueError("end_time must not be before start_time")
+        for field_name in ("start_time", "end_time"):
+            value = getattr(self, field_name)
+            if value is not None:
+                if value.tzinfo is None or value.utcoffset() is None:
+                    raise ValueError(f"{field_name} must be timezone-aware")
+                setattr(self, field_name, value.astimezone(UTC))
+        if self.from_time is not None and self.start_time is not None:
+            raise ValueError("use either from or start_time, not both")
+        if self.to_time is not None and self.end_time is not None:
+            raise ValueError("use either to or end_time, not both")
+        lower = self.from_time or self.start_time
+        upper = self.to_time or self.end_time
+        if lower is not None and upper is not None and upper < lower:
+            raise ValueError("upper time bound must not be before lower time bound")
         return self
+
+    @property
+    def effective_from(self) -> datetime | None:
+        return self.from_time or self.start_time
+
+    @property
+    def effective_to(self) -> datetime | None:
+        return self.to_time or self.end_time
+
+
+class ScoreHistoryQuery(InstrumentHistoryQuery):
+    """Filters for persisted technical Score history."""
+
+
+class DecisionHistoryQuery(InstrumentHistoryQuery):
+    """Filters for immutable Decision Snapshot history."""
+
+    run_id: UUID | None = None
 
 
 class MarketCandleResponse(BaseModel):

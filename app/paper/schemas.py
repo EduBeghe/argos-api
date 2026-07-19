@@ -1,10 +1,12 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.history import HistoryWindow
 from app.paper.models import PaperPositionStatus, PaperTradingRun
 from app.paper.persistence import PaperTradeRecord
 
@@ -75,6 +77,27 @@ class PaperTradeResponse(BaseModel):
     @classmethod
     def from_record(cls, record: PaperTradeRecord) -> "PaperTradeResponse":
         return cls.model_validate(record)
+
+
+class PaperTradeQuery(HistoryWindow):
+    """Backward-compatible filters for persisted Paper Trade history."""
+
+    run_id: UUID | None = None
+    asset: Asset | None = None
+    interval: Interval | None = None
+    provider: Provider | None = None
+    market_type: MarketType | None = None
+    offset: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> Self:
+        if (self.asset is None) != (self.interval is None):
+            raise ValueError("asset and interval must be provided together")
+        if self.asset is None and (
+            self.provider is not None or self.market_type is not None
+        ):
+            raise ValueError("provider and market_type require asset and interval")
+        return self
 
 
 class PaperDecisionCycleResponse(BaseModel):

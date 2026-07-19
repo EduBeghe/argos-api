@@ -8,6 +8,10 @@ class MarketCatalogError(ValueError):
     """Raised when the configured market instrument catalog is invalid."""
 
 
+class MarketCatalogAmbiguityError(MarketCatalogError):
+    """Raised when a partial identity matches multiple catalog instruments."""
+
+
 class InstrumentCapability(StrEnum):
     INGESTION = "ingestion"
     SCORING = "scoring"
@@ -213,10 +217,17 @@ def resolve_instrument(
     asset: Asset,
     interval: Interval,
     capability: InstrumentCapability,
+    provider: Provider | None = None,
+    market_type: MarketType | None = None,
     definitions: tuple[MarketInstrumentDefinition, ...] = MARKET_INSTRUMENTS,
 ) -> MarketInstrumentDefinition:
+    matches: list[MarketInstrumentDefinition] = []
     for definition in definitions:
         if definition.asset is not asset or definition.interval is not interval:
+            continue
+        if provider is not None and definition.provider is not provider:
+            continue
+        if market_type is not None and definition.market_type is not market_type:
             continue
         enabled = {
             InstrumentCapability.INGESTION: definition.ingestion_enabled,
@@ -224,7 +235,14 @@ def resolve_instrument(
             InstrumentCapability.DECISION: definition.decision_enabled,
         }[capability]
         if enabled:
-            return definition
+            matches.append(definition)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise MarketCatalogAmbiguityError(
+            f"instrument identity is ambiguous for {capability.value}: "
+            f"{asset.value} {interval.value}; provide provider and market_type"
+        )
     raise MarketCatalogError(
         f"instrument is not configured for {capability.value}: "
         f"{asset.value} {interval.value}"

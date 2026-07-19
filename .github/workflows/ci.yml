@@ -34,6 +34,8 @@ jobs:
         run: uv run mypy
       - name: Test
         run: uv run pytest
+      - name: Build production container
+        run: docker build --tag argos-api:ci .
 
   integration:
     runs-on: ubuntu-latest

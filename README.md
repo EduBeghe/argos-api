@@ -103,6 +103,39 @@ Request candles in ascending chronological order:
 curl "http://localhost:8000/market/candles?asset=BTC%2FUSDT&interval=5m&order=asc"
 ```
 
+### Read-only instrument history
+
+The historical collections use the complete catalog identity: `asset`,
+`provider`, `market_type`, and `interval`. For backward compatibility,
+`provider` and `market_type` may be omitted when `asset` plus `interval` resolves
+to exactly one enabled catalog instrument. Unknown instruments return HTTP 404;
+ambiguous partial identities return HTTP 422 and must be completed explicitly.
+
+```sh
+curl "http://localhost:8000/market/candles?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&from=2026-07-15T12%3A00%3A00Z&to=2026-07-15T14%3A00%3A00Z&order=asc&limit=500"
+curl "http://localhost:8000/market/scores?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&order=desc&limit=100"
+curl "http://localhost:8000/market/decisions?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&run_id=<paper-run-id>&order=asc&limit=100"
+curl "http://localhost:8000/paper/trades?run_id=<paper-run-id>&asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&order=asc&limit=100"
+```
+
+`from` and `to` are optional, inclusive, timezone-aware ISO-8601 bounds;
+offset-aware values are normalized to UTC and naive timestamps are rejected.
+`order` defaults to `desc`, `limit` defaults to 100, and the maximum is 1000.
+Ordering is deterministic by each collection's event time and immutable ID.
+Valid identities with no matching rows return HTTP 200 with `[]`.
+
+These endpoints return persisted Candles, Scores, immutable Decision Snapshots,
+and simulated Paper Trades only. Reads never contact a provider, calculate
+analytics, generate Decisions, infer Trades, or execute Paper Trading actions.
+Score responses retain model, contribution, and explanation fields; Decision
+responses retain source evidence, versions, sizing intent, rule, explanation,
+and position state; Trade responses retain prices, quantities, costs, cash
+impact, and immutable run, Decision, and Position links. `NO_ACTION` Decisions
+therefore appear in Decision history but never fabricate a Trade.
+
+The older candle parameters `start_time` and `end_time` remain supported. Do not
+combine them with `from` and `to` respectively.
+
 Inspect ingestion freshness for both supported assets:
 
 ```sh

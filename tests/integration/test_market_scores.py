@@ -9,14 +9,67 @@ from app.core.config import get_settings
 from app.features.calculation import calculate_market_features
 from app.features.persistence import MarketFeatureRecord
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.history import HistoryOrder
 from app.market.persistence import MarketCandleRecord, to_record
 from app.scores.calculation import calculate_market_scores
-from app.scores.persistence import MarketScoreRecord
+from app.scores.persistence import (
+    MarketScoreRecord,
+    insert_market_scores,
+    list_market_scores,
+)
+from tests.decisions.factories import make_score
 from tests.market.factories import make_candle
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 START = datetime(2026, 7, 15, tzinfo=UTC)
 CALCULATED_AT = datetime(2026, 7, 16, tzinfo=UTC)
+
+
+async def test_score_history_filters_inclusively_and_orders_in_postgresql() -> None:
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        await session.execute(delete(MarketScoreRecord))
+        older = make_score().model_copy(
+            update={"candle_open_time": START, "calculated_at": CALCULATED_AT}
+        )
+        newer = make_score().model_copy(
+            update={
+                "candle_open_time": START + timedelta(minutes=5),
+                "calculated_at": CALCULATED_AT,
+            }
+        )
+        assert await insert_market_scores(session, [older, newer]) == 2
+        await session.commit()
+
+        ascending = await list_market_scores(
+            session=session,
+            asset=Asset.BTC_USDT,
+            provider=Provider.BINANCE,
+            market_type=MarketType.SPOT,
+            interval=Interval.FIVE_MINUTES,
+            from_time=START,
+            to_time=START + timedelta(minutes=5),
+            order=HistoryOrder.ASC,
+            limit=100,
+        )
+        exact = await list_market_scores(
+            session=session,
+            asset=Asset.BTC_USDT,
+            provider=Provider.BINANCE,
+            market_type=MarketType.SPOT,
+            interval=Interval.FIVE_MINUTES,
+            from_time=START + timedelta(minutes=5),
+            to_time=START + timedelta(minutes=5),
+            order=HistoryOrder.DESC,
+            limit=1,
+        )
+
+        assert [item.id for item in ascending] == [older.id, newer.id]
+        assert [item.id for item in exact] == [newer.id]
+        await session.execute(delete(MarketScoreRecord))
+        await session.commit()
+    await engine.dispose()
 
 
 async def test_complete_features_generate_idempotent_score() -> None:

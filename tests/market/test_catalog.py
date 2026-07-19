@@ -5,6 +5,8 @@ import pytest
 
 from app.market.catalog import (
     MARKET_INSTRUMENTS,
+    InstrumentCapability,
+    MarketCatalogAmbiguityError,
     MarketCatalogError,
     MarketInstrumentDefinition,
     binance_spot_five_minute_ingestion_instruments,
@@ -13,6 +15,7 @@ from app.market.catalog import (
     ingestion_enabled_instruments,
     market_instruments,
     provider_symbol,
+    resolve_instrument,
     validate_catalog,
 )
 from app.market.enums import Asset, Interval, MarketType, Provider
@@ -42,6 +45,35 @@ def test_catalog_contains_current_instruments_in_stable_order() -> None:
     )
     assert provider_symbol(definitions[0].instrument) == "BTCUSDT"
     assert provider_symbol(definitions[1].instrument) == "ETHUSDT"
+
+
+def test_resolve_instrument_accepts_complete_or_unambiguous_partial_identity() -> None:
+    partial = resolve_instrument(
+        asset=Asset.BTC_USDT,
+        interval=Interval.FIVE_MINUTES,
+        capability=InstrumentCapability.SCORING,
+    )
+    complete = resolve_instrument(
+        asset=Asset.BTC_USDT,
+        interval=Interval.FIVE_MINUTES,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        capability=InstrumentCapability.SCORING,
+    )
+
+    assert partial is complete is MARKET_INSTRUMENTS[0]
+
+
+def test_resolve_instrument_rejects_ambiguous_partial_identity() -> None:
+    duplicate_match = replace(MARKET_INSTRUMENTS[0], display_order=99)
+
+    with pytest.raises(MarketCatalogAmbiguityError, match="provide provider"):
+        resolve_instrument(
+            asset=Asset.BTC_USDT,
+            interval=Interval.FIVE_MINUTES,
+            capability=InstrumentCapability.SCORING,
+            definitions=(MARKET_INSTRUMENTS[0], duplicate_match),
+        )
 
 
 def test_catalog_and_definitions_are_immutable() -> None:
