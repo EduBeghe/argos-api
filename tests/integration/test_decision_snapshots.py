@@ -18,8 +18,10 @@ from app.decisions.persistence import (
     DecisionSnapshotRecord,
     ScoreEvidence,
     get_latest_decision_snapshot,
+    list_decision_snapshots,
 )
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.history import HistoryOrder
 from app.scores.persistence import MarketScoreRecord, insert_market_scores
 from app.strategies.baseline_long_only import StrategyAction
 from tests.decisions.factories import make_score
@@ -153,6 +155,22 @@ async def test_repeated_generation_is_conflict_safe_and_latest_is_ordered(
     assert latest.source_score_id == newer.score.id
     assert latest.action is StrategyAction.SELL_ALL
     assert len((await session.scalars(select(DecisionSnapshotRecord.id))).all()) == 2
+    history = await list_decision_snapshots(
+        session=session,
+        asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
+        run_id=None,
+        from_time=DECIDED_AT,
+        to_time=DECIDED_AT + timedelta(minutes=30),
+        order=HistoryOrder.ASC,
+        limit=100,
+    )
+    assert [item.source_score_id for item in history] == [
+        older.score.id,
+        newer.score.id,
+    ]
 
 
 async def test_database_rejects_invalid_action_sizing(session: AsyncSession) -> None:

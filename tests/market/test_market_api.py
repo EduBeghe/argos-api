@@ -51,11 +51,6 @@ def test_candle_response_maps_domain_values_exactly() -> None:
         {
             "asset": "BTC/USDT",
             "interval": "5m",
-            "start_time": "2026-07-15T09:00:00-03:00",
-        },
-        {
-            "asset": "BTC/USDT",
-            "interval": "5m",
             "start_time": "2026-07-15T12:00:00Z",
             "end_time": "2026-07-15T11:00:00Z",
         },
@@ -139,11 +134,6 @@ def test_candles_endpoint_uses_defaults_and_returns_empty_result(
         {
             "asset": "BTC/USDT",
             "interval": "5m",
-            "start_time": "2026-07-15T09:00:00-03:00",
-        },
-        {
-            "asset": "BTC/USDT",
-            "interval": "5m",
             "start_time": "2026-07-15T13:00:00Z",
             "end_time": "2026-07-15T12:00:00Z",
         },
@@ -155,6 +145,20 @@ def test_candles_endpoint_rejects_invalid_query(
     response = client.get("/market/candles", params=params)
 
     assert response.status_code == 422
+
+
+def test_candle_query_normalizes_timezone_aware_bounds_to_utc() -> None:
+    query = MarketCandleQuery.model_validate(
+        {
+            "asset": "BTC/USDT",
+            "interval": "5m",
+            "from": "2026-07-15T09:00:00-03:00",
+            "to": "2026-07-15T10:00:00-03:00",
+        }
+    )
+
+    assert query.effective_from == datetime(2026, 7, 15, 12, tzinfo=UTC)
+    assert query.effective_to == datetime(2026, 7, 15, 13, tzinfo=UTC)
 
 
 def test_build_status_returns_supported_assets_in_order_with_freshness() -> None:

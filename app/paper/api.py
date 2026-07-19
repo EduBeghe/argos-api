@@ -7,6 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
+from app.market.catalog import (
+    InstrumentCapability,
+    MarketCatalogAmbiguityError,
+    MarketCatalogError,
+    resolve_instrument,
+)
 from app.market.enums import Asset
 from app.paper.config import DEFAULT_ACCOUNT_CURRENCY
 from app.paper.decision_cycles import get_cycle, list_cycles
@@ -30,11 +36,13 @@ from app.paper.schemas import (
     PaperPortfolioResponse,
     PaperPortfolioSnapshotResponse,
     PaperPositionResponse,
+    PaperTradeQuery,
     PaperTradeResponse,
 )
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 Session = Annotated[AsyncSession, Depends(get_db_session)]
+TradeQuery = Annotated[PaperTradeQuery, Query()]
 
 
 async def _active(session: AsyncSession) -> PaperTradingRunRecord:
@@ -171,15 +179,37 @@ async def paper_positions(
 @router.get("/trades", response_model=list[PaperTradeResponse])
 async def paper_trades(
     session: Session,
-    run_id: Annotated[UUID | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    params: TradeQuery,
 ) -> list[PaperTradeResponse]:
-    run = await _selected_run(session, run_id)
+    run = await _selected_run(session, params.run_id)
+    instrument = None
+    if params.asset is not None and params.interval is not None:
+        try:
+            instrument = resolve_instrument(
+                asset=params.asset,
+                interval=params.interval,
+                capability=InstrumentCapability.DECISION,
+                provider=params.provider,
+                market_type=params.market_type,
+            )
+        except MarketCatalogAmbiguityError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except MarketCatalogError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
     return [
         PaperTradeResponse.from_record(item)
         for item in await list_trades(
-            session, run_id=run.id, limit=limit, offset=offset
+            session,
+            run_id=run.id,
+            asset=instrument.asset if instrument else None,
+            provider=instrument.provider if instrument else None,
+            market_type=instrument.market_type if instrument else None,
+            interval=instrument.interval if instrument else None,
+            from_time=params.from_time,
+            to_time=params.to_time,
+            order=params.order,
+            limit=params.limit,
+            offset=params.offset,
         )
     ]
 

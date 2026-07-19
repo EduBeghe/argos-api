@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database.base import Base
 from app.decisions.persistence import DecisionSnapshotRecord
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.history import HistoryOrder
 from app.paper.config import SimulationConfiguration
 from app.paper.models import (
     PaperPosition,
@@ -364,18 +365,41 @@ async def list_positions(
 
 
 async def list_trades(
-    session: AsyncSession, *, run_id: UUID, limit: int, offset: int
+    session: AsyncSession,
+    *,
+    run_id: UUID,
+    asset: Asset | None = None,
+    provider: Provider | None = None,
+    market_type: MarketType | None = None,
+    interval: Interval | None = None,
+    from_time: datetime | None = None,
+    to_time: datetime | None = None,
+    order: HistoryOrder = HistoryOrder.DESC,
+    limit: int,
+    offset: int,
 ) -> list[PaperTradeRecord]:
+    statement = select(PaperTradeRecord).where(PaperTradeRecord.run_id == run_id)
+    if asset is not None:
+        statement = statement.where(PaperTradeRecord.asset == asset.value)
+    if provider is not None:
+        statement = statement.where(PaperTradeRecord.provider == provider.value)
+    if market_type is not None:
+        statement = statement.where(PaperTradeRecord.market_type == market_type.value)
+    if interval is not None:
+        statement = statement.where(PaperTradeRecord.interval == interval.value)
+    if from_time is not None:
+        statement = statement.where(PaperTradeRecord.executed_at >= from_time)
+    if to_time is not None:
+        statement = statement.where(PaperTradeRecord.executed_at <= to_time)
+    ordering = (
+        (PaperTradeRecord.executed_at.asc(), PaperTradeRecord.id.asc())
+        if order is HistoryOrder.ASC
+        else (PaperTradeRecord.executed_at.desc(), PaperTradeRecord.id.desc())
+    )
     return list(
         (
             await session.scalars(
-                select(PaperTradeRecord)
-                .where(PaperTradeRecord.run_id == run_id)
-                .order_by(
-                    PaperTradeRecord.executed_at.desc(), PaperTradeRecord.id.desc()
-                )
-                .limit(limit)
-                .offset(offset)
+                statement.order_by(*ordering).limit(limit).offset(offset)
             )
         ).all()
     )

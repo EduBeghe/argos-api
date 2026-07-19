@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database.base import Base
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.history import HistoryOrder
 from app.scores.models import MarketScore
 
 
@@ -170,3 +171,44 @@ async def get_latest_market_score(
             for column in record.__table__.columns
         }
     )
+
+
+async def list_market_scores(
+    *,
+    session: AsyncSession,
+    asset: Asset,
+    provider: Provider,
+    market_type: MarketType,
+    interval: Interval,
+    from_time: datetime | None,
+    to_time: datetime | None,
+    order: HistoryOrder,
+    limit: int,
+) -> list[MarketScore]:
+    """Return persisted scores for one identity without calculating new scores."""
+
+    statement = select(MarketScoreRecord).where(
+        MarketScoreRecord.asset == asset.value,
+        MarketScoreRecord.provider == provider.value,
+        MarketScoreRecord.market_type == market_type.value,
+        MarketScoreRecord.interval == interval.value,
+    )
+    if from_time is not None:
+        statement = statement.where(MarketScoreRecord.candle_open_time >= from_time)
+    if to_time is not None:
+        statement = statement.where(MarketScoreRecord.candle_open_time <= to_time)
+    ordering = (
+        (MarketScoreRecord.candle_open_time.asc(), MarketScoreRecord.id.asc())
+        if order is HistoryOrder.ASC
+        else (MarketScoreRecord.candle_open_time.desc(), MarketScoreRecord.id.desc())
+    )
+    records = (await session.scalars(statement.order_by(*ordering).limit(limit))).all()
+    return [
+        MarketScore.model_validate(
+            {
+                column.name: getattr(record, column.name)
+                for column in record.__table__.columns
+            }
+        )
+        for record in records
+    ]

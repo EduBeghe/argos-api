@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database.base import Base
 from app.decisions.models import DecisionSnapshot
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.market.history import HistoryOrder
 from app.market.persistence import MarketCandleRecord
 from app.scores.models import MarketScore
 from app.scores.persistence import MarketScoreRecord
@@ -95,17 +97,6 @@ class DecisionSnapshotRecord(Base):
             name="ck_decisions_action_sizing",
         ),
         CheckConstraint(
-            "(action = 'open_position' AND NOT position_is_open AND "
-            "applied_rule = 'entry_threshold_met') OR "
-            "(action IN ('increase_position', 'sell_partial', 'sell_all') AND "
-            "position_is_open) OR "
-            "(action = 'no_action' AND NOT position_is_open AND "
-            "applied_rule = 'entry_threshold_not_met') OR "
-            "(action = 'no_action' AND position_is_open AND "
-            "applied_rule = 'open_position_retained')",
-            name="ck_decisions_action_state_rule",
-        ),
-        CheckConstraint(
             "length(btrim(applied_rule)) > 0", name="ck_decisions_applied_rule"
         ),
         CheckConstraint(
@@ -118,6 +109,15 @@ class DecisionSnapshotRecord(Base):
             "configuration_version",
             "position_is_open",
             name="uq_decision_snapshots_source_evaluation",
+        ),
+        Index(
+            "ix_decisions_identity_timestamp",
+            "asset",
+            "provider",
+            "market_type",
+            "interval",
+            "decision_timestamp",
+            "id",
         ),
     )
 
@@ -259,3 +259,62 @@ async def get_latest_decision_snapshot(
             for column in record.__table__.columns
         }
     )
+
+
+async def list_decision_snapshots(
+    *,
+    session: AsyncSession,
+    asset: Asset,
+    provider: Provider,
+    market_type: MarketType,
+    interval: Interval,
+    run_id: UUID | None,
+    from_time: datetime | None,
+    to_time: datetime | None,
+    order: HistoryOrder,
+    limit: int,
+) -> list[DecisionSnapshot]:
+    """Return immutable persisted decisions, optionally attributed to one Paper run."""
+
+    statement = select(DecisionSnapshotRecord).where(
+        DecisionSnapshotRecord.asset == asset.value,
+        DecisionSnapshotRecord.provider == provider.value,
+        DecisionSnapshotRecord.market_type == market_type.value,
+        DecisionSnapshotRecord.interval == interval.value,
+    )
+    if run_id is not None:
+        from app.paper.decision_cycles import PaperDecisionCycleRecord
+
+        statement = statement.join(
+            PaperDecisionCycleRecord,
+            PaperDecisionCycleRecord.decision_snapshot_id == DecisionSnapshotRecord.id,
+        ).where(PaperDecisionCycleRecord.paper_run_id == run_id)
+    if from_time is not None:
+        statement = statement.where(
+            DecisionSnapshotRecord.decision_timestamp >= from_time
+        )
+    if to_time is not None:
+        statement = statement.where(
+            DecisionSnapshotRecord.decision_timestamp <= to_time
+        )
+    ordering = (
+        (
+            DecisionSnapshotRecord.decision_timestamp.asc(),
+            DecisionSnapshotRecord.id.asc(),
+        )
+        if order is HistoryOrder.ASC
+        else (
+            DecisionSnapshotRecord.decision_timestamp.desc(),
+            DecisionSnapshotRecord.id.desc(),
+        )
+    )
+    records = (await session.scalars(statement.order_by(*ordering).limit(limit))).all()
+    return [
+        DecisionSnapshot.model_validate(
+            {
+                column.name: getattr(record, column.name)
+                for column in record.__table__.columns
+            }
+        )
+        for record in records
+    ]

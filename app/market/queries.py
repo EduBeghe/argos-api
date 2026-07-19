@@ -51,11 +51,11 @@ async def list_market_candles(
     if end_time is not None:
         statement = statement.where(MarketCandleRecord.open_time <= end_time)
     ordering = (
-        asc(MarketCandleRecord.open_time)
+        (asc(MarketCandleRecord.open_time), asc(MarketCandleRecord.id))
         if order is CandleOrder.ASC
-        else desc(MarketCandleRecord.open_time)
+        else (desc(MarketCandleRecord.open_time), desc(MarketCandleRecord.id))
     )
-    records = await session.scalars(statement.order_by(ordering).limit(limit))
+    records = await session.scalars(statement.order_by(*ordering).limit(limit))
     return [to_domain(record) for record in records.all()]
 
 
