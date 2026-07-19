@@ -7,6 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.history import HistoryWindow
+from app.paper.evaluation import (
+    BenchmarkMethod,
+    EvaluationStatus,
+    EvaluationUnavailableReason,
+)
 from app.paper.models import PaperPositionStatus, PaperTradingRun
 from app.paper.persistence import PaperTradeRecord
 
@@ -206,3 +211,113 @@ class PaperPerformanceResponse(BaseModel):
     latest_snapshot_boundary: datetime | None
     evaluated_from: datetime
     evaluated_until: datetime
+
+
+class PaperEvaluationRunResponse(BaseModel):
+    run_id: UUID
+    status: str
+    account_currency: str
+    configuration_version: int
+    evaluated_from: datetime
+    evaluated_until: datetime
+    latest_snapshot_id: UUID | None
+    snapshot_count: int
+
+
+class PaperStrategyEvaluationResponse(BaseModel):
+    status: EvaluationStatus
+    unavailable_reason: EvaluationUnavailableReason | None
+    initial_equity: Decimal
+    ending_equity: Decimal | None
+    absolute_pnl: Decimal | None
+    total_return: Decimal | None
+    current_drawdown: Decimal | None
+    max_drawdown: Decimal | None
+    realized_gross_pnl: Decimal | None
+    realized_net_pnl: Decimal | None
+    unrealized_pnl: Decimal | None
+    fees_paid: Decimal | None
+    estimated_slippage_cost: Decimal | None
+    decision_count: int
+    decision_counts_by_action: dict[str, int]
+    trade_count: int
+    trade_counts_by_side: dict[str, int]
+    open_position_count: int
+    closed_position_count: int
+    winning_position_count: int
+    losing_position_count: int
+    breakeven_position_count: int
+    win_rate: Decimal | None
+    average_win: Decimal | None
+    average_loss: Decimal | None
+    profit_factor: Decimal | None
+
+
+class BenchmarkInstrumentResponse(BaseModel):
+    asset: str
+    provider: str
+    market_type: str
+    interval: str
+    status: EvaluationStatus
+    unavailable_reason: EvaluationUnavailableReason | None
+    allocation: Decimal
+    entry_candle_open_time: datetime | None
+    entry_observed_price: Decimal | None
+    entry_execution_price: Decimal | None
+    quantity: Decimal | None
+    entry_fee: Decimal | None
+    estimated_entry_slippage_cost: Decimal | None
+    ending_candle_open_time: datetime | None
+    ending_mark_price: Decimal | None
+    ending_market_value: Decimal | None
+    absolute_pnl: Decimal | None
+    total_return: Decimal | None
+
+
+class PaperBenchmarkEvaluationResponse(BaseModel):
+    status: EvaluationStatus
+    unavailable_reason: EvaluationUnavailableReason | None
+    method: BenchmarkMethod
+    instrument_count: int
+    initial_equity: Decimal
+    ending_asset_value: Decimal | None
+    remaining_cash: Decimal | None
+    ending_equity: Decimal | None
+    absolute_pnl: Decimal | None
+    total_return: Decimal | None
+    entry_fees: Decimal | None
+    entry_slippage_cost: Decimal | None
+    instruments: list[BenchmarkInstrumentResponse]
+
+
+class PaperEvaluationComparisonResponse(BaseModel):
+    status: EvaluationStatus
+    unavailable_reason: EvaluationUnavailableReason | None
+    strategy_excess_return: Decimal | None
+    strategy_minus_benchmark_pnl: Decimal | None
+
+
+class PaperInstrumentEvaluationResponse(BaseModel):
+    asset: str
+    provider: str
+    market_type: str
+    interval: str
+    decision_count: int
+    decision_counts_by_action: dict[str, int]
+    trade_count: int
+    trade_counts_by_side: dict[str, int]
+    fees_paid: Decimal
+    estimated_slippage_cost: Decimal
+    open_position_count: int
+    closed_position_count: int
+    realized_gross_pnl: Decimal
+    realized_net_pnl: Decimal
+    unrealized_pnl: Decimal | None
+
+
+class PaperEvaluationResponse(BaseModel):
+    run: PaperEvaluationRunResponse
+    strategy: PaperStrategyEvaluationResponse
+    benchmark: PaperBenchmarkEvaluationResponse
+    comparison: PaperEvaluationComparisonResponse
+    instruments: list[PaperInstrumentEvaluationResponse]

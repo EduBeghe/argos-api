@@ -106,6 +106,97 @@ def test_performance_uses_selected_run_and_persisted_points(
     query.assert_awaited_once_with(ANY, run_id=domain_run.id)
 
 
+def test_evaluation_uses_selected_run_and_preserves_missing_run_semantics(
+    client: TestClient,
+) -> None:
+    selected = SimpleNamespace(id=uuid4())
+    result = {
+        "run": {
+            "run_id": selected.id,
+            "status": "active",
+            "account_currency": "USDT",
+            "configuration_version": 1,
+            "evaluated_from": datetime(2026, 7, 17, tzinfo=UTC),
+            "evaluated_until": datetime(2026, 7, 17, tzinfo=UTC),
+            "latest_snapshot_id": None,
+            "snapshot_count": 0,
+        },
+        "strategy": {
+            "status": "unavailable",
+            "unavailable_reason": "no_equity_snapshot",
+            "initial_equity": Decimal("10000"),
+            **{
+                name: None
+                for name in (
+                    "ending_equity",
+                    "absolute_pnl",
+                    "total_return",
+                    "current_drawdown",
+                    "max_drawdown",
+                    "realized_gross_pnl",
+                    "realized_net_pnl",
+                    "unrealized_pnl",
+                    "fees_paid",
+                    "estimated_slippage_cost",
+                    "win_rate",
+                    "average_win",
+                    "average_loss",
+                    "profit_factor",
+                )
+            },
+            "decision_count": 0,
+            "decision_counts_by_action": {},
+            "trade_count": 0,
+            "trade_counts_by_side": {},
+            "open_position_count": 0,
+            "closed_position_count": 0,
+            "winning_position_count": 0,
+            "losing_position_count": 0,
+            "breakeven_position_count": 0,
+        },
+        "benchmark": {
+            "status": "unavailable",
+            "unavailable_reason": "no_decision_universe",
+            "method": "equal_weight_buy_and_hold_v1",
+            "instrument_count": 0,
+            "initial_equity": Decimal("10000"),
+            "ending_asset_value": None,
+            "remaining_cash": None,
+            "ending_equity": None,
+            "absolute_pnl": None,
+            "total_return": None,
+            "entry_fees": None,
+            "entry_slippage_cost": None,
+            "instruments": [],
+        },
+        "comparison": {
+            "status": "unavailable",
+            "unavailable_reason": "strategy_or_benchmark_unavailable",
+            "strategy_excess_return": None,
+            "strategy_minus_benchmark_pnl": None,
+        },
+        "instruments": [],
+    }
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        evaluation = AsyncMock(return_value=result)
+        with (
+            patch("app.paper.api.get_run", AsyncMock(return_value=selected)),
+            patch("app.paper.api.evaluate_paper_run", evaluation),
+        ):
+            response = client.get(f"/paper/evaluation?run_id={selected.id}")
+        with patch("app.paper.api.get_run", AsyncMock(return_value=None)):
+            missing = client.get(f"/paper/evaluation?run_id={uuid4()}")
+        with patch("app.paper.api.get_active_run", AsyncMock(return_value=None)):
+            no_active = client.get("/paper/evaluation")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()["strategy"]["unavailable_reason"] == "no_equity_snapshot"
+    evaluation.assert_awaited_once_with(session=ANY, run=selected)
+    assert missing.status_code == no_active.status_code == 404
+
+
 def test_run_history_is_ordered_paginated_and_unknown_is_404(
     client: TestClient,
 ) -> None:
