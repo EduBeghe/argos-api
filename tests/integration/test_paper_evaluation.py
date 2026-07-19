@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -198,7 +198,34 @@ async def test_benchmark_candles_use_close_boundaries_and_complete_identity(
             _candle("BTC/USDT", "00:30:00", "00:34:59.999000", "99"),
         ]
     )
-    await session.commit()
+    await session.flush()
+
+    savepoint = await session.begin_nested()
+    await session.execute(
+        text("ALTER TABLE market_candles DROP CONSTRAINT ck_market_candles_provider")
+    )
+    await session.execute(
+        text("ALTER TABLE market_candles DROP CONSTRAINT ck_market_candles_interval")
+    )
+    session.add_all(
+        [
+            _candle(
+                "BTC/USDT",
+                "23:55:00",
+                "23:59:59.999000",
+                "777",
+                provider="other",
+            ),
+            _candle(
+                "BTC/USDT",
+                "00:25:00",
+                "00:29:59.999000",
+                "888",
+                interval="15m",
+            ),
+        ]
+    )
+    await session.flush()
 
     entry, ending = await benchmark_candles(
         session,
@@ -214,16 +241,21 @@ async def test_benchmark_candles_use_close_boundaries_and_complete_identity(
     )
     assert entry.close_price == Decimal("10.000000000000000000")
     assert ending.close_price == Decimal("12.000000000000000000")
-    for identity in (
-        MarketIdentity("BTC/USDT", "other", "spot", "5m"),
-        MarketIdentity("BTC/USDT", "binance", "spot", "15m"),
-    ):
-        assert await benchmark_candles(
-            session,
-            identity=identity,
-            started_at=START,
-            evaluated_until=BOUNDARY,
-        ) == (None, None)
+    other_entry, _ = await benchmark_candles(
+        session,
+        identity=MarketIdentity("BTC/USDT", "other", "spot", "5m"),
+        started_at=START,
+        evaluated_until=BOUNDARY,
+    )
+    _, other_ending = await benchmark_candles(
+        session,
+        identity=MarketIdentity("BTC/USDT", "binance", "spot", "15m"),
+        started_at=START,
+        evaluated_until=BOUNDARY,
+    )
+    assert other_entry is not None and other_entry.close_price == Decimal("777")
+    assert other_ending is not None and other_ending.close_price == Decimal("888")
+    await savepoint.rollback()
 
 
 async def test_incomplete_persisted_benchmark_evidence_does_not_reweight(
@@ -481,7 +513,13 @@ def _snapshot(
 
 
 def _candle(
-    asset: str, open_clock: str, close_clock: str, price: str
+    asset: str,
+    open_clock: str,
+    close_clock: str,
+    price: str,
+    *,
+    provider: str = "binance",
+    interval: str = "5m",
 ) -> MarketCandleRecord:
     open_day = 19 if open_clock.startswith("23:") else 20
     close_day = 19 if close_clock.startswith("23:") else 20
@@ -491,9 +529,9 @@ def _candle(
     return MarketCandleRecord(
         id=uuid4(),
         asset=asset,
-        provider="binance",
+        provider=provider,
         market_type="spot",
-        interval="5m",
+        interval=interval,
         open_time=open_time,
         close_time=close_time,
         open_price=value,

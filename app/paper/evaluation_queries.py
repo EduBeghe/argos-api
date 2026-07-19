@@ -30,9 +30,13 @@ async def latest_snapshot_and_count(
             .limit(1)
         ),
     )
+    if snapshot is None:
+        return None, 0
     count = await session.scalar(
         select(func.count(PaperPortfolioSnapshotRecord.id)).where(
-            PaperPortfolioSnapshotRecord.run_id == run_id
+            PaperPortfolioSnapshotRecord.run_id == snapshot.run_id,
+            PaperPortfolioSnapshotRecord.scheduled_boundary
+            <= snapshot.scheduled_boundary,
         )
     )
     return snapshot, int(count or 0)
