@@ -377,7 +377,9 @@ def _decision(
         action=action,
         requested_target_portfolio_percentage=target,
         requested_position_percentage=position,
-        applied_rule="integration_evidence",
+        applied_rule=(
+            "exit_threshold_breached" if action == "sell_all" else "entry_threshold_met"
+        ),
         explanation="Persisted integration evidence.",
         position_is_open=action == "sell_all",
     )
