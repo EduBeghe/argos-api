@@ -18,6 +18,7 @@ from app.optimization.historical_data import (
     HistoricalDatasetRange,
     read_historical_dataset,
 )
+from app.optimization.refinement import RefinementBudget, refine_historical_dataset
 from app.optimization.simulation import simulate_historical_strategy
 from app.paper.persistence import PaperPositionRecord, PaperTradeRecord
 from app.scores.persistence import MarketScoreRecord
@@ -25,7 +26,7 @@ from tests.market.factories import make_candle
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 START = datetime(2024, 3, 1, tzinfo=UTC)
-COUNT = 60
+COUNT = 120
 END = START + timedelta(minutes=5 * COUNT)
 INSTRUMENT = Instrument(
     Asset.BTC_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
@@ -123,5 +124,39 @@ async def test_historical_simulation_is_read_only(session: AsyncSession) -> None
         await session.scalar(select(func.count()).select_from(PaperPositionRecord)),
     )
     assert result.decision_count > 0
+    assert counts_after == counts_before
+    assert not session.new and not session.dirty and not session.deleted
+
+
+async def test_historical_refinement_is_read_only(session: AsyncSession) -> None:
+    counts_before = (
+        await session.scalar(select(func.count()).select_from(MarketFeatureRecord)),
+        await session.scalar(select(func.count()).select_from(MarketScoreRecord)),
+        await session.scalar(select(func.count()).select_from(PaperTradeRecord)),
+        await session.scalar(select(func.count()).select_from(PaperPositionRecord)),
+    )
+    dataset = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    result = refine_historical_dataset(
+        dataset=dataset,
+        initial_cash=Decimal("10000"),
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        budget=RefinementBudget(1, 1, 200, 60),
+    )
+    counts_after = (
+        await session.scalar(select(func.count()).select_from(MarketFeatureRecord)),
+        await session.scalar(select(func.count()).select_from(MarketScoreRecord)),
+        await session.scalar(select(func.count()).select_from(PaperTradeRecord)),
+        await session.scalar(select(func.count()).select_from(PaperPositionRecord)),
+    )
+    assert result.counts.score_configurations_generated == 176
+    assert result.counts.joint_candidates_evaluated == 60
     assert counts_after == counts_before
     assert not session.new and not session.dirty and not session.deleted

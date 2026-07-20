@@ -4,7 +4,9 @@ from decimal import Decimal
 import pytest
 
 from app.scores.calculator import (
+    BASELINE_TECHNICAL_V1_PARAMETERS,
     BaselineScoreInput,
+    BaselineTechnicalParameters,
     ScoreInterpretation,
     calculate_baseline_score,
     clamp,
@@ -144,6 +146,50 @@ def test_repeated_execution_is_deterministic_and_volume_cannot_reverse_sign() ->
     assert calculate_baseline_score(inputs()) == calculate_baseline_score(inputs())
     assert low.overall_score > 0 and high.overall_score > 0
     assert abs(low.overall_score) <= abs(high.overall_score)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        inputs(),
+        replace(inputs(), rsi_14=Decimal("31.25"), return_1=Decimal("-0.001")),
+        replace(inputs(), ema_20=Decimal("98"), return_12=Decimal("-0.02")),
+    ],
+)
+def test_explicit_v1_score_parameters_are_bit_identical(
+    value: BaselineScoreInput,
+) -> None:
+    assert calculate_baseline_score(value) == calculate_baseline_score(
+        value, parameters=BASELINE_TECHNICAL_V1_PARAMETERS
+    )
+
+
+@pytest.mark.parametrize(
+    "weights",
+    [
+        ("NaN", "0", "0", "0", "0"),
+        ("1.1", "0", "0", "-0.1", "0"),
+        ("0.5", "0.2", "0.2", "0.2", "0"),
+        ("0", "0", "0", "0", "0"),
+        ("1", "0", "0", "0", "0.51"),
+    ],
+)
+def test_invalid_score_parameters_are_rejected(
+    weights: tuple[str, str, str, str, str],
+) -> None:
+    with pytest.raises(ValueError):
+        BaselineTechnicalParameters(*(Decimal(value) for value in weights))
+
+
+def test_zero_weights_disable_contributions_and_volume_confirmation() -> None:
+    parameters = BaselineTechnicalParameters(
+        Decimal("0.5"), Decimal("0.5"), Decimal(0), Decimal(0), Decimal(0)
+    )
+    result = calculate_baseline_score(inputs(), parameters=parameters)
+    assert result.return_1_contribution == 0
+    assert result.return_12_contribution == 0
+    assert result.volume_confirmation_factor == 1
+    assert result.overall_score == result.directional_score
 
 
 def test_half_even_quantization_is_symmetric_and_persisted_invariants_hold() -> None:

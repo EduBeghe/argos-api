@@ -23,7 +23,11 @@ from app.optimization.simulation import (
 )
 from app.paper.calculation import calculate_open_position
 from app.paper.config import SimulationConfiguration, quantize_financial
-from app.strategies.baseline_long_only import evaluate_baseline_long_only
+from app.scores.calculator import BaselineTechnicalParameters
+from app.strategies.baseline_long_only import (
+    BaselineLongOnlyParameters,
+    evaluate_baseline_long_only,
+)
 
 START = datetime(2024, 1, 1, tzinfo=UTC)
 INSTRUMENT = Instrument(
@@ -126,6 +130,57 @@ def test_result_preserves_effective_simulation_configuration() -> None:
     assert result.fee_rate == fee_rate
     assert result.slippage_rate == slippage_rate
     assert result.decision_interval == decision_interval
+
+
+def test_result_preserves_effective_strategy_parameters() -> None:
+    parameters = BaselineLongOnlyParameters(
+        Decimal("0.65"), Decimal("0.15"), Decimal("20")
+    )
+    outputs = [SimpleNamespace(overall_score=Decimal("0.7"))] * 4
+    with (
+        patch(
+            "app.optimization.simulation.build_historical_feature_matrix",
+            return_value=matrix(),
+        ),
+        patch(
+            "app.optimization.simulation.calculate_baseline_score", side_effect=outputs
+        ),
+    ):
+        result = simulate_historical_strategy(
+            dataset=source_dataset(),
+            initial_cash=Decimal("10000"),
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            strategy_parameters=parameters,
+        )
+    assert result.strategy_parameters == parameters
+
+
+def test_result_preserves_effective_score_parameters() -> None:
+    parameters = BaselineTechnicalParameters(
+        Decimal("0.5"), Decimal("0.25"), Decimal(0), Decimal("0.25"), Decimal("0.125")
+    )
+    outputs = [SimpleNamespace(overall_score=Decimal("0.7"))] * 4
+    with (
+        patch(
+            "app.optimization.simulation.build_historical_feature_matrix",
+            return_value=matrix(),
+        ),
+        patch(
+            "app.optimization.simulation.calculate_baseline_score", side_effect=outputs
+        ) as calculate,
+    ):
+        result = simulate_historical_strategy(
+            dataset=source_dataset(),
+            initial_cash=Decimal("10000"),
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            score_parameters=parameters,
+        )
+    assert result.score_parameters == parameters
+    assert all(
+        call.kwargs["parameters"] == parameters for call in calculate.call_args_list
+    )
 
 
 def test_results_retain_distinguishable_rate_configurations_deterministically() -> None:

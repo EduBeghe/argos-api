@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from app.strategies.baseline_long_only import (
+    BASELINE_LONG_ONLY_V1_PARAMETERS,
     CONFIGURATION_VERSION,
     OPEN_POSITION_TARGET_PORTFOLIO_PERCENTAGE,
     REQUIRED_SCORE_MODEL_NAME,
@@ -12,6 +13,7 @@ from app.strategies.baseline_long_only import (
     SELL_ALL_POSITION_PERCENTAGE,
     STRATEGY_NAME,
     STRATEGY_VERSION,
+    BaselineLongOnlyParameters,
     StrategyAction,
     StrategyDecision,
     evaluate_baseline_long_only,
@@ -143,6 +145,63 @@ def test_repeated_evaluation_is_deterministic() -> None:
     )
 
     assert first == second
+
+
+def test_explicit_version_one_parameters_preserve_default_behavior() -> None:
+    scores = (Decimal("0.19"), Decimal("0.20"), Decimal("0.59"), Decimal("0.60"))
+    for score in scores:
+        for position_is_open in (False, True):
+            assert evaluate_baseline_long_only(
+                overall_score=score,
+                position_is_open=position_is_open,
+            ) == evaluate_baseline_long_only(
+                overall_score=score,
+                position_is_open=position_is_open,
+                parameters=BASELINE_LONG_ONLY_V1_PARAMETERS,
+            )
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        (Decimal("NaN"), Decimal("0.20"), Decimal("15")),
+        (Decimal("1.1"), Decimal("0.20"), Decimal("15")),
+        (Decimal("0.60"), Decimal("-1.1"), Decimal("15")),
+        (Decimal("0.20"), Decimal("0.20"), Decimal("15")),
+        (Decimal("0.20"), Decimal("0.30"), Decimal("15")),
+        (Decimal("0.60"), Decimal("0.20"), Decimal("0")),
+        (Decimal("0.60"), Decimal("0.20"), Decimal("100.01")),
+    ],
+)
+def test_invalid_strategy_parameters_are_rejected(
+    parameters: tuple[Decimal, Decimal, Decimal],
+) -> None:
+    with pytest.raises(ValueError):
+        BaselineLongOnlyParameters(*parameters)
+
+
+def test_custom_parameters_control_thresholds_and_sizing() -> None:
+    parameters = BaselineLongOnlyParameters(
+        Decimal("0.70"), Decimal("0.10"), Decimal("20")
+    )
+    below_entry = evaluate_baseline_long_only(
+        overall_score=Decimal("0.65"),
+        position_is_open=False,
+        parameters=parameters,
+    )
+    opened = evaluate_baseline_long_only(
+        overall_score=Decimal("0.70"),
+        position_is_open=False,
+        parameters=parameters,
+    )
+    retained = evaluate_baseline_long_only(
+        overall_score=Decimal("0.10"),
+        position_is_open=True,
+        parameters=parameters,
+    )
+    assert below_entry.action is StrategyAction.NO_ACTION
+    assert opened.requested_target_portfolio_percentage == Decimal("20")
+    assert retained.action is StrategyAction.NO_ACTION
 
 
 @pytest.mark.parametrize(

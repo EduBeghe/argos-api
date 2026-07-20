@@ -5,6 +5,7 @@ from uuid import UUID
 
 from app.market.catalog import Instrument
 from app.optimization.feature_matrix import (
+    HistoricalFeatureMatrix,
     HistoricalFeatureRow,
     build_historical_feature_matrix,
 )
@@ -18,11 +19,18 @@ from app.paper.config import (
 )
 from app.paper.models import PaperPosition, PaperPositionStatus, PaperTradeSide
 from app.scores.calculation import MODEL_NAME, MODEL_VERSION
-from app.scores.calculator import BaselineScoreInput, calculate_baseline_score
+from app.scores.calculator import (
+    BASELINE_TECHNICAL_V1_PARAMETERS,
+    BaselineScoreInput,
+    BaselineTechnicalParameters,
+    calculate_baseline_score,
+)
 from app.strategies.baseline_long_only import (
+    BASELINE_LONG_ONLY_V1_PARAMETERS,
     CONFIGURATION_VERSION,
     STRATEGY_NAME,
     STRATEGY_VERSION,
+    BaselineLongOnlyParameters,
     StrategyAction,
     evaluate_baseline_long_only,
 )
@@ -92,6 +100,8 @@ class HistoricalSimulationResult:
     fee_rate: Decimal
     slippage_rate: Decimal
     decision_interval: timedelta
+    strategy_parameters: BaselineLongOnlyParameters
+    score_parameters: BaselineTechnicalParameters
     initial_cash: Decimal
     final_cash: Decimal
     final_equity: Decimal
@@ -128,8 +138,46 @@ def simulate_historical_strategy(
     strategy_version: int = STRATEGY_VERSION,
     configuration_version: int = CONFIGURATION_VERSION,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
+    strategy_parameters: BaselineLongOnlyParameters = BASELINE_LONG_ONLY_V1_PARAMETERS,
+    score_parameters: BaselineTechnicalParameters = BASELINE_TECHNICAL_V1_PARAMETERS,
 ) -> HistoricalSimulationResult:
     """Run baseline_long_only v1 deterministically against closed candle evidence."""
+
+    matrix = build_historical_feature_matrix(dataset)
+    return simulate_historical_feature_matrix(
+        dataset=dataset,
+        feature_matrix=matrix,
+        initial_cash=initial_cash,
+        fee_rate=fee_rate,
+        slippage_rate=slippage_rate,
+        score_model_name=score_model_name,
+        score_model_version=score_model_version,
+        strategy_name=strategy_name,
+        strategy_version=strategy_version,
+        configuration_version=configuration_version,
+        decision_interval=decision_interval,
+        strategy_parameters=strategy_parameters,
+        score_parameters=score_parameters,
+    )
+
+
+def simulate_historical_feature_matrix(
+    *,
+    dataset: HistoricalDataset,
+    feature_matrix: HistoricalFeatureMatrix,
+    initial_cash: Decimal,
+    fee_rate: Decimal,
+    slippage_rate: Decimal,
+    score_model_name: str = MODEL_NAME,
+    score_model_version: int = MODEL_VERSION,
+    strategy_name: str = STRATEGY_NAME,
+    strategy_version: int = STRATEGY_VERSION,
+    configuration_version: int = CONFIGURATION_VERSION,
+    decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
+    strategy_parameters: BaselineLongOnlyParameters = BASELINE_LONG_ONLY_V1_PARAMETERS,
+    score_parameters: BaselineTechnicalParameters = BASELINE_TECHNICAL_V1_PARAMETERS,
+) -> HistoricalSimulationResult:
+    """Simulate a precomputed Feature matrix without rebuilding it."""
 
     if score_model_name != MODEL_NAME or score_model_version != MODEL_VERSION:
         raise HistoricalSimulationError("unsupported historical score model")
@@ -149,10 +197,9 @@ def simulate_historical_strategy(
         fee_rate,
         slippage_rate,
     )
-    matrix = build_historical_feature_matrix(dataset)
     boundaries = tuple(
         (row.candle_open_time + timedelta(minutes=5), row)
-        for row in matrix.rows
+        for row in feature_matrix.rows
         if _is_boundary(row.candle_open_time + timedelta(minutes=5), decision_interval)
     )
     if not boundaries:
@@ -174,10 +221,11 @@ def simulate_historical_strategy(
         equity_before = _equity(cash, quantity, observed_price)
         quantity_before = quantity
         cash_before = cash
-        score = calculate_baseline_score(_score_input(row))
+        score = calculate_baseline_score(_score_input(row), parameters=score_parameters)
         decision = evaluate_baseline_long_only(
             overall_score=score.overall_score,
             position_is_open=quantity > 0,
+            parameters=strategy_parameters,
         )
         if decision.action is StrategyAction.OPEN_POSITION:
             calculation = calculate_open_position(
@@ -286,6 +334,8 @@ def simulate_historical_strategy(
         dataset=dataset,
         configuration=configuration,
         decision_interval=decision_interval,
+        strategy_parameters=strategy_parameters,
+        score_parameters=score_parameters,
         starting_cash=starting_cash,
         cash=cash,
         quantity=quantity,
@@ -395,6 +445,8 @@ def _result(
     dataset: HistoricalDataset,
     configuration: SimulationConfiguration,
     decision_interval: timedelta,
+    strategy_parameters: BaselineLongOnlyParameters,
+    score_parameters: BaselineTechnicalParameters,
     starting_cash: Decimal,
     cash: Decimal,
     quantity: Decimal,
@@ -444,6 +496,8 @@ def _result(
         configuration.fee_rate,
         configuration.slippage_rate,
         decision_interval,
+        strategy_parameters,
+        score_parameters,
         starting_cash,
         cash,
         final.equity,

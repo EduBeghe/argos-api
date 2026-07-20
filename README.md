@@ -508,6 +508,82 @@ domain vocabulary reserves partial selling, `baseline_long_only` version 1 does
 not emit it. This is a deterministic simulator, not backtesting infrastructure
 for multiple Strategies and not an optimizer or profitability guarantee.
 
+### Deterministic strategy refinement
+
+Run the first bounded, read-only refiner for `baseline_long_only`:
+
+```sh
+python -m app.jobs.refine_historical_strategy \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-04-01T00:00:00Z \
+  --asset BTC/USDT \
+  --provider binance \
+  --market-type spot \
+  --interval 5m \
+  --initial-cash 10000 \
+  --fee-rate 0.001 \
+  --slippage-rate 0.0005 \
+  --validation-top-k 10 \
+  --score-screening-top-k 12 \
+  --max-score-configurations 200 \
+  --max-joint-candidates 1000
+```
+
+The refiner constructs the historical Feature matrix once. Score screening first
+tests the 35 directional combinations on a `0.25` simplex for trend, RSI,
+return-1, and return-12. Each is combined
+with volume-confirmation weights `0`, `0.125`, `0.25`, `0.375`, and `0.50`, and
+the exact production score weights are included once. Screening uses only the
+first chronological half of training and retains 12 score configurations by
+default.
+
+Joint refinement combines retained score configurations with entry thresholds
+`0.55`, `0.60`, `0.65`, and `0.70`; exit thresholds `0.10` through `0.30` in
+`0.05` steps; and target allocations `10`, `15`, and `20` percent. The production
+score weights `0.55/0.1575/0.09/0.2025` with volume `0.25` and Strategy
+parameters `0.60/0.20/15%` remain unchanged and explicitly identified.
+
+Decision boundaries are split chronologically into 60% training, 20%
+validation, and 20% untouched test evidence. Each segment starts with the same
+cash and no open Position. Features may use earlier candles for warm-up, while
+each segment contains only its own aligned Decision boundaries, preventing
+future evidence and test results from influencing selection.
+
+Training ranks every joint candidate by net return, drawdown, trade count, and a
+stable ID derived from all score and Strategy parameters. Only the configured top
+K reaches validation. A recommendation must also beat the production baseline
+validation return after the supplied fees and slippage, keep drawdown no greater
+than 10%, and execute at least one Trade. Test evaluates only the selected
+candidate, production baseline, and a separately calculated buy-and-hold
+benchmark; it confirms or rejects the fixed recommendation and never changes it.
+Buy and hold enters and exits at segment boundaries with identical fees and
+slippage. Return over drawdown is reported as zero when maximum drawdown is zero,
+avoiding an undefined ratio. Five additional controlled one-at-a-time ablations
+use the production Strategy on the same screening segment. A directional signal
+is set to zero and its production weight is redistributed proportionally across
+the other three directional signals using Decimal, 18-place ROUND_HALF_EVEN
+quantization, and a deterministic residual on the last enabled weight so their
+sum remains exactly one. The volume ablation changes only its own weight. These
+comparisons report historical metric differences and do not demonstrate
+causality.
+
+The default computational budget retains 12 of at most 200 generated score
+configurations, evaluates at most 1,000 joint candidates, and sends 10 to
+validation. Generation fails clearly instead of silently truncating when a limit
+would be exceeded. Override these bounds with `--score-screening-top-k`,
+`--max-score-configurations`, `--max-joint-candidates`, and
+`--validation-top-k`.
+
+All refinement is in memory after one historical read. The command emits compact
+structured metrics and a deterministic explanation, but persists no experiment,
+Feature, Score, Decision, Trade, Position, or Paper Run and never promotes a
+configuration. Version 1 is single-instrument, long-only, sequential, uses one
+fixed score model and a finite grid, and makes no claim of future profitability.
+Score-model and Strategy parameters remain separate so future candidates can add
+technical, sentiment, news, or ML component weights without coupling those
+future components to Strategy thresholds; none of those components is introduced
+here.
+
 Run Decision generation and Paper execution as a separate one-shot process:
 
 ```sh

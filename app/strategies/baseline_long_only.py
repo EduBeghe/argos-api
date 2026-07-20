@@ -16,6 +16,40 @@ _MINIMUM_SCORE = Decimal("-1")
 _MAXIMUM_SCORE = Decimal("1")
 
 
+@dataclass(frozen=True, slots=True)
+class BaselineLongOnlyParameters:
+    entry_threshold: Decimal
+    exit_threshold: Decimal
+    open_position_target_percentage: Decimal
+
+    def __post_init__(self) -> None:
+        values = (
+            self.entry_threshold,
+            self.exit_threshold,
+            self.open_position_target_percentage,
+        )
+        if any(
+            not isinstance(value, Decimal) or not value.is_finite() for value in values
+        ):
+            raise ValueError("strategy parameters must be finite Decimals")
+        if not (
+            _MINIMUM_SCORE <= self.entry_threshold <= _MAXIMUM_SCORE
+            and _MINIMUM_SCORE <= self.exit_threshold <= _MAXIMUM_SCORE
+        ):
+            raise ValueError("strategy thresholds must be between -1 and 1")
+        if self.exit_threshold >= self.entry_threshold:
+            raise ValueError("exit threshold must be lower than entry threshold")
+        if not Decimal(0) < self.open_position_target_percentage <= Decimal(100):
+            raise ValueError("target percentage must be greater than 0 and at most 100")
+
+
+BASELINE_LONG_ONLY_V1_PARAMETERS = BaselineLongOnlyParameters(
+    ENTRY_THRESHOLD,
+    EXIT_THRESHOLD,
+    OPEN_POSITION_TARGET_PORTFOLIO_PERCENTAGE,
+)
+
+
 class StrategyAction(StrEnum):
     OPEN_POSITION = "open_position"
     INCREASE_POSITION = "increase_position"
@@ -52,6 +86,7 @@ class StrategyDecision:
     required_score_model_version: int
     applied_rule: str
     explanation: str
+    parameters: BaselineLongOnlyParameters = BASELINE_LONG_ONLY_V1_PARAMETERS
 
     def __post_init__(self) -> None:
         if (
@@ -73,7 +108,7 @@ class StrategyDecision:
         if self.action is StrategyAction.OPEN_POSITION:
             valid_sizing = (
                 self.requested_target_portfolio_percentage
-                == OPEN_POSITION_TARGET_PORTFOLIO_PERCENTAGE
+                == self.parameters.open_position_target_percentage
                 and self.requested_position_percentage is None
             )
         elif self.action is StrategyAction.SELL_ALL:
@@ -91,7 +126,10 @@ class StrategyDecision:
 
 
 def evaluate_baseline_long_only(
-    *, overall_score: Decimal, position_is_open: bool
+    *,
+    overall_score: Decimal,
+    position_is_open: bool,
+    parameters: BaselineLongOnlyParameters = BASELINE_LONG_ONLY_V1_PARAMETERS,
 ) -> StrategyDecision:
     if not isinstance(overall_score, Decimal):
         raise ValueError("overall_score must be a Decimal")
@@ -103,34 +141,38 @@ def evaluate_baseline_long_only(
         raise ValueError("position_is_open must be a bool")
 
     if not position_is_open:
-        if overall_score >= ENTRY_THRESHOLD:
+        if overall_score >= parameters.entry_threshold:
             return _decision(
                 action=StrategyAction.OPEN_POSITION,
                 requested_target_portfolio_percentage=(
-                    OPEN_POSITION_TARGET_PORTFOLIO_PERCENTAGE
+                    parameters.open_position_target_percentage
                 ),
                 applied_rule="entry_threshold_met",
                 explanation="Entry threshold met; request a new long position.",
+                parameters=parameters,
             )
         return _decision(
             action=StrategyAction.NO_ACTION,
             applied_rule="entry_threshold_not_met",
             explanation="Entry threshold not met; leave the portfolio unchanged.",
+            parameters=parameters,
         )
 
-    if overall_score >= EXIT_THRESHOLD:
+    if overall_score >= parameters.exit_threshold:
         return _decision(
             action=StrategyAction.NO_ACTION,
             applied_rule="open_position_retained",
             explanation=(
                 "Exit threshold not breached; leave the open position unchanged."
             ),
+            parameters=parameters,
         )
     return _decision(
         action=StrategyAction.SELL_ALL,
         requested_position_percentage=SELL_ALL_POSITION_PERCENTAGE,
         applied_rule="exit_threshold_breached",
         explanation="Exit threshold breached; request complete position liquidation.",
+        parameters=parameters,
     )
 
 
@@ -141,6 +183,7 @@ def _decision(
     explanation: str,
     requested_target_portfolio_percentage: Decimal | None = None,
     requested_position_percentage: Decimal | None = None,
+    parameters: BaselineLongOnlyParameters = BASELINE_LONG_ONLY_V1_PARAMETERS,
 ) -> StrategyDecision:
     return StrategyDecision(
         action=action,
@@ -153,4 +196,5 @@ def _decision(
         required_score_model_version=REQUIRED_SCORE_MODEL_VERSION,
         applied_rule=applied_rule,
         explanation=explanation,
+        parameters=parameters,
     )
