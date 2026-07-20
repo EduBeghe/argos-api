@@ -557,7 +557,9 @@ than 10%, and execute at least one Trade. Test evaluates only the selected
 candidate, production baseline, and a separately calculated buy-and-hold
 benchmark; it confirms or rejects the fixed recommendation and never changes it.
 Buy and hold enters and exits at segment boundaries with identical fees and
-slippage. Return over drawdown is reported as zero when maximum drawdown is zero,
+slippage. Its near-total entry reserves a `0.000001` cash-rate buffer solely to
+absorb Decimal quantization effects, leaving a minimal cash residue; the buffer
+is not an additional fee. Return over drawdown is reported as zero when maximum drawdown is zero,
 avoiding an undefined ratio. Five additional controlled one-at-a-time ablations
 use the production Strategy on the same screening segment. A directional signal
 is set to zero and its production weight is redistributed proportionally across
