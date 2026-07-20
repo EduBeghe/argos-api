@@ -508,6 +508,50 @@ domain vocabulary reserves partial selling, `baseline_long_only` version 1 does
 not emit it. This is a deterministic simulator, not backtesting infrastructure
 for multiple Strategies and not an optimizer or profitability guarantee.
 
+### Deterministic strategy refinement
+
+Run the first bounded, read-only refiner for `baseline_long_only`:
+
+```sh
+python -m app.jobs.refine_historical_strategy \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-04-01T00:00:00Z \
+  --asset BTC/USDT \
+  --provider binance \
+  --market-type spot \
+  --interval 5m \
+  --initial-cash 10000 \
+  --fee-rate 0.001 \
+  --slippage-rate 0.0005 \
+  --validation-top-k 10
+```
+
+The refiner constructs the historical Feature matrix once and explores a fixed,
+deterministic grid: entry thresholds `0.55`, `0.60`, `0.65`, and `0.70`; exit
+thresholds `0.10` through `0.30` in `0.05` steps; and target allocations `10`,
+`15`, and `20` percent. The production version-1 parameters `0.60/0.20/15%`
+remain unchanged and are always an identifiable baseline candidate.
+
+Decision boundaries are split chronologically into 60% training, 20%
+validation, and 20% untouched test evidence. Each segment starts with the same
+cash and no open Position. Features may use earlier candles for warm-up, while
+each segment contains only its own aligned Decision boundaries, preventing
+future evidence and test results from influencing selection.
+
+Training ranks every candidate by net return, drawdown, trade count, and stable
+parameter order. Only the configured top K reaches validation. A recommendation
+requires positive validation return after the supplied fees and slippage,
+drawdown no greater than 10%, and at least one Trade. The test segment evaluates
+only the selected candidate and baseline; it confirms or rejects the already
+fixed recommendation and never changes it. If validation has no qualifying
+candidate, the result explicitly contains no recommendation.
+
+All refinement is in memory after one historical read. The command emits compact
+structured metrics and a deterministic explanation, but persists no experiment,
+Feature, Score, Decision, Trade, Position, or Paper Run and never promotes a
+configuration. Version 1 is single-instrument, long-only, sequential, uses one
+fixed score model and a finite grid, and makes no claim of future profitability.
+
 Run Decision generation and Paper execution as a separate one-shot process:
 
 ```sh
