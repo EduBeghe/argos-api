@@ -18,6 +18,8 @@ from app.optimization.historical_data import (
     HistoricalDatasetRange,
     read_historical_dataset,
 )
+from app.optimization.simulation import simulate_historical_strategy
+from app.paper.persistence import PaperPositionRecord, PaperTradeRecord
 from app.scores.persistence import MarketScoreRecord
 from tests.market.factories import make_candle
 
@@ -90,4 +92,36 @@ async def test_keyset_multi_page_matrix_is_read_only(session: AsyncSession) -> N
         await session.scalar(select(func.count()).select_from(MarketScoreRecord))
         == score_count_before
     )
+    assert not session.new and not session.dirty and not session.deleted
+
+
+async def test_historical_simulation_is_read_only(session: AsyncSession) -> None:
+    counts_before = (
+        await session.scalar(select(func.count()).select_from(MarketFeatureRecord)),
+        await session.scalar(select(func.count()).select_from(MarketScoreRecord)),
+        await session.scalar(select(func.count()).select_from(PaperTradeRecord)),
+        await session.scalar(select(func.count()).select_from(PaperPositionRecord)),
+    )
+    dataset = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    result = simulate_historical_strategy(
+        dataset=dataset,
+        initial_cash=Decimal("10000"),
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+    )
+    counts_after = (
+        await session.scalar(select(func.count()).select_from(MarketFeatureRecord)),
+        await session.scalar(select(func.count()).select_from(MarketScoreRecord)),
+        await session.scalar(select(func.count()).select_from(PaperTradeRecord)),
+        await session.scalar(select(func.count()).select_from(PaperPositionRecord)),
+    )
+    assert result.decision_count > 0
+    assert counts_after == counts_before
     assert not session.new and not session.dirty and not session.deleted

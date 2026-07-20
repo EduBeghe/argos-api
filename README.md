@@ -471,6 +471,43 @@ one. The current roughly 268,000 five-minute candles per asset are read in
 exact memory depends on Python and Decimal object overhead, so production runs
 should observe container memory before increasing the selected range.
 
+### Deterministic historical strategy simulation
+
+Simulate `baseline_technical` version 1 and `baseline_long_only` version 1 for
+one validated historical instrument without modifying operational or Paper
+Trading state:
+
+```sh
+python -m app.jobs.simulate_historical_strategy \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-04-01T00:00:00Z \
+  --asset BTC/USDT \
+  --provider binance \
+  --market-type spot \
+  --interval 5m \
+  --initial-cash 10000 \
+  --fee-rate 0.001 \
+  --slippage-rate 0.0005
+```
+
+The engine builds the Feature matrix once and evaluates only UTC 30-minute
+boundaries. At each boundary it uses the five-minute candle that has just
+closed: the source candle's `close_price` is both the observed Decision evidence
+and the input to the existing Paper execution calculation. No later candle or
+Feature row is visible, preventing look-ahead. BUY and SELL execution prices,
+fees, slippage, sizing, and P&L reuse the same pure production functions.
+
+Cash, the long-only Position, Trades, realized/unrealized P&L, and the boundary
+equity curve remain immutable in-memory results. The command logs only an
+aggregate summary and dataset fingerprint. It performs no writes, external
+requests, or clock-dependent calculations inside the simulation.
+
+Version 1 supports one instrument, one 30-minute cadence, and the existing
+Strategy actions (`OPEN_POSITION`, `SELL_ALL`, and `NO_ACTION`). Although the
+domain vocabulary reserves partial selling, `baseline_long_only` version 1 does
+not emit it. This is a deterministic simulator, not backtesting infrastructure
+for multiple Strategies and not an optimizer or profitability guarantee.
+
 Run Decision generation and Paper execution as a separate one-shot process:
 
 ```sh
