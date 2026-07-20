@@ -100,8 +100,10 @@ def build_search_plan(
     """Plan a bounded deterministic search; no history preserves legacy fallback."""
     if not historical:
         return None
-    quotas = _allocate(max_candidates, allocation)
-    used: set[str] = set()
+    # The baseline consumes the first slot. Only the remainder is allocated, so the
+    # planner cannot exceed its budget while guaranteeing a production reference.
+    quotas = _allocate(max_candidates - 1, allocation)
+    used: set[str] = {production_baseline.stable_candidate_id}
 
     def take(
         values: tuple[CandidateConfiguration, ...], amount: int
@@ -133,9 +135,9 @@ def build_search_plan(
             key=_known_key,
         )
     )
-    known = take(
-        (production_baseline, *(item.configuration for item in known_profiles)),
-        quotas[0],
+    known = (
+        production_baseline,
+        *take(tuple(item.configuration for item in known_profiles), quotas[0]),
     )
     promising_sources = tuple(
         item.configuration
@@ -208,8 +210,10 @@ def build_search_plan(
 
 
 def _allocate(total: int, allocation: PlannerAllocation) -> tuple[int, int, int, int]:
-    if total <= 0:
+    if total < 0:
         raise ValueError("planner candidate budget must be positive")
+    if total == 0:
+        return 0, 0, 0, 0
     weights = (
         allocation.known_rechecks,
         allocation.promising_neighborhoods,

@@ -105,6 +105,74 @@ def test_same_history_produces_bounded_unique_plan_with_all_categories() -> None
     assert first.promising_neighborhoods
 
 
+@pytest.mark.parametrize("budget", [1, 2, 3, 4, 7])
+def test_small_budgets_reserve_one_unique_baseline_and_remain_bounded(
+    budget: int,
+) -> None:
+    baseline = configuration()
+    historical = (
+        HistoricalCandidate(
+            configuration(1),
+            profile(
+                stable_candidate_id=configuration(1).stable_candidate_id,
+                evidence_classification=EvidenceClassification.PROMISING,
+            ),
+            False,
+        ),
+    )
+    novel_pool = (baseline, *(configuration(index) for index in range(1, 20)))
+
+    first = build_search_plan(
+        historical=historical,
+        novel_pool=novel_pool,
+        max_candidates=budget,
+        production_baseline=baseline,
+    )
+    second = build_search_plan(
+        historical=historical,
+        novel_pool=novel_pool,
+        max_candidates=budget,
+        production_baseline=baseline,
+    )
+
+    assert first == second
+    assert first is not None
+    assert len(first.candidates) <= budget
+    assert first.candidates.count(baseline) == 1
+    assert len({item.stable_candidate_id for item in first.candidates}) == len(
+        first.candidates
+    )
+    if budget == 1:
+        assert first.candidates == (baseline,)
+    else:
+        assert len(first.novel_exploration) > 0
+
+
+def test_budget_two_is_baseline_plus_novel_exploration() -> None:
+    baseline = configuration()
+    historical = (
+        HistoricalCandidate(
+            configuration(1),
+            profile(
+                stable_candidate_id=configuration(1).stable_candidate_id,
+                evidence_classification=EvidenceClassification.PROMISING,
+            ),
+            False,
+        ),
+    )
+    plan = build_search_plan(
+        historical=historical,
+        novel_pool=(baseline, configuration(2), configuration(3)),
+        max_candidates=2,
+        production_baseline=baseline,
+    )
+
+    assert plan is not None
+    assert plan.known_rechecks == (baseline,)
+    assert len(plan.novel_exploration) == 1
+    assert plan.candidates == (baseline, *plan.novel_exploration)
+
+
 def test_neighbors_are_valid_and_directional_sum_is_exact() -> None:
     values = _neighbors(configuration())
     assert values

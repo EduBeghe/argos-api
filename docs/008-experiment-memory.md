@@ -51,8 +51,10 @@ predict future performance, or guarantee profitability.
 Planner version 1 assigns the joint budget to known rechecks (15%), neighborhoods around
 promising candidates (50%), uncertain rechecks (15%), and novel exploration (20%).
 Allocations are Decimal values that sum exactly to one; integer residual slots are
-distributed deterministically. Novel exploration is never removed, the production
-baseline remains present, candidates are de-duplicated, and the total never exceeds the
+distributed deterministically after reserving the first slot for the production
+baseline. A budget of one therefore evaluates only the baseline. Larger budgets retain
+a positive novel-exploration allocation. Candidates are de-duplicated, including when
+the baseline also appears in history or the novel pool, and the total never exceeds the
 configured budget.
 
 Neighborhoods move 0.05 directional weight between two signals while preserving an
@@ -93,6 +95,14 @@ python -m app.jobs.refine_historical_strategy <arguments> --persist --force-reco
 A mismatch fails explicitly. Failed runs retain only sanitized failure state; partial
 evaluations never become valid evidence. PostgreSQL uniqueness resolves concurrent
 claims without distributed locks.
+
+A `running` experiment is an execution lease for two hours. An identical invocation
+inside that timeout fails closed as concurrent work. After the timeout, PostgreSQL
+atomically reclaims the same row only when both its `running` state and previously
+observed `started_at` still match. Reclamation refreshes `started_at` and clears terminal
+timestamps and failure text. This compare-and-set rule permits one recovery process,
+preserves the experiment identity, and prevents a killed process from blocking the
+experiment indefinitely.
 
 Inspect row counts and combined table/index storage with:
 

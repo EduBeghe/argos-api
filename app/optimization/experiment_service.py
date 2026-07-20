@@ -30,6 +30,7 @@ from app.optimization.memory import (
     insert_candidate_evaluations,
     load_candidate_definitions,
     load_compatible_evidence,
+    reclaim_abandoned_run,
     upsert_candidates,
 )
 from app.optimization.planning import (
@@ -70,6 +71,11 @@ from app.strategies.baseline_long_only import (
 
 class ExperimentMemoryError(RuntimeError):
     """Raised when experiment memory cannot safely complete or reuse a run."""
+
+
+# A persisted running row acts as a lease. A two-hour window accommodates the current
+# bounded synchronous refinement while ensuring a killed process cannot block forever.
+ABANDONED_EXPERIMENT_TIMEOUT = timedelta(hours=2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,8 +142,26 @@ async def execute_refinement(
                 _stored_int((existing.counts or {}).get("evaluations_computed")),
             ),
         )
+    run = existing
     if existing is not None and existing.status == "running":
-        raise ExperimentMemoryError("an identical experiment is already running")
+        if (
+            not persist
+            or started_at - existing.started_at <= ABANDONED_EXPERIMENT_TIMEOUT
+        ):
+            raise ExperimentMemoryError("an identical experiment is already running")
+        run = await reclaim_abandoned_run(
+            session,
+            run_id=existing.id,
+            previous_started_at=existing.started_at,
+            stale_before=started_at - ABANDONED_EXPERIMENT_TIMEOUT,
+            restarted_at=started_at,
+        )
+        if run is None:
+            await session.rollback()
+            raise ExperimentMemoryError(
+                "an identical experiment was concurrently reclaimed"
+            )
+        await session.commit()
 
     evidence_rows = await load_compatible_evidence(
         session,
@@ -171,7 +195,6 @@ async def execute_refinement(
             allocation=planner_allocation,
         )
     )
-    run = existing
     if persist and existing is None:
         run = await create_run(
             session,

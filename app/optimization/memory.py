@@ -261,6 +261,34 @@ async def create_run(
     return (await session.scalars(statement)).one_or_none()
 
 
+async def reclaim_abandoned_run(
+    session: AsyncSession,
+    *,
+    run_id: UUID,
+    previous_started_at: datetime,
+    stale_before: datetime,
+    restarted_at: datetime,
+) -> StrategyRefinementRunRecord | None:
+    """Atomically reclaim a running experiment only if its observed lease expired."""
+    statement = (
+        update(StrategyRefinementRunRecord)
+        .where(
+            StrategyRefinementRunRecord.id == run_id,
+            StrategyRefinementRunRecord.status == "running",
+            StrategyRefinementRunRecord.started_at == previous_started_at,
+            StrategyRefinementRunRecord.started_at <= stale_before,
+        )
+        .values(
+            started_at=restarted_at,
+            failed_at=None,
+            completed_at=None,
+            failure_reason=None,
+        )
+        .returning(StrategyRefinementRunRecord)
+    )
+    return (await session.scalars(statement)).one_or_none()
+
+
 async def upsert_candidates(
     session: AsyncSession, values: Sequence[dict[str, object]]
 ) -> None:

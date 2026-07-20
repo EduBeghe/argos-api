@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -7,7 +8,12 @@ from unittest.mock import patch
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.core.config import get_settings
 from app.features.persistence import MarketFeatureRecord
@@ -15,11 +21,14 @@ from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord, to_record
 from app.optimization.experiment_service import (
+    ABANDONED_EXPERIMENT_TIMEOUT,
+    ExperimentExecution,
     ExperimentMemoryError,
     execute_refinement,
 )
 from app.optimization.feature_matrix import build_historical_feature_matrix
 from app.optimization.historical_data import (
+    HistoricalDataset,
     HistoricalDatasetIdentity,
     HistoricalDatasetRange,
     read_historical_dataset,
@@ -27,6 +36,7 @@ from app.optimization.historical_data import (
 from app.optimization.memory import (
     StrategyCandidateEvaluationRecord,
     StrategyRefinementRunRecord,
+    reclaim_abandoned_run,
 )
 from app.optimization.refinement import RefinementBudget, refine_historical_dataset
 from app.optimization.simulation import simulate_historical_strategy
@@ -41,6 +51,24 @@ END = START + timedelta(minutes=5 * COUNT)
 INSTRUMENT = Instrument(
     Asset.BTC_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
 )
+
+
+async def execute_memory_refinement(
+    session: AsyncSession,
+    dataset: HistoricalDataset,
+    started_at: datetime,
+) -> ExperimentExecution:
+    return await execute_refinement(
+        session=session,
+        dataset=dataset,
+        initial_cash=Decimal("10000"),
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        budget=RefinementBudget(1, 1, 200, 60),
+        persist=True,
+        force_recompute=False,
+        started_at=started_at,
+    )
 
 
 @pytest_asyncio.fixture
@@ -292,3 +320,152 @@ async def test_failed_refinement_retains_failure_without_valid_evidence(
         )
         == 0
     )
+
+
+async def test_recent_running_is_rejected_and_abandoned_run_completes(
+    session: AsyncSession,
+) -> None:
+    source = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    dataset = replace(source, fingerprint="integration-abandoned-completion")
+    initial_start = END + timedelta(days=5)
+    await session.execute(
+        delete(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    await session.commit()
+    with (
+        patch(
+            "app.optimization.experiment_service.refine_historical_strategy",
+            side_effect=SystemExit("simulated process termination"),
+        ),
+        pytest.raises(SystemExit, match="simulated process termination"),
+    ):
+        await execute_memory_refinement(session, dataset, initial_start)
+
+    with pytest.raises(ExperimentMemoryError, match="already running"):
+        await execute_memory_refinement(
+            session, dataset, initial_start + ABANDONED_EXPERIMENT_TIMEOUT
+        )
+
+    restarted_at = initial_start + ABANDONED_EXPERIMENT_TIMEOUT + timedelta(seconds=1)
+    recovered = await execute_memory_refinement(session, dataset, restarted_at)
+    assert recovered.result is not None
+    run = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    assert run is not None
+    assert run.status == "completed"
+    assert run.started_at == restarted_at
+    assert run.failed_at is None
+    assert run.failure_reason is None
+
+
+async def test_abandoned_run_has_one_atomic_recovery_claim(
+    session: AsyncSession,
+) -> None:
+    source = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    dataset = replace(source, fingerprint="integration-concurrent-recovery")
+    started_at = END + timedelta(days=6)
+    await session.execute(
+        delete(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    await session.commit()
+    with (
+        patch(
+            "app.optimization.experiment_service.refine_historical_strategy",
+            side_effect=SystemExit,
+        ),
+        pytest.raises(SystemExit),
+    ):
+        await execute_memory_refinement(session, dataset, started_at)
+    run = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    assert run is not None
+    engine = session.bind
+    assert isinstance(engine, AsyncEngine)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    restarted_at = started_at + ABANDONED_EXPERIMENT_TIMEOUT + timedelta(seconds=1)
+
+    async def claim() -> bool:
+        async with factory() as independent:
+            claimed = await reclaim_abandoned_run(
+                independent,
+                run_id=run.id,
+                previous_started_at=started_at,
+                stale_before=restarted_at - ABANDONED_EXPERIMENT_TIMEOUT,
+                restarted_at=restarted_at,
+            )
+            await independent.commit()
+            return claimed is not None
+
+    assert sorted(await asyncio.gather(claim(), claim())) == [False, True]
+
+
+async def test_recovered_experiment_failure_is_persisted(session: AsyncSession) -> None:
+    source = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    dataset = replace(source, fingerprint="integration-abandoned-failure")
+    started_at = END + timedelta(days=7)
+    await session.execute(
+        delete(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    await session.commit()
+    with (
+        patch(
+            "app.optimization.experiment_service.refine_historical_strategy",
+            side_effect=SystemExit,
+        ),
+        pytest.raises(SystemExit),
+    ):
+        await execute_memory_refinement(session, dataset, started_at)
+    with (
+        patch(
+            "app.optimization.experiment_service.refine_historical_strategy",
+            side_effect=ExperimentMemoryError("recovered calculation failed"),
+        ),
+        pytest.raises(ExperimentMemoryError, match="recovered calculation failed"),
+    ):
+        await execute_memory_refinement(
+            session,
+            dataset,
+            started_at + ABANDONED_EXPERIMENT_TIMEOUT + timedelta(seconds=1),
+        )
+    run = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    assert run is not None
+    assert run.status == "failed"
+    assert run.failed_at is not None
+    assert run.failure_reason and "recovered calculation failed" in run.failure_reason
