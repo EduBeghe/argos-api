@@ -9,7 +9,12 @@ from app.core.config import get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
-from app.market.catalog import InstrumentCapability, resolve_instrument
+from app.market.catalog import (
+    MARKET_INSTRUMENTS,
+    InstrumentCapability,
+    MarketInstrumentDefinition,
+    resolve_instrument,
+)
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.feature_matrix import build_historical_feature_matrix
 from app.optimization.historical_data import (
@@ -47,17 +52,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def resolve_historical_instrument(
+    *,
+    asset: Asset,
+    provider: Provider,
+    market_type: MarketType,
+    interval: Interval,
+    definitions: tuple[MarketInstrumentDefinition, ...] = MARKET_INSTRUMENTS,
+) -> MarketInstrumentDefinition:
+    """Resolve an instrument enabled for the Feature matrix capability."""
+
+    return resolve_instrument(
+        asset=asset,
+        provider=provider,
+        market_type=market_type,
+        interval=interval,
+        capability=InstrumentCapability.SCORING,
+        definitions=definitions,
+    )
+
+
 async def run(
     args: argparse.Namespace, *, now: datetime | None = None
 ) -> HistoricalDataset:
     settings = get_settings()
     configure_logging(settings.log_level)
-    definition = resolve_instrument(
+    definition = resolve_historical_instrument(
         asset=args.asset,
         provider=args.provider,
         market_type=args.market_type,
         interval=args.interval,
-        capability=InstrumentCapability.INGESTION,
     )
     identity = HistoricalDatasetIdentity(
         instrument=definition.instrument,
