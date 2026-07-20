@@ -36,11 +36,11 @@ def raw_kline() -> list[object]:
     ]
 
 
-def raw_klines(count: int) -> list[list[object]]:
+def raw_klines(count: int, *, start_time: int = OPEN_TIME) -> list[list[object]]:
     rows: list[list[object]] = []
     for index in range(count):
         row = raw_kline()
-        open_time = OPEN_TIME + index * 300_000
+        open_time = start_time + index * 300_000
         row[0] = open_time
         row[6] = open_time + 299_999
         row[4] = str(35_000 + index)
@@ -103,8 +103,11 @@ async def test_feature_failure_preserves_candles_and_next_run_recovers() -> None
         await cleanup.execute(delete(MarketCandleRecord))
         await cleanup.commit()
 
-    async def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=raw_klines(20))
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=raw_klines(20, start_time=int(request.url.params["startTime"])),
+        )
 
     settings = Settings.model_validate(
         {
@@ -124,6 +127,9 @@ async def test_feature_failure_preserves_candles_and_next_run_recovers() -> None
         market_type: MarketType,
         interval: Interval,
         calculated_at: datetime,
+        target_start_time: datetime | None = None,
+        target_end_time: datetime | None = None,
+        context_limit: int | None = None,
     ) -> FeatureCalculationResult:
         if asset is Asset.ETH_USDT:
             raise original
@@ -134,6 +140,9 @@ async def test_feature_failure_preserves_candles_and_next_run_recovers() -> None
             market_type=market_type,
             interval=interval,
             calculated_at=calculated_at,
+            target_start_time=target_start_time,
+            target_end_time=target_end_time,
+            context_limit=context_limit,
         )
 
     with (

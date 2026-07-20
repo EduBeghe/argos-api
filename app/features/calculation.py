@@ -1,6 +1,8 @@
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +25,9 @@ from app.market.persistence import MarketCandleRecord
 
 FEATURE_VERSION = 1
 EMA_20_VERSION = FEATURE_VERSION
+# Bounds live-ingest memory independently of total persisted candle history while
+# retaining far more context than the longest current recursive indicator requires.
+LIVE_FEATURE_CONTEXT_CANDLES = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +55,7 @@ class FeatureCalculationResult:
     first_feature_time: datetime | None
     last_feature_time: datetime | None
     features: tuple[PerFeatureCalculationResult, ...]
+    target_candle_count: int = 0
 
     def __post_init__(self) -> None:
         if self.values_inserted + self.duplicates != self.values_calculated:
@@ -70,24 +76,36 @@ async def calculate_market_features(
     market_type: MarketType,
     interval: Interval,
     calculated_at: datetime,
+    target_start_time: datetime | None = None,
+    target_end_time: datetime | None = None,
+    context_limit: int | None = None,
 ) -> FeatureCalculationResult:
-    statement = (
-        select(
-            MarketCandleRecord.open_time,
-            MarketCandleRecord.high_price,
-            MarketCandleRecord.low_price,
-            MarketCandleRecord.close_price,
-            MarketCandleRecord.quote_asset_volume,
-        )
-        .where(
-            MarketCandleRecord.asset == asset.value,
-            MarketCandleRecord.provider == provider.value,
-            MarketCandleRecord.market_type == market_type.value,
-            MarketCandleRecord.interval == interval.value,
-        )
-        .order_by(MarketCandleRecord.open_time.asc())
+    statement = select(
+        MarketCandleRecord.open_time,
+        MarketCandleRecord.high_price,
+        MarketCandleRecord.low_price,
+        MarketCandleRecord.close_price,
+        MarketCandleRecord.quote_asset_volume,
+    ).where(
+        MarketCandleRecord.asset == asset.value,
+        MarketCandleRecord.provider == provider.value,
+        MarketCandleRecord.market_type == market_type.value,
+        MarketCandleRecord.interval == interval.value,
     )
-    candles = (await session.execute(statement)).tuples().all()
+    if target_end_time is not None:
+        statement = statement.where(MarketCandleRecord.open_time < target_end_time)
+    if context_limit is not None:
+        if context_limit < 50:
+            raise ValueError("context_limit must be at least 50 candles")
+        statement = statement.order_by(MarketCandleRecord.open_time.desc()).limit(
+            context_limit
+        )
+        candles: Sequence[tuple[datetime, Decimal, Decimal, Decimal, Decimal]] = list(
+            reversed((await session.execute(statement)).tuples().all())
+        )
+    else:
+        statement = statement.order_by(MarketCandleRecord.open_time.asc())
+        candles = (await session.execute(statement)).tuples().all()
     times = [row[0] for row in candles]
     highs = [row[1] for row in candles]
     lows = [row[2] for row in candles]
@@ -102,6 +120,23 @@ async def calculate_market_features(
         (FeatureName.RETURN_12, calculate_return(closes, period=12)),
         (FeatureName.RELATIVE_VOLUME_20, calculate_relative_volume(volumes, period=20)),
     )
+    target_times = {
+        value
+        for value in times
+        if (target_start_time is None or value >= target_start_time)
+        and (target_end_time is None or value < target_end_time)
+    }
+    target_points = tuple(
+        (
+            name,
+            [
+                point
+                for point in calculated_points
+                if times[point.candle_index] in target_times
+            ],
+        )
+        for name, calculated_points in points
+    )
     values = [
         MarketFeature(
             asset=asset,
@@ -114,8 +149,9 @@ async def calculate_market_features(
             value=point.value,
             calculated_at=calculated_at,
         )
-        for name, calculated_points in points
+        for name, calculated_points in target_points
         for point in calculated_points
+        if times[point.candle_index] in target_times
     ]
     existing_identities = (
         await get_existing_feature_identities(
@@ -125,6 +161,8 @@ async def calculate_market_features(
             market_type=market_type,
             interval=interval,
             feature_version=FEATURE_VERSION,
+            start_time=target_start_time,
+            end_time=target_end_time,
         )
         if values
         else set()
@@ -157,7 +195,7 @@ async def calculate_market_features(
             if calculated_points
             else None,
         )
-        for name, calculated_points in points
+        for name, calculated_points in target_points
     )
     feature_times = [value.candle_open_time for value in values]
     return FeatureCalculationResult(
@@ -169,6 +207,7 @@ async def calculate_market_features(
         first_feature_time=min(feature_times) if feature_times else None,
         last_feature_time=max(feature_times) if feature_times else None,
         features=per_feature,
+        target_candle_count=len(target_times),
     )
 
 

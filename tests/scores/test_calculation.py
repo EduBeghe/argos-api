@@ -90,3 +90,28 @@ async def test_incomplete_same_candle_features_are_skipped() -> None:
     insert.assert_not_awaited()
     assert result.candidate_candles_read == 1
     assert result.scores_calculated == 0
+
+
+@pytest.mark.asyncio
+async def test_live_score_query_is_bounded_to_target_window() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    query_result = MagicMock()
+    query_result.tuples.return_value.all.return_value = []
+    session.execute.return_value = query_result
+    start = CANDLE_TIME
+    end = CANDLE_TIME.replace(hour=1)
+
+    await calculate_market_scores(
+        session=session,
+        asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
+        calculated_at=NOW,
+        target_start_time=start,
+        target_end_time=end,
+    )
+
+    sql = str(session.execute.await_args.args[0])
+    assert "market_candles.open_time >=" in sql
+    assert "market_candles.open_time <" in sql
