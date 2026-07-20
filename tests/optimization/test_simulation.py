@@ -75,6 +75,10 @@ def matrix() -> HistoricalFeatureMatrix:
 
 def simulate(
     scores: tuple[str, ...] = ("0.7", "0.7", "0.1", "0.1"),
+    *,
+    fee_rate: Decimal = Decimal("0.001"),
+    slippage_rate: Decimal = Decimal("0.0005"),
+    decision_interval: timedelta = timedelta(minutes=30),
 ) -> HistoricalSimulationResult:
     outputs = [SimpleNamespace(overall_score=Decimal(value)) for value in scores]
     with (
@@ -89,8 +93,9 @@ def simulate(
         return simulate_historical_strategy(
             dataset=source_dataset(),
             initial_cash=Decimal("10000"),
-            fee_rate=Decimal("0.001"),
-            slippage_rate=Decimal("0.0005"),
+            fee_rate=fee_rate,
+            slippage_rate=slippage_rate,
+            decision_interval=decision_interval,
         )
 
 
@@ -104,6 +109,43 @@ def test_same_input_is_deterministic_and_boundaries_have_no_lookahead() -> None:
         for point in first.equity_curve
     )
     assert all(trade.source_candle_open_time < trade.boundary for trade in first.trades)
+
+
+def test_result_preserves_effective_simulation_configuration() -> None:
+    fee_rate = Decimal("0.0025")
+    slippage_rate = Decimal("0.00075")
+    decision_interval = timedelta(minutes=30)
+
+    result = simulate(
+        fee_rate=fee_rate,
+        slippage_rate=slippage_rate,
+        decision_interval=decision_interval,
+    )
+
+    assert result.account_currency == "USDT"
+    assert result.fee_rate == fee_rate
+    assert result.slippage_rate == slippage_rate
+    assert result.decision_interval == decision_interval
+
+
+def test_results_retain_distinguishable_rate_configurations_deterministically() -> None:
+    first = simulate(fee_rate=Decimal("0.001"), slippage_rate=Decimal("0.0005"))
+    repeated = simulate(fee_rate=Decimal("0.001"), slippage_rate=Decimal("0.0005"))
+    different = simulate(fee_rate=Decimal("0.002"), slippage_rate=Decimal("0.0008"))
+
+    assert first == repeated
+    assert (first.fee_rate, first.slippage_rate) == (
+        Decimal("0.001"),
+        Decimal("0.0005"),
+    )
+    assert (different.fee_rate, different.slippage_rate) == (
+        Decimal("0.002"),
+        Decimal("0.0008"),
+    )
+    assert (first.fee_rate, first.slippage_rate) != (
+        different.fee_rate,
+        different.slippage_rate,
+    )
 
 
 def test_buy_no_action_and_sell_all_reuse_paper_execution_math() -> None:
@@ -221,3 +263,4 @@ def test_insufficient_dataset_has_clear_error() -> None:
             fee_rate=Decimal("0.001"),
             slippage_rate=Decimal("0.0005"),
         )
+
