@@ -364,6 +364,21 @@ The MVP reads the complete aggregate snapshot history because it produces only
 two points per hour. A database aggregation or daily summaries can be introduced
 if volume later justifies them.
 
+## Historical optimization memory API
+
+Persisted refinement evidence is exposed through read-only endpoints:
+
+- `GET /optimization/refinement-runs`
+- `GET /optimization/refinement-runs/{run_id}`
+- `GET /optimization/candidates`
+- `GET /optimization/candidates/{stable_candidate_id}`
+
+Collections use deterministic `limit`/`offset` pagination with a maximum page size of
+200. Filters use the complete asset, provider, market type, and interval identity.
+Responses preserve Decimal values and UTC evidence timestamps, expose explicit public
+models rather than PostgreSQL JSONB payloads, and never execute a refinement or contact
+an external provider.
+
 ## Production deployment
 
 Provide `DATABASE_URL` and review the production values for `BINANCE_BASE_URL`,

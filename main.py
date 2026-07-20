@@ -6,6 +6,7 @@ from app.core.lifespan import lifespan
 from app.dashboard.router import router as dashboard_router
 from app.health.router import router as health_router
 from app.market.api import router as market_router
+from app.optimization.router import router as optimization_router
 from app.paper.api import router as paper_router
 
 
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     application.include_router(market_router)
     application.include_router(paper_router)
     application.include_router(dashboard_router)
+    application.include_router(optimization_router)
     return application
 
 

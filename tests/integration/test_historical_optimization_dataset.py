@@ -45,7 +45,15 @@ from app.optimization.memory import (
     insert_benchmark_evaluations,
     reclaim_abandoned_run,
 )
+from app.optimization.read_service import (
+    PUBLIC_FAILURE_REASON,
+    read_candidate,
+    read_candidates,
+    read_refinement_run,
+    read_refinement_runs,
+)
 from app.optimization.refinement import RefinementBudget, refine_historical_dataset
+from app.optimization.schemas import CandidateQuery, RefinementRunQuery
 from app.optimization.simulation import simulate_historical_strategy
 from app.paper.persistence import PaperPositionRecord, PaperTradeRecord
 from app.scores.persistence import MarketScoreRecord
@@ -607,3 +615,140 @@ async def test_recovered_experiment_failure_is_persisted(session: AsyncSession) 
     assert run.status == "failed"
     assert run.failed_at is not None
     assert run.failure_reason and "recovered calculation failed" in run.failure_reason
+
+
+async def test_optimization_memory_reads_are_typed_filtered_and_read_only(
+    session: AsyncSession,
+) -> None:
+    source = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    dataset = replace(source, fingerprint="integration-read-api")
+    await session.execute(
+        delete(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    await session.commit()
+    execution = await execute_memory_refinement(
+        session, dataset, END + timedelta(days=9)
+    )
+    assert execution.result is not None
+    run = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.experiment_key
+            == execution.result.experiment_key
+        )
+    )
+    assert run is not None
+    before = (
+        await session.scalar(
+            select(func.count()).select_from(StrategyRefinementRunRecord)
+        ),
+        await session.scalar(
+            select(func.count()).select_from(StrategyCandidateEvaluationRecord)
+        ),
+        await session.scalar(
+            select(func.count()).select_from(StrategyBenchmarkEvaluationRecord)
+        ),
+    )
+
+    runs = await read_refinement_runs(
+        session,
+        RefinementRunQuery(
+            asset=Asset.BTC_USDT,
+            provider=Provider.BINANCE,
+            market_type=MarketType.SPOT,
+            interval=Interval.FIVE_MINUTES,
+            status="completed",
+            started_from=END + timedelta(days=9),
+            limit=1,
+        ),
+    )
+    assert len(runs) == 1
+    assert runs[0].id == run.id
+    assert runs[0].initial_cash == Decimal("10000.000000000000000000")
+    assert runs[0].started_at.utcoffset() == timedelta(0)
+    detail = await read_refinement_run(session, run.id)
+    assert detail.run.id == run.id
+    assert detail.production_baseline
+    assert detail.buy_and_hold
+    assert detail.result_digest
+    candidates = await read_candidates(
+        session,
+        CandidateQuery(
+            asset=Asset.BTC_USDT,
+            provider=Provider.BINANCE,
+            market_type=MarketType.SPOT,
+            interval=Interval.FIVE_MINUTES,
+            limit=2,
+        ),
+    )
+    assert candidates
+    candidate = await read_candidate(
+        session,
+        candidates[0].definition.stable_candidate_id,
+        limit=5,
+        offset=0,
+    )
+    assert candidate.evaluations
+    assert candidate.profile.evidence_classification.value
+    assert all(
+        item.instrument.asset is Asset.BTC_USDT for item in candidate.evaluations
+    )
+    after = (
+        await session.scalar(
+            select(func.count()).select_from(StrategyRefinementRunRecord)
+        ),
+        await session.scalar(
+            select(func.count()).select_from(StrategyCandidateEvaluationRecord)
+        ),
+        await session.scalar(
+            select(func.count()).select_from(StrategyBenchmarkEvaluationRecord)
+        ),
+    )
+    assert after == before
+    assert not session.new and not session.dirty and not session.deleted
+
+
+async def test_failed_run_exposes_only_sanitized_failure_reason(
+    session: AsyncSession,
+) -> None:
+    source = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    dataset = replace(source, fingerprint="integration-read-failure")
+    await session.execute(
+        delete(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    await session.commit()
+    secret = "postgresql://user:unsafe-password@example.test/database"
+    with (
+        patch(
+            "app.optimization.experiment_service.refine_historical_strategy",
+            side_effect=ExperimentMemoryError(secret),
+        ),
+        pytest.raises(ExperimentMemoryError),
+    ):
+        await execute_memory_refinement(session, dataset, END + timedelta(days=10))
+    run = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    assert run is not None
+    response = await read_refinement_run(session, run.id)
+    assert response.run.failure_reason == PUBLIC_FAILURE_REASON
+    assert secret not in response.model_dump_json()

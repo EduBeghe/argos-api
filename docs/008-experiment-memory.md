@@ -124,3 +124,26 @@ diagnostic command provides the actual deployment-specific measurement.
 Version 1 is single-instrument and sequential. It adds no cron, public endpoint,
 frontend, automatic promotion, new Strategy, sentiment/news/ML signal, or Railway
 configuration.
+
+## Read-only API
+
+Persisted memory is available to frontend consumers through four bounded read-only
+resources:
+
+- `GET /optimization/refinement-runs` lists experiments newest first and supports
+  complete instrument identity, lifecycle, recommendation, and UTC start filters.
+- `GET /optimization/refinement-runs/{run_id}` composes the typed run summary, search
+  plan, segment benchmarks, recommendation, digest, and grouped compact evaluations.
+- `GET /optimization/candidates` lists canonical parameters with profiles calculated by
+  the same versioned `experience.py` rules used by planning.
+- `GET /optimization/candidates/{stable_candidate_id}` returns the canonical definition,
+  current profile, chronological paginated evidence, related run identities, and
+  recommendation attribution.
+
+Collection pages use `limit` and `offset`, with a maximum limit of 200. Queries are
+deterministic, data-driven by full instrument identity, and use a constant number of
+PostgreSQL operations rather than one query per candidate. Decimal values and UTC
+timestamps remain exact. The contract maps stored budgets, allocations, plans, and
+parameters into explicit versionable schemas; it does not expose raw JSONB, candles,
+Features, matrices, or unsafe failure details. GET requests never write, start a
+refinement, or contact a provider. Unknown run and candidate identities return 404.
