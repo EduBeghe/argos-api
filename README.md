@@ -389,6 +389,47 @@ five-minute UTC boundary. The overlap window and PostgreSQL natural uniqueness
 make repeated or overlapping invocations idempotent; this is not an exactly-once
 scheduling guarantee. Argos contains no internal scheduler or infinite loop.
 
+### Historical market-candle backfill
+
+Import only persisted market candles for an aligned UTC range. Bounds are
+`[from, to)`: `from` is inclusive and `to` is exclusive. This command never
+calculates Features or Scores and never creates Decisions, Trades, Positions,
+Snapshots, or Paper Runs.
+
+```sh
+python -m app.jobs.backfill_market_candles \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-04-01T00:00:00Z
+```
+
+Without identity filters, the job uses every ingestion-enabled catalog
+instrument compatible with the existing Binance Spot adapter. Optional
+`--asset`, `--provider`, `--market-type`, and `--interval` filters narrow the
+selection. `--page-size` defaults to Binance's 1,000-candle maximum,
+`--max-pages` supports controlled canaries, and `--dry-run` validates and reads
+provider pages without persistence.
+
+Run a canary first, then import quarter by quarter:
+
+```sh
+python -m app.jobs.backfill_market_candles \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-01-08T00:00:00Z \
+  --max-pages 5
+```
+
+Each page commits independently and natural candle identity makes reruns
+idempotent. After an interruption, rerun the same range: completed pages remain
+stored and duplicates are ignored. Instrument summaries report expected slots,
+received/inserted/duplicate candles, gaps and their first/last timestamps,
+pages, retries, and processed bounds. PostgreSQL summaries report row and byte
+growth plus an approximate added-byte cost per new candle; other database
+dialects explicitly omit storage telemetry.
+
+Review available PostgreSQL storage before each quarter and inspect missing
+slots before continuing. A gap can reflect unavailable provider evidence and
+must not be silently filled or inferred.
+
 Run Decision generation and Paper execution as a separate one-shot process:
 
 ```sh
