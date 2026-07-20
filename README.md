@@ -435,6 +435,42 @@ Review available PostgreSQL storage before each quarter and inspect missing
 slots before continuing. A gap can reflect unavailable provider evidence and
 must not be silently filled or inferred.
 
+### Historical optimization dataset
+
+Build and validate one deterministic, read-only dataset for future automatic
+optimization:
+
+```sh
+python -m app.jobs.validate_historical_dataset \
+  --from 2024-01-01T00:00:00Z \
+  --to 2025-01-01T00:00:00Z \
+  --asset BTC/USDT \
+  --provider binance \
+  --market-type spot \
+  --interval 5m
+```
+
+The reader uses bounded keyset pages ordered by candle `open_time`; it never
+uses `OFFSET` or writes to PostgreSQL. Bounds are aligned UTC `[from, to)`.
+Every expected interval slot must have exactly one candle: any initial,
+internal, or final gap invalidates the dataset rather than being filled,
+interpolated, or hidden.
+
+The command calculates the current seven-feature matrix once in memory using
+the same pure indicator functions as operational ingestion. Warm-up candles
+without a complete Feature set are omitted. It does not persist derived Feature
+rows, calculate Scores, evaluate Strategies or profitability, or simulate
+Trades. Process one instrument at a time so its dataset can be released before
+the next instrument is loaded.
+
+The reported SHA-256 fingerprint covers the complete instrument identity,
+range, Feature model/version, and canonical ordered OHLCV evidence. Identical
+evidence produces the same fingerprint; any candle change produces a different
+one. The current roughly 268,000 five-minute candles per asset are read in
+5,000-row pages. In-memory usage remains linear in that one instrument's range;
+exact memory depends on Python and Decimal object overhead, so production runs
+should observe container memory before increasing the selected range.
+
 Run Decision generation and Paper execution as a separate one-shot process:
 
 ```sh
