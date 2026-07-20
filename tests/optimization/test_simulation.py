@@ -263,4 +263,3 @@ def test_insufficient_dataset_has_clear_error() -> None:
             fee_rate=Decimal("0.001"),
             slippage_rate=Decimal("0.0005"),
         )
-
