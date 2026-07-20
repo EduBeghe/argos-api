@@ -124,6 +124,9 @@ async def test_feature_failure_preserves_candles_and_next_run_recovers() -> None
         market_type: MarketType,
         interval: Interval,
         calculated_at: datetime,
+        target_start_time: datetime | None = None,
+        target_end_time: datetime | None = None,
+        context_limit: int | None = None,
     ) -> FeatureCalculationResult:
         if asset is Asset.ETH_USDT:
             raise original
@@ -134,6 +137,9 @@ async def test_feature_failure_preserves_candles_and_next_run_recovers() -> None
             market_type=market_type,
             interval=interval,
             calculated_at=calculated_at,
+            target_start_time=target_start_time,
+            target_end_time=target_end_time,
+            context_limit=context_limit,
         )
 
     with (
