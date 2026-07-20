@@ -467,4 +467,3 @@ def _result(
         trades,
         curve,
     )
-
