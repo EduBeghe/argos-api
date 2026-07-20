@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -277,4 +274,3 @@ def _expected_open_times(requested: BackfillRange) -> Sequence[datetime]:
 
 def _to_milliseconds(value: datetime) -> int:
     return int(value.timestamp() * 1000)
-

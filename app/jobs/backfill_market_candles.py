@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 import argparse
 import asyncio
 import logging
@@ -198,4 +195,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

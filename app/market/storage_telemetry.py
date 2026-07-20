@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 from dataclasses import dataclass
 
 from sqlalchemy import func, select, text
@@ -41,4 +38,3 @@ async def read_market_storage_telemetry(
     return MarketStorageTelemetry(
         True, int(rows or 0), *(int(value) for value in sizes)
     )
-

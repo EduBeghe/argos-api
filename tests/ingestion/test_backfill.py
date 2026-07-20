@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -222,4 +219,3 @@ async def test_retries_transient_errors_but_not_permanent_4xx() -> None:
                 dry_run=True,
                 sleep=sleep,
             )
-

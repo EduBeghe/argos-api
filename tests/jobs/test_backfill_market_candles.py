@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 import argparse
 from datetime import UTC, datetime
 
@@ -57,4 +54,3 @@ def test_catalog_selection_is_data_driven_and_filterable() -> None:
     ]
     args.asset = Asset.ETH_USDT
     assert [item.asset for item in select_instruments(args)] == [Asset.ETH_USDT]
-

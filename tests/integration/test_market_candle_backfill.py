@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
@@ -177,4 +174,3 @@ async def test_completed_pages_survive_interruption_and_resume(
         )
     assert (result.inserted, result.duplicates, result.missing) == (2, 1, 0)
     assert await count_rows(session) == 3
-

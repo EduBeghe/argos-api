@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.3 seconds
-Output:
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,4 +13,3 @@ async def test_storage_telemetry_explicitly_omits_non_postgresql() -> None:
     result = await read_market_storage_telemetry(session)
     assert result.supported is False
     session.execute.assert_not_called()
-
