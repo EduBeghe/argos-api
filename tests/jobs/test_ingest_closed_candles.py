@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from app.core.config import Settings
-from app.features.calculation import FeatureCalculationResult
+from app.features.calculation import (
+    LIVE_FEATURE_CONTEXT_CANDLES,
+    FeatureCalculationResult,
+)
 from app.ingestion.binance.ingestion import IngestionResult
 from app.ingestion.orchestration import (
     AssetIngestionResult,
@@ -142,8 +145,21 @@ async def test_run_commits_ingestion_then_features_and_closes_resources() -> Non
         now=INGESTED_AT,
         limit=18,
     )
-    calculate.assert_awaited_once_with(session=session, calculated_at=CALCULATED_AT)
-    calculate_scores.assert_awaited_once_with(session=session, calculated_at=SCORED_AT)
+    target_start = datetime.fromtimestamp(1, tz=UTC)
+    target_end = datetime.fromtimestamp(2.001, tz=UTC)
+    calculate.assert_awaited_once_with(
+        session=session,
+        calculated_at=CALCULATED_AT,
+        target_start_time=target_start,
+        target_end_time=target_end,
+        context_limit=LIVE_FEATURE_CONTEXT_CANDLES,
+    )
+    calculate_scores.assert_awaited_once_with(
+        session=session,
+        calculated_at=SCORED_AT,
+        target_start_time=target_start,
+        target_end_time=target_end,
+    )
     assert session.commit.await_count == 3
     projected.assert_called_once_with()
     session.rollback.assert_not_awaited()
@@ -208,7 +224,13 @@ async def test_second_feature_failure_rolls_back_only_feature_transaction() -> N
     assert captured.value is original
     session.commit.assert_awaited_once_with()
     session.rollback.assert_awaited_once_with()
-    calculate.assert_awaited_once_with(session=session, calculated_at=CALCULATED_AT)
+    calculate.assert_awaited_once_with(
+        session=session,
+        calculated_at=CALCULATED_AT,
+        target_start_time=datetime.fromtimestamp(1, tz=UTC),
+        target_end_time=datetime.fromtimestamp(2.001, tz=UTC),
+        context_limit=LIVE_FEATURE_CONTEXT_CANDLES,
+    )
 
 
 def test_completion_log_contains_both_stage_fields(

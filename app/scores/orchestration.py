@@ -7,11 +7,16 @@ from app.scores.calculation import ScoreCalculationResult, calculate_market_scor
 
 
 async def calculate_all_market_scores(
-    *, session: AsyncSession, calculated_at: datetime
+    *,
+    session: AsyncSession,
+    calculated_at: datetime,
+    target_start_time: datetime | None = None,
+    target_end_time: datetime | None = None,
 ) -> tuple[ScoreCalculationResult, ...]:
-    return tuple(
-        [
-            await calculate_market_scores(
+    results: list[ScoreCalculationResult] = []
+    for instrument in enabled_scoring_instruments():
+        if target_start_time is None and target_end_time is None:
+            result = await calculate_market_scores(
                 session=session,
                 asset=instrument.asset,
                 provider=instrument.provider,
@@ -19,6 +24,16 @@ async def calculate_all_market_scores(
                 interval=instrument.interval,
                 calculated_at=calculated_at,
             )
-            for instrument in enabled_scoring_instruments()
-        ]
-    )
+        else:
+            result = await calculate_market_scores(
+                session=session,
+                asset=instrument.asset,
+                provider=instrument.provider,
+                market_type=instrument.market_type,
+                interval=instrument.interval,
+                calculated_at=calculated_at,
+                target_start_time=target_start_time,
+                target_end_time=target_end_time,
+            )
+        results.append(result)
+    return tuple(results)

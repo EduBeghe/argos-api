@@ -54,6 +54,8 @@ async def calculate_market_scores(
     market_type: MarketType,
     interval: Interval,
     calculated_at: datetime,
+    target_start_time: datetime | None = None,
+    target_end_time: datetime | None = None,
 ) -> ScoreCalculationResult:
     statement = (
         select(
@@ -91,6 +93,10 @@ async def calculate_market_scores(
         )
         .order_by(MarketCandleRecord.open_time.asc())
     )
+    if target_start_time is not None:
+        statement = statement.where(MarketCandleRecord.open_time >= target_start_time)
+    if target_end_time is not None:
+        statement = statement.where(MarketCandleRecord.open_time < target_end_time)
     rows = (await session.execute(statement)).tuples().all()
     grouped: dict[datetime, tuple[Decimal, dict[FeatureName, Decimal]]] = {}
     for open_time, close_price, feature_name, feature_value in rows:

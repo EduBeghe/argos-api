@@ -193,6 +193,11 @@ The ingestion job calculates EMA 20, EMA 50, RSI 14, ATR 14, one- and
 twelve-candle fractional returns, and twenty-candle relative quote volume after
 committing each closed-candle batch. Each feature is persisted only when its
 history requirement is satisfied; these measurements are not trading decisions.
+Live calculation targets only the current ingestion window and loads at most
+1,000 preceding/current candles per configured instrument as analytical context.
+This keeps live memory and query cost independent of total historical candle
+storage. Candle-only backfills are intentionally excluded; the overlap window
+still retries missing recent Features and Scores after a partial pipeline failure.
 For an explicit repair or historical calculation after at least 20 closed
 candles exist, run the standalone command:
 

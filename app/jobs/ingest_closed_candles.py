@@ -11,7 +11,11 @@ from app.core.config import Settings, get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
-from app.features.calculation import FeatureCalculationResult, feature_log_totals
+from app.features.calculation import (
+    LIVE_FEATURE_CONTEXT_CANDLES,
+    FeatureCalculationResult,
+    feature_log_totals,
+)
 from app.features.orchestration import calculate_all_market_features
 from app.ingestion.binance.client import BinanceClient
 from app.ingestion.orchestration import (
@@ -79,9 +83,19 @@ async def run(
                 raise
 
             calculated_at = clock()
+            target_start_time = datetime.fromtimestamp(
+                ingestion.start_time / 1000, tz=UTC
+            )
+            target_end_time = datetime.fromtimestamp(
+                (ingestion.end_time + 1) / 1000, tz=UTC
+            )
             try:
                 features = await calculate_all_market_features(
-                    session=session, calculated_at=calculated_at
+                    session=session,
+                    calculated_at=calculated_at,
+                    target_start_time=target_start_time,
+                    target_end_time=target_end_time,
+                    context_limit=LIVE_FEATURE_CONTEXT_CANDLES,
                 )
                 await session.commit()
             except Exception as error:
@@ -91,7 +105,10 @@ async def run(
             score_calculated_at = clock()
             try:
                 scores = await calculate_all_market_scores(
-                    session=session, calculated_at=score_calculated_at
+                    session=session,
+                    calculated_at=score_calculated_at,
+                    target_start_time=target_start_time,
+                    target_end_time=target_end_time,
                 )
                 await session.commit()
             except Exception as error:
@@ -155,6 +172,8 @@ def _log_completion(result: IngestionPipelineResult) -> None:
                 "feature_assets": [
                     {
                         "asset": item.asset.value,
+                        "context_candles_loaded": item.candle_count_read,
+                        "target_candles": item.target_candle_count,
                         "calculated": item.values_calculated,
                         "inserted": item.values_inserted,
                         "duplicates": item.duplicates,
@@ -173,6 +192,7 @@ def _log_completion(result: IngestionPipelineResult) -> None:
                 "score_assets": [
                     {
                         "asset": item.asset.value,
+                        "target_candles": item.candidate_candles_read,
                         "calculated": item.scores_calculated,
                         "inserted": item.scores_inserted,
                         "duplicates": item.duplicates,

@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.features.calculation import FEATURE_VERSION, calculate_ema_20_features
+from app.features.calculation import (
+    FEATURE_VERSION,
+    LIVE_FEATURE_CONTEXT_CANDLES,
+    calculate_ema_20_features,
+)
 from app.features.models import FeatureName, MarketFeature
 from app.market.enums import Asset, Interval, MarketType, Provider
 
@@ -220,3 +224,63 @@ async def test_up_to_date_run_performs_no_insert() -> None:
     insert.assert_not_awaited()
     assert calculated.values_inserted == 0
     assert calculated.duplicates == calculated.values_calculated
+
+
+async def test_live_window_bounds_context_and_excludes_historical_targets() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    end = datetime(2026, 7, 16, tzinfo=UTC)
+    start = end - timedelta(minutes=10)
+    ascending = [
+        (
+            end - timedelta(minutes=5 * (LIVE_FEATURE_CONTEXT_CANDLES - index)),
+            Decimal(index + 2),
+            Decimal(index),
+            Decimal(index + 1),
+            Decimal(100 + index),
+        )
+        for index in range(LIVE_FEATURE_CONTEXT_CANDLES)
+    ]
+    query_result = MagicMock()
+    query_result.tuples.return_value.all.return_value = list(reversed(ascending))
+    session.execute.return_value = query_result
+    captured: list[MarketFeature] = []
+
+    async def insert(_: AsyncSession, values: list[MarketFeature]) -> list[FeatureName]:
+        captured.extend(values)
+        return [value.feature_name for value in values]
+
+    with (
+        patch(
+            "app.features.calculation.get_existing_feature_identities",
+            AsyncMock(return_value=set()),
+        ) as existing,
+        patch("app.features.calculation.insert_market_features", side_effect=insert),
+    ):
+        result = await calculate_ema_20_features(
+            session=cast(AsyncSession, session),
+            asset=Asset.BTC_USDT,
+            provider=Provider.BINANCE,
+            market_type=MarketType.SPOT,
+            interval=Interval.FIVE_MINUTES,
+            calculated_at=end,
+            target_start_time=start,
+            target_end_time=end,
+            context_limit=LIVE_FEATURE_CONTEXT_CANDLES,
+        )
+
+    statement = session.execute.await_args.args[0]
+    assert statement._limit_clause is not None
+    assert result.candle_count_read == LIVE_FEATURE_CONTEXT_CANDLES
+    assert result.target_candle_count == 2
+    assert captured
+    assert all(start <= value.candle_open_time < end for value in captured)
+    existing.assert_awaited_once_with(
+        session=session,
+        asset=Asset.BTC_USDT,
+        provider=Provider.BINANCE,
+        market_type=MarketType.SPOT,
+        interval=Interval.FIVE_MINUTES,
+        feature_version=FEATURE_VERSION,
+        start_time=start,
+        end_time=end,
+    )

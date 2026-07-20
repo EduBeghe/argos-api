@@ -109,22 +109,25 @@ async def get_existing_feature_identities(
     market_type: MarketType,
     interval: Interval,
     feature_version: int,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
 ) -> set[FeatureIdentity]:
-    rows = (
-        await session.execute(
-            select(
-                MarketFeatureRecord.candle_open_time,
-                MarketFeatureRecord.feature_name,
-                MarketFeatureRecord.feature_version,
-            ).where(
-                MarketFeatureRecord.asset == asset.value,
-                MarketFeatureRecord.provider == provider.value,
-                MarketFeatureRecord.market_type == market_type.value,
-                MarketFeatureRecord.interval == interval.value,
-                MarketFeatureRecord.feature_version == feature_version,
-            )
-        )
-    ).tuples()
+    statement = select(
+        MarketFeatureRecord.candle_open_time,
+        MarketFeatureRecord.feature_name,
+        MarketFeatureRecord.feature_version,
+    ).where(
+        MarketFeatureRecord.asset == asset.value,
+        MarketFeatureRecord.provider == provider.value,
+        MarketFeatureRecord.market_type == market_type.value,
+        MarketFeatureRecord.interval == interval.value,
+        MarketFeatureRecord.feature_version == feature_version,
+    )
+    if start_time is not None:
+        statement = statement.where(MarketFeatureRecord.candle_open_time >= start_time)
+    if end_time is not None:
+        statement = statement.where(MarketFeatureRecord.candle_open_time < end_time)
+    rows = (await session.execute(statement)).tuples()
     return {
         (candle_open_time, FeatureName(feature_name), version)
         for candle_open_time, feature_name, version in rows
