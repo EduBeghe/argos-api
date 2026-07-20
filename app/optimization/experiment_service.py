@@ -249,6 +249,13 @@ async def execute_refinement(
         )
         await session.commit()
 
+    claimed_run_id = (
+        run.id
+        if persist
+        and run is not None
+        and not (existing is not None and existing.status == "completed")
+        else None
+    )
     clock_started = perf_counter()
     try:
         result = refine_historical_strategy(
@@ -340,10 +347,10 @@ async def execute_refinement(
         return ExperimentExecution(result, None)
     except Exception as error:
         await session.rollback()
-        if persist and run is not None and run.status != "completed":
+        if claimed_run_id is not None:
             await fail_run(
                 session,
-                run.id,
+                claimed_run_id,
                 failed_at=datetime.now(UTC),
                 reason=f"{type(error).__name__}: {error}",
             )
