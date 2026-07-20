@@ -88,6 +88,10 @@ class HistoricalSimulationResult:
     strategy_name: str
     strategy_version: int
     configuration_version: int
+    account_currency: str
+    fee_rate: Decimal
+    slippage_rate: Decimal
+    decision_interval: timedelta
     initial_cash: Decimal
     final_cash: Decimal
     final_equity: Decimal
@@ -280,6 +284,8 @@ def simulate_historical_strategy(
 
     return _result(
         dataset=dataset,
+        configuration=configuration,
+        decision_interval=decision_interval,
         starting_cash=starting_cash,
         cash=cash,
         quantity=quantity,
@@ -387,6 +393,8 @@ def _trade(
 def _result(
     *,
     dataset: HistoricalDataset,
+    configuration: SimulationConfiguration,
+    decision_interval: timedelta,
     starting_cash: Decimal,
     cash: Decimal,
     quantity: Decimal,
@@ -432,6 +440,10 @@ def _result(
         STRATEGY_NAME,
         STRATEGY_VERSION,
         CONFIGURATION_VERSION,
+        configuration.account_currency,
+        configuration.fee_rate,
+        configuration.slippage_rate,
+        decision_interval,
         starting_cash,
         cash,
         final.equity,
@@ -455,3 +467,4 @@ def _result(
         trades,
         curve,
     )
+
