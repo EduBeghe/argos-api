@@ -36,6 +36,8 @@ def test_refinement_command_parses_identity_costs_and_top_k() -> None:
             "190",
             "--max-joint-candidates",
             "900",
+            "--persist",
+            "--force-recompute",
         ]
     )
     assert (args.asset, args.provider, args.market_type, args.interval) == (
@@ -53,6 +55,35 @@ def test_refinement_command_parses_identity_costs_and_top_k() -> None:
     assert args.score_screening_top_k == 9
     assert args.max_score_configurations == 190
     assert args.max_joint_candidates == 900
+    assert args.persist is True
+    assert args.force_recompute is True
+
+
+def test_refinement_memory_flags_default_to_read_only() -> None:
+    args = build_parser().parse_args(
+        [
+            "--from",
+            "2024-01-01T00:00:00Z",
+            "--to",
+            "2024-04-01T00:00:00Z",
+            "--asset",
+            "BTC/USDT",
+            "--provider",
+            "binance",
+            "--market-type",
+            "spot",
+            "--interval",
+            "5m",
+            "--initial-cash",
+            "10000",
+            "--fee-rate",
+            "0.001",
+            "--slippage-rate",
+            "0.0005",
+        ]
+    )
+    assert args.persist is False
+    assert args.force_recompute is False
 
 
 def test_refinement_command_rejects_non_positive_top_k() -> None:

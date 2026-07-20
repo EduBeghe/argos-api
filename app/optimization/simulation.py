@@ -36,6 +36,7 @@ from app.strategies.baseline_long_only import (
 )
 
 DEFAULT_DECISION_INTERVAL = timedelta(minutes=30)
+SIMULATION_ENGINE_VERSION = 1
 _ZERO_UUID = UUID(int=0)
 
 

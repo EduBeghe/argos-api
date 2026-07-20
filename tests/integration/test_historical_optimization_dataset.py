@@ -1,6 +1,8 @@
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -12,11 +14,19 @@ from app.features.persistence import MarketFeatureRecord
 from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.persistence import MarketCandleRecord, to_record
+from app.optimization.experiment_service import (
+    ExperimentMemoryError,
+    execute_refinement,
+)
 from app.optimization.feature_matrix import build_historical_feature_matrix
 from app.optimization.historical_data import (
     HistoricalDatasetIdentity,
     HistoricalDatasetRange,
     read_historical_dataset,
+)
+from app.optimization.memory import (
+    StrategyCandidateEvaluationRecord,
+    StrategyRefinementRunRecord,
 )
 from app.optimization.refinement import RefinementBudget, refine_historical_dataset
 from app.optimization.simulation import simulate_historical_strategy
@@ -160,3 +170,125 @@ async def test_historical_refinement_is_read_only(session: AsyncSession) -> None
     assert result.counts.joint_candidates_evaluated == 60
     assert counts_after == counts_before
     assert not session.new and not session.dirty and not session.deleted
+
+
+async def test_persisted_refinement_is_atomic_and_exact_retry_is_reused(
+    session: AsyncSession,
+) -> None:
+    await session.execute(
+        delete(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint
+            == "integration-refinement-memory"
+        )
+    )
+    await session.commit()
+    source = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    dataset = replace(source, fingerprint="integration-refinement-memory")
+    first = await execute_refinement(
+        session=session,
+        dataset=dataset,
+        initial_cash=Decimal("10000"),
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        budget=RefinementBudget(1, 1, 200, 60),
+        persist=True,
+        force_recompute=False,
+        started_at=END + timedelta(days=2),
+    )
+    assert first.result is not None
+    assert first.result.persisted
+    assert first.reused is None
+    run = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.experiment_key == first.result.experiment_key
+        )
+    )
+    assert run is not None and run.status == "completed"
+    evaluation_count = await session.scalar(
+        select(func.count())
+        .select_from(StrategyCandidateEvaluationRecord)
+        .where(StrategyCandidateEvaluationRecord.refinement_run_id == run.id)
+    )
+    assert evaluation_count and evaluation_count > 0
+
+    second = await execute_refinement(
+        session=session,
+        dataset=dataset,
+        initial_cash=Decimal("10000"),
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        budget=RefinementBudget(1, 1, 200, 60),
+        persist=True,
+        force_recompute=False,
+        started_at=END + timedelta(days=3),
+    )
+    assert second.result is None
+    assert second.reused is not None
+    assert second.reused.reused_existing_experiment
+    assert second.reused.evaluations_computed == 0
+    assert (
+        await session.scalar(
+            select(func.count())
+            .select_from(StrategyRefinementRunRecord)
+            .where(
+                StrategyRefinementRunRecord.experiment_key
+                == first.result.experiment_key
+            )
+        )
+        == 1
+    )
+
+
+async def test_failed_refinement_retains_failure_without_valid_evidence(
+    session: AsyncSession,
+) -> None:
+    source = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    dataset = replace(source, fingerprint="integration-refinement-failure")
+    with (
+        patch(
+            "app.optimization.experiment_service.refine_historical_strategy",
+            side_effect=ExperimentMemoryError("deliberate safe failure"),
+        ),
+        pytest.raises(ExperimentMemoryError, match="deliberate"),
+    ):
+        await execute_refinement(
+            session=session,
+            dataset=dataset,
+            initial_cash=Decimal("10000"),
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            budget=RefinementBudget(1, 1, 200, 60),
+            persist=True,
+            force_recompute=False,
+            started_at=END + timedelta(days=4),
+        )
+    run = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    assert run is not None
+    assert run.status == "failed"
+    assert run.failure_reason and "deliberate safe failure" in run.failure_reason
+    assert (
+        await session.scalar(
+            select(func.count())
+            .select_from(StrategyCandidateEvaluationRecord)
+            .where(StrategyCandidateEvaluationRecord.refinement_run_id == run.id)
+        )
+        == 0
+    )

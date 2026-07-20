@@ -13,6 +13,7 @@ Every generated signal must retain its component scores, supporting metrics, and
 - [Architecture overview](docs/002-architecture.md)
 - [Domain model](docs/003-domain-model.md)
 - [Binance market-data contract](docs/004-binance-market-data-contract.md)
+- [Experiment memory and experience-guided search](docs/008-experiment-memory.md)
 - [Architecture decisions](docs/decisions/)
 
 ## Current phase
@@ -585,6 +586,17 @@ Score-model and Strategy parameters remain separate so future candidates can add
 technical, sentiment, news, or ML component weights without coupling those
 future components to Strategy thresholds; none of those components is introduced
 here.
+
+The command remains read-only by default but may use compatible completed experiment
+history to build a deterministic search plan. Add `--persist` to atomically retain the
+run, canonical candidates, compact evaluations, baseline, and buy-and-hold evidence.
+An exact completed experiment is reused without simulation. Add `--force-recompute`
+with `--persist` to compare a fresh deterministic result against stored evidence without
+creating a duplicate. Run `python -m app.jobs.refinement_storage` to inspect experiment,
+candidate, evaluation, and storage totals. See
+[Experiment Memory and Experience-Guided Search](docs/008-experiment-memory.md) for
+compatibility, classifications, planner allocation, neighborhood rules, rejected
+candidate reconsideration, transaction behavior, and limitations.
 
 Run Decision generation and Paper execution as a separate one-shot process:
 

@@ -6,12 +6,17 @@ from hashlib import sha256
 from uuid import UUID
 
 from app.market.catalog import Instrument
+from app.optimization.experience import (
+    CandidateHistoricalProfile,
+    EvidenceClassification,
+)
 from app.optimization.feature_matrix import (
     HistoricalFeatureMatrix,
     HistoricalFeatureRow,
     build_historical_feature_matrix,
 )
 from app.optimization.historical_data import HistoricalDataset
+from app.optimization.planning import SearchPlan
 from app.optimization.simulation import (
     DEFAULT_DECISION_INTERVAL,
     HistoricalSimulationResult,
@@ -215,6 +220,21 @@ class HistoricalRefinementResult:
     recommendation_status: RecommendationStatus
     recommendation_explanation: str
     counts: RefinementCounts
+    experiment_key: str = ""
+    persisted: bool = False
+    reused_existing_experiment: bool = False
+    history_run_count: int = 0
+    history_cutoff: datetime | None = None
+    compatible_profile_count: int = 0
+    search_plan: SearchPlan | None = None
+    evaluations_reused: int = 0
+    evaluations_computed: int = 0
+    compute_avoided_estimate: int = 0
+    recommended_historical_profile: CandidateHistoricalProfile | None = None
+    history_influence_explanation: str = (
+        "No compatible experiment history was available."
+    )
+    evidence_classification: EvidenceClassification | None = None
 
 
 def generate_score_configurations() -> tuple[BaselineTechnicalParameters, ...]:
@@ -253,7 +273,22 @@ def candidate_for(
     score: BaselineTechnicalParameters,
     strategy: BaselineLongOnlyParameters,
 ) -> RefinementCandidate:
-    canonical = "|".join(
+    canonical = "|".join(canonical_candidate_parameters(score, strategy))
+    return RefinementCandidate(
+        score,
+        strategy,
+        score == BASELINE_TECHNICAL_V1_PARAMETERS
+        and strategy == BASELINE_LONG_ONLY_V1_PARAMETERS,
+        sha256(canonical.encode("ascii")).hexdigest(),
+    )
+
+
+def canonical_candidate_parameters(
+    score: BaselineTechnicalParameters,
+    strategy: BaselineLongOnlyParameters,
+) -> tuple[str, ...]:
+    """Return the ordered canonical values hashed by candidate identity."""
+    return tuple(
         _decimal(value)
         for value in (
             score.trend_weight,
@@ -266,13 +301,6 @@ def candidate_for(
             strategy.open_position_target_percentage,
         )
     )
-    return RefinementCandidate(
-        score,
-        strategy,
-        score == BASELINE_TECHNICAL_V1_PARAMETERS
-        and strategy == BASELINE_LONG_ONLY_V1_PARAMETERS,
-        sha256(canonical.encode("ascii")).hexdigest(),
-    )
 
 
 def refine_historical_strategy(
@@ -284,6 +312,7 @@ def refine_historical_strategy(
     slippage_rate: Decimal,
     budget: RefinementBudget = DEFAULT_REFINEMENT_BUDGET,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
+    search_plan: SearchPlan | None = None,
 ) -> HistoricalRefinementResult:
     """Screen score weights, then refine score and Strategy jointly in memory."""
     if feature_matrix.dataset_fingerprint != dataset.fingerprint:
@@ -346,10 +375,22 @@ def refine_historical_strategy(
         )
     )
     retained = screening[: min(budget.score_screening_top_k, len(screening))]
+    joint = (
+        tuple(
+            candidate_for(item.score_parameters, item.strategy_parameters)
+            for item in search_plan.candidates
+        )
+        if search_plan is not None
+        else tuple(
+            candidate_for(screen.score_parameters, strategy)
+            for screen in (item.candidate for item in retained)
+            for strategy in strategies
+        )
+    )
+    if search_plan is not None and baseline_candidate not in joint:
+        joint = (baseline_candidate, *joint)
     joint = tuple(
-        candidate_for(screen.score_parameters, strategy)
-        for screen in (item.candidate for item in retained)
-        for strategy in strategies
+        {candidate.stable_candidate_id: candidate for candidate in joint}.values()
     )
     if len(joint) > budget.max_joint_candidates:
         raise HistoricalRefinementError(
@@ -491,6 +532,8 @@ def refine_historical_strategy(
         status,
         explanation,
         counts,
+        search_plan=search_plan,
+        evaluations_computed=simulations,
     )
 
 
@@ -502,6 +545,7 @@ def refine_historical_dataset(
     slippage_rate: Decimal,
     budget: RefinementBudget = DEFAULT_REFINEMENT_BUDGET,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
+    search_plan: SearchPlan | None = None,
 ) -> HistoricalRefinementResult:
     matrix = build_historical_feature_matrix(dataset)
     return refine_historical_strategy(
@@ -512,6 +556,15 @@ def refine_historical_dataset(
         slippage_rate=slippage_rate,
         budget=budget,
         decision_interval=decision_interval,
+        search_plan=search_plan,
+    )
+
+
+def generate_joint_candidate_pool() -> tuple[RefinementCandidate, ...]:
+    return tuple(
+        candidate_for(score, strategy)
+        for score in generate_score_configurations()
+        for strategy in generate_strategy_configurations()
     )
 
 
