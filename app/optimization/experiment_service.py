@@ -19,9 +19,11 @@ from app.optimization.experience import (
 from app.optimization.feature_matrix import build_historical_feature_matrix
 from app.optimization.historical_data import HistoricalDataset
 from app.optimization.memory import (
+    ExperimentLeaseLostError,
     StrategyCandidateEvaluationRecord,
     StrategyCandidateRecord,
     StrategyRefinementRunRecord,
+    assert_run_lease,
     complete_run,
     create_run,
     fail_run,
@@ -320,6 +322,13 @@ async def execute_refinement(
                 raise ExperimentMemoryError("persisted refinement run was not claimed")
             evaluated_at = datetime.now(UTC)
             candidates, evaluations = _candidate_rows(result, run.id, evaluated_at)
+            # This row lock protects every evidence write and completion transition
+            # from an owner whose started_at lease token has since been replaced.
+            await assert_run_lease(
+                session,
+                run_id=run.id,
+                expected_started_at=started_at,
+            )
             await upsert_candidates(session, candidates)
             await insert_candidate_evaluations(session, evaluations)
             await insert_benchmark_evaluations(
@@ -328,7 +337,8 @@ async def execute_refinement(
             await complete_run(
                 session,
                 run.id,
-                {
+                expected_started_at=started_at,
+                values={
                     "recommendation_status": result.recommendation_status.value,
                     "recommended_candidate_id": (
                         result.recommendation.candidate.stable_candidate_id
@@ -348,13 +358,18 @@ async def execute_refinement(
     except Exception as error:
         await session.rollback()
         if claimed_run_id is not None:
-            await fail_run(
-                session,
-                claimed_run_id,
-                failed_at=datetime.now(UTC),
-                reason=f"{type(error).__name__}: {error}",
-            )
-            await session.commit()
+            try:
+                await fail_run(
+                    session,
+                    claimed_run_id,
+                    expected_started_at=started_at,
+                    failed_at=datetime.now(UTC),
+                    reason=f"{type(error).__name__}: {error}",
+                )
+                await session.commit()
+            except ExperimentLeaseLostError:
+                await session.rollback()
+                raise
         raise
 
 

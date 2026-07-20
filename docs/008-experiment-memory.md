@@ -104,6 +104,13 @@ timestamps and failure text. This compare-and-set rule permits one recovery proc
 preserves the experiment identity, and prevents a killed process from blocking the
 experiment indefinitely.
 
+The claimed `started_at` is also the execution's ownership token. Before writing any
+candidate, evaluation, or benchmark evidence, the owner locks the matching `running`
+row in the same PostgreSQL transaction. Completion and failure transitions require the
+same run identity, state, and token and treat a zero-row update as an explicit lost
+lease. Consequently, a superseded process rolls back all attempted evidence and cannot
+complete or fail the recovered owner's execution.
+
 Inspect row counts and combined table/index storage with:
 
 ```sh

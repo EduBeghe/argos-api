@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -34,8 +35,14 @@ from app.optimization.historical_data import (
     read_historical_dataset,
 )
 from app.optimization.memory import (
+    ExperimentLeaseLostError,
+    StrategyBenchmarkEvaluationRecord,
     StrategyCandidateEvaluationRecord,
     StrategyRefinementRunRecord,
+    assert_run_lease,
+    complete_run,
+    fail_run,
+    insert_benchmark_evaluations,
     reclaim_abandoned_run,
 )
 from app.optimization.refinement import RefinementBudget, refine_historical_dataset
@@ -421,6 +428,137 @@ async def test_abandoned_run_has_one_atomic_recovery_claim(
             return claimed is not None
 
     assert sorted(await asyncio.gather(claim(), claim())) == [False, True]
+
+
+async def test_superseded_owner_cannot_write_evidence_complete_or_fail(
+    session: AsyncSession,
+) -> None:
+    source = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+        page_size=17,
+    )
+    dataset = replace(source, fingerprint="integration-lease-ownership")
+    owner_a_started_at = END + timedelta(days=8)
+    await session.execute(
+        delete(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    await session.commit()
+    with (
+        patch(
+            "app.optimization.experiment_service.refine_historical_strategy",
+            side_effect=SystemExit,
+        ),
+        pytest.raises(SystemExit),
+    ):
+        await execute_memory_refinement(session, dataset, owner_a_started_at)
+    run = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.dataset_fingerprint == dataset.fingerprint
+        )
+    )
+    assert run is not None
+    run_id = run.id
+    owner_b_started_at = (
+        owner_a_started_at + ABANDONED_EXPERIMENT_TIMEOUT + timedelta(seconds=1)
+    )
+    engine = session.bind
+    assert isinstance(engine, AsyncEngine)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as owner_b_claim:
+        reclaimed = await reclaim_abandoned_run(
+            owner_b_claim,
+            run_id=run_id,
+            previous_started_at=owner_a_started_at,
+            stale_before=owner_b_started_at - ABANDONED_EXPERIMENT_TIMEOUT,
+            restarted_at=owner_b_started_at,
+        )
+        assert reclaimed is not None
+        await owner_b_claim.commit()
+
+    owner_a_evidence = {
+        "id": uuid4(),
+        "refinement_run_id": run_id,
+        "benchmark": "production_baseline",
+        "segment": "training",
+        "total_return": Decimal("0.01"),
+        "absolute_pnl": Decimal("100"),
+        "max_drawdown": Decimal("0.02"),
+        "trade_count": 1,
+        "fees_paid": Decimal("1"),
+        "final_equity": Decimal("10100"),
+        "return_over_drawdown": Decimal("0.5"),
+        "evaluated_at": owner_b_started_at,
+    }
+    async with factory() as owner_a:
+        with pytest.raises(ExperimentLeaseLostError, match="lease was lost"):
+            await assert_run_lease(
+                owner_a,
+                run_id=run_id,
+                expected_started_at=owner_a_started_at,
+            )
+            await insert_benchmark_evaluations(owner_a, [owner_a_evidence])
+        await owner_a.rollback()
+        with pytest.raises(ExperimentLeaseLostError, match="lease was lost"):
+            await complete_run(
+                owner_a,
+                run_id,
+                expected_started_at=owner_a_started_at,
+                values={"completed_at": owner_b_started_at},
+            )
+        await owner_a.rollback()
+        with pytest.raises(ExperimentLeaseLostError, match="lease was lost"):
+            await fail_run(
+                owner_a,
+                run_id,
+                expected_started_at=owner_a_started_at,
+                failed_at=owner_b_started_at,
+                reason="stale owner failure",
+            )
+        await owner_a.rollback()
+
+    owner_b_evidence = {
+        **owner_a_evidence,
+        "id": uuid4(),
+        "total_return": Decimal("0.02"),
+        "absolute_pnl": Decimal("200"),
+        "final_equity": Decimal("10200"),
+    }
+    async with factory() as owner_b:
+        await assert_run_lease(
+            owner_b,
+            run_id=run_id,
+            expected_started_at=owner_b_started_at,
+        )
+        await insert_benchmark_evaluations(owner_b, [owner_b_evidence])
+        await complete_run(
+            owner_b,
+            run_id,
+            expected_started_at=owner_b_started_at,
+            values={"completed_at": owner_b_started_at + timedelta(seconds=1)},
+        )
+        await owner_b.commit()
+
+    session.expire_all()
+    persisted_run = await session.get(StrategyRefinementRunRecord, run_id)
+    assert persisted_run is not None
+    assert persisted_run.status == "completed"
+    assert persisted_run.started_at == owner_b_started_at
+    assert persisted_run.failed_at is None
+    evidence = (
+        await session.scalars(
+            select(StrategyBenchmarkEvaluationRecord).where(
+                StrategyBenchmarkEvaluationRecord.refinement_run_id == run_id
+            )
+        )
+    ).all()
+    assert len(evidence) == 1
+    assert evidence[0].total_return == Decimal("0.020000000000000000")
 
 
 async def test_recovered_experiment_failure_is_persisted(session: AsyncSession) -> None:

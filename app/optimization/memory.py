@@ -31,6 +31,10 @@ from app.core.database.base import Base
 JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
 
 
+class ExperimentLeaseLostError(RuntimeError):
+    """Raised when a refinement process no longer owns its persisted run lease."""
+
+
 class StrategyRefinementRunRecord(Base):
     __tablename__ = "strategy_refinement_runs"
     __table_args__ = (
@@ -289,6 +293,26 @@ async def reclaim_abandoned_run(
     return (await session.scalars(statement)).one_or_none()
 
 
+async def assert_run_lease(
+    session: AsyncSession,
+    *,
+    run_id: UUID,
+    expected_started_at: datetime,
+) -> None:
+    """Lock the running row and prove ownership for the current transaction."""
+    owned_run_id = await session.scalar(
+        select(StrategyRefinementRunRecord.id)
+        .where(
+            StrategyRefinementRunRecord.id == run_id,
+            StrategyRefinementRunRecord.status == "running",
+            StrategyRefinementRunRecord.started_at == expected_started_at,
+        )
+        .with_for_update()
+    )
+    if owned_run_id is None:
+        raise ExperimentLeaseLostError("refinement experiment lease was lost")
+
+
 async def upsert_candidates(
     session: AsyncSession, values: Sequence[dict[str, object]]
 ) -> None:
@@ -319,26 +343,46 @@ async def insert_benchmark_evaluations(
 
 
 async def complete_run(
-    session: AsyncSession, run_id: UUID, values: dict[str, object]
+    session: AsyncSession,
+    run_id: UUID,
+    *,
+    expected_started_at: datetime,
+    values: dict[str, object],
 ) -> None:
-    await session.execute(
+    completed_run_id = await session.scalar(
         update(StrategyRefinementRunRecord)
         .where(
             StrategyRefinementRunRecord.id == run_id,
             StrategyRefinementRunRecord.status == "running",
+            StrategyRefinementRunRecord.started_at == expected_started_at,
         )
         .values(status="completed", **values)
+        .returning(StrategyRefinementRunRecord.id)
     )
+    if completed_run_id is None:
+        raise ExperimentLeaseLostError("refinement experiment lease was lost")
 
 
 async def fail_run(
-    session: AsyncSession, run_id: UUID, *, failed_at: datetime, reason: str
+    session: AsyncSession,
+    run_id: UUID,
+    *,
+    expected_started_at: datetime,
+    failed_at: datetime,
+    reason: str,
 ) -> None:
-    await session.execute(
+    failed_run_id = await session.scalar(
         update(StrategyRefinementRunRecord)
-        .where(StrategyRefinementRunRecord.id == run_id)
+        .where(
+            StrategyRefinementRunRecord.id == run_id,
+            StrategyRefinementRunRecord.status == "running",
+            StrategyRefinementRunRecord.started_at == expected_started_at,
+        )
         .values(status="failed", failed_at=failed_at, failure_reason=reason[:512])
+        .returning(StrategyRefinementRunRecord.id)
     )
+    if failed_run_id is None:
+        raise ExperimentLeaseLostError("refinement experiment lease was lost")
 
 
 async def load_compatible_evidence(
