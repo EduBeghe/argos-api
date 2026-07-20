@@ -26,7 +26,7 @@ from tests.market.factories import make_candle
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 START = datetime(2024, 3, 1, tzinfo=UTC)
-COUNT = 60
+COUNT = 120
 END = START + timedelta(minutes=5 * COUNT)
 INSTRUMENT = Instrument(
     Asset.BTC_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
