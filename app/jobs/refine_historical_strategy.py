@@ -15,6 +15,7 @@ from app.jobs.validate_historical_dataset import (
     resolve_historical_instrument,
 )
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.optimization.experiment_service import ExperimentExecution, execute_refinement
 from app.optimization.historical_data import (
     HistoricalDatasetIdentity,
     HistoricalDatasetRange,
@@ -23,9 +24,7 @@ from app.optimization.historical_data import (
 from app.optimization.refinement import (
     BenchmarkSegmentResult,
     CandidateSegmentResult,
-    HistoricalRefinementResult,
     RefinementBudget,
-    refine_historical_dataset,
 )
 from app.scores.calculator import BaselineTechnicalParameters
 
@@ -62,12 +61,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-score-configurations", type=positive_integer, default=200
     )
     parser.add_argument("--max-joint-candidates", type=positive_integer, default=1000)
+    parser.add_argument("--persist", action="store_true")
+    parser.add_argument("--force-recompute", action="store_true")
     return parser
 
 
 async def run(
     args: argparse.Namespace, *, now: datetime | None = None
-) -> HistoricalRefinementResult:
+) -> ExperimentExecution:
+    if args.force_recompute and not args.persist:
+        raise ValueError("--force-recompute requires --persist")
     started = perf_counter()
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -88,7 +91,8 @@ async def run(
                 ),
                 now=now or datetime.now(UTC),
             )
-            result = refine_historical_dataset(
+            execution = await execute_refinement(
+                session=session,
                 dataset=dataset,
                 initial_cash=args.initial_cash,
                 fee_rate=args.fee_rate,
@@ -99,19 +103,54 @@ async def run(
                     max_score_configurations=args.max_score_configurations,
                     max_joint_candidates=args.max_joint_candidates,
                 ),
+                persist=args.persist,
+                force_recompute=args.force_recompute,
+                started_at=now or datetime.now(UTC),
             )
-            if session.new or session.dirty or session.deleted:
+            if not args.persist and (session.new or session.dirty or session.deleted):
                 raise RuntimeError(
                     "historical refinement attempted to mutate the session"
                 )
     finally:
         await engine.dispose()
+    if execution.reused is not None:
+        logger.info(
+            "Historical strategy refinement reused",
+            extra={
+                "structured_fields": {
+                    "experiment_key": execution.reused.experiment_key,
+                    "refinement_run_id": str(execution.reused.run_id),
+                    "reused_existing_experiment": True,
+                    "evaluations_reused": execution.reused.evaluations_reused,
+                    "evaluations_computed": 0,
+                    "compute_avoided_estimate": (
+                        execution.reused.compute_avoided_estimate
+                    ),
+                    "result_digest": execution.reused.result_digest,
+                }
+            },
+        )
+        return execution
+    result = execution.result
+    if result is None:
+        raise RuntimeError("refinement execution returned no result")
     counts = result.counts
     logger.info(
         "Historical strategy refinement completed",
         extra={
             "structured_fields": {
                 "dataset_fingerprint": result.dataset_fingerprint,
+                "experiment_key": result.experiment_key,
+                "persisted": result.persisted,
+                "reused_existing_experiment": result.reused_existing_experiment,
+                "history_run_count": result.history_run_count,
+                "compatible_profile_count": result.compatible_profile_count,
+                "search_plan_counts": result.search_plan.counts
+                if result.search_plan
+                else {},
+                "evaluations_reused": result.evaluations_reused,
+                "evaluations_computed": result.evaluations_computed,
+                "compute_avoided_estimate": result.compute_avoided_estimate,
                 "asset": result.instrument.asset.value,
                 "provider": result.instrument.provider.value,
                 "market_type": result.instrument.market_type.value,
@@ -205,11 +244,17 @@ async def run(
                     for item in result.ablation_summary
                 ],
                 "recommendation_explanation": result.recommendation_explanation,
+                "history_influence_explanation": result.history_influence_explanation,
+                "evidence_classification": (
+                    result.evidence_classification.value
+                    if result.evidence_classification
+                    else None
+                ),
                 "elapsed_seconds": perf_counter() - started,
             }
         },
     )
-    return result
+    return execution
 
 
 def _candidate_parameters(value: object) -> dict[str, dict[str, str]]:
