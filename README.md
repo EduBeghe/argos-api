@@ -531,7 +531,7 @@ python -m app.jobs.refine_historical_strategy \
 
 The refiner constructs the historical Feature matrix once. Score screening first
 tests the 35 directional combinations on a `0.25` simplex for trend, RSI,
-return-1, and return-12, including zero-weight signal ablations. Each is combined
+return-1, and return-12. Each is combined
 with volume-confirmation weights `0`, `0.125`, `0.25`, `0.375`, and `0.50`, and
 the exact production score weights are included once. Screening uses only the
 first chronological half of training and retains 12 score configurations by
@@ -558,9 +558,14 @@ candidate, production baseline, and a separately calculated buy-and-hold
 benchmark; it confirms or rejects the fixed recommendation and never changes it.
 Buy and hold enters and exits at segment boundaries with identical fees and
 slippage. Return over drawdown is reported as zero when maximum drawdown is zero,
-avoiding an undefined ratio. Ablation summaries report historical metric
-differences when each technical signal has zero weight without making causal
-claims.
+avoiding an undefined ratio. Five additional controlled one-at-a-time ablations
+use the production Strategy on the same screening segment. A directional signal
+is set to zero and its production weight is redistributed proportionally across
+the other three directional signals using Decimal, 18-place ROUND_HALF_EVEN
+quantization, and a deterministic residual on the last enabled weight so their
+sum remains exactly one. The volume ablation changes only its own weight. These
+comparisons report historical metric differences and do not demonstrate
+causality.
 
 The default computational budget retains 12 of at most 200 generated score
 configurations, evaluates at most 1,000 joint candidates, and sends 10 to

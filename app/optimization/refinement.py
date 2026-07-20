@@ -1,7 +1,6 @@
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
 from hashlib import sha256
 from uuid import UUID
@@ -52,6 +51,7 @@ _EXIT_THRESHOLDS = tuple(
     Decimal(value) for value in ("0.10", "0.15", "0.20", "0.25", "0.30")
 )
 _TARGET_PERCENTAGES = tuple(Decimal(value) for value in ("10", "15", "20"))
+_WEIGHT_QUANTUM = Decimal("0.000000000000000001")
 _ZERO_UUID = UUID(int=0)
 
 
@@ -157,7 +157,10 @@ class BenchmarkResults:
 @dataclass(frozen=True, slots=True)
 class AblationResult:
     disabled_signal: str
-    candidate: CandidateSegmentResult
+    baseline_score_parameters: BaselineTechnicalParameters
+    ablated_score_parameters: BaselineTechnicalParameters
+    baseline: CandidateSegmentResult
+    ablated: CandidateSegmentResult
     return_difference_from_baseline: Decimal
     drawdown_difference_from_baseline: Decimal
     trade_difference_from_baseline: int
@@ -436,6 +439,20 @@ def refine_historical_strategy(
             "trade, and enabled costs. Buy and hold remains a separate historical "
             "benchmark. Historical evidence does not guarantee future results."
         )
+    screening_baseline = next(
+        item for item in screening if item.candidate.is_production_baseline
+    )
+    ablation = _controlled_ablation(
+        screening_baseline,
+        tuple(
+            evaluate(
+                candidate_for(parameters, BASELINE_LONG_ONLY_V1_PARAMETERS),
+                RefinementSegmentName.SCREENING,
+                screening_matrix,
+            )
+            for parameters in generate_ablation_configurations()
+        ),
+    )
     counts = RefinementCounts(
         len(score_configurations),
         len(screening),
@@ -466,10 +483,7 @@ def refine_historical_strategy(
         tuple(item.candidate.score_parameters for item in retained),
         training,
         validation,
-        _ablation(
-            screening,
-            next(item for item in screening if item.candidate.is_production_baseline),
-        ),
+        ablation,
         recommendation,
         recommendation.candidate.score_parameters if recommendation else None,
         recommendation.candidate.strategy_parameters if recommendation else None,
@@ -669,33 +683,74 @@ def _ranking_key(result: CandidateSegmentResult) -> tuple[Decimal, Decimal, int,
     )
 
 
-def _ablation(
-    screening: tuple[CandidateSegmentResult, ...], baseline: CandidateSegmentResult
-) -> tuple[AblationResult, ...]:
-    accessors: tuple[
-        tuple[str, Callable[[BaselineTechnicalParameters], Decimal]], ...
-    ] = (
-        ("trend", lambda value: value.trend_weight),
-        ("rsi", lambda value: value.rsi_weight),
-        ("return_1", lambda value: value.return_1_weight),
-        ("return_12", lambda value: value.return_12_weight),
-        ("volume_confirmation", lambda value: value.volume_confirmation_weight),
+def generate_ablation_configurations() -> tuple[BaselineTechnicalParameters, ...]:
+    """Disable one signal at a time from the production score configuration.
+
+    For a disabled directional weight ``d``, each remaining weight ``w`` becomes
+    ``w / (1 - d)``. Values are quantized with ROUND_HALF_EVEN to 18 places; the
+    last enabled weight receives the deterministic residual so the directional
+    sum remains exactly one. Volume ablation changes only its own weight.
+    """
+    baseline = BASELINE_TECHNICAL_V1_PARAMETERS
+    directional = (
+        baseline.trend_weight,
+        baseline.rsi_weight,
+        baseline.return_1_weight,
+        baseline.return_12_weight,
     )
-    results = []
-    for name, accessor in accessors:
-        candidate = next(
-            item for item in screening if accessor(item.candidate.score_parameters) == 0
+    configurations = []
+    for disabled_index, disabled_weight in enumerate(directional):
+        enabled_indexes = tuple(
+            index for index in range(len(directional)) if index != disabled_index
         )
-        results.append(
-            AblationResult(
-                name,
-                candidate,
-                candidate.total_return - baseline.total_return,
-                candidate.max_drawdown - baseline.max_drawdown,
-                candidate.trade_count - baseline.trade_count,
+        redistributed = [Decimal(0)] * len(directional)
+        assigned = Decimal(0)
+        for index in enabled_indexes[:-1]:
+            weight = (directional[index] / (Decimal(1) - disabled_weight)).quantize(
+                _WEIGHT_QUANTUM, rounding=ROUND_HALF_EVEN
+            )
+            redistributed[index] = weight
+            assigned += weight
+        redistributed[enabled_indexes[-1]] = Decimal(1) - assigned
+        configurations.append(
+            BaselineTechnicalParameters(
+                redistributed[0],
+                redistributed[1],
+                redistributed[2],
+                redistributed[3],
+                baseline.volume_confirmation_weight,
             )
         )
-    return tuple(results)
+    configurations.append(
+        BaselineTechnicalParameters(
+            baseline.trend_weight,
+            baseline.rsi_weight,
+            baseline.return_1_weight,
+            baseline.return_12_weight,
+            Decimal(0),
+        )
+    )
+    return tuple(configurations)
+
+
+def _controlled_ablation(
+    baseline: CandidateSegmentResult,
+    ablated: tuple[CandidateSegmentResult, ...],
+) -> tuple[AblationResult, ...]:
+    names = ("trend", "rsi", "return_1", "return_12", "volume_confirmation")
+    return tuple(
+        AblationResult(
+            name,
+            baseline.candidate.score_parameters,
+            result.candidate.score_parameters,
+            baseline,
+            result,
+            result.total_return - baseline.total_return,
+            result.max_drawdown - baseline.max_drawdown,
+            result.trade_count - baseline.trade_count,
+        )
+        for name, result in zip(names, ablated, strict=True)
+    )
 
 
 def _explain(

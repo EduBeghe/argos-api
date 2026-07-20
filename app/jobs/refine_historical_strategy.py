@@ -27,6 +27,7 @@ from app.optimization.refinement import (
     RefinementBudget,
     refine_historical_dataset,
 )
+from app.scores.calculator import BaselineTechnicalParameters
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +183,15 @@ async def run(
                 "ablation_summary": [
                     {
                         "disabled_signal": item.disabled_signal,
+                        "comparison": "controlled_one_at_a_time",
+                        "baseline_score_parameters": _score_parameters(
+                            item.baseline_score_parameters
+                        ),
+                        "ablated_score_parameters": _score_parameters(
+                            item.ablated_score_parameters
+                        ),
+                        "baseline_metrics": _metric(item.baseline),
+                        "ablated_metrics": _metric(item.ablated),
                         "return_difference_from_baseline": str(
                             item.return_difference_from_baseline
                         ),
@@ -209,15 +219,7 @@ def _candidate_parameters(value: object) -> dict[str, dict[str, str]]:
     if not isinstance(candidate, RefinementCandidate):
         raise TypeError("expected RefinementCandidate")
     return {
-        "score": {
-            "trend_weight": str(candidate.score_parameters.trend_weight),
-            "rsi_weight": str(candidate.score_parameters.rsi_weight),
-            "return_1_weight": str(candidate.score_parameters.return_1_weight),
-            "return_12_weight": str(candidate.score_parameters.return_12_weight),
-            "volume_confirmation_weight": str(
-                candidate.score_parameters.volume_confirmation_weight
-            ),
-        },
+        "score": _score_parameters(candidate.score_parameters),
         "strategy": {
             "entry_threshold": str(candidate.strategy_parameters.entry_threshold),
             "exit_threshold": str(candidate.strategy_parameters.exit_threshold),
@@ -225,6 +227,16 @@ def _candidate_parameters(value: object) -> dict[str, dict[str, str]]:
                 candidate.strategy_parameters.open_position_target_percentage
             ),
         },
+    }
+
+
+def _score_parameters(value: BaselineTechnicalParameters) -> dict[str, str]:
+    return {
+        "trend_weight": str(value.trend_weight),
+        "rsi_weight": str(value.rsi_weight),
+        "return_1_weight": str(value.return_1_weight),
+        "return_12_weight": str(value.return_12_weight),
+        "volume_confirmation_weight": str(value.volume_confirmation_weight),
     }
 
 

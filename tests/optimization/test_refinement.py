@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
@@ -25,6 +26,7 @@ from app.optimization.refinement import (
     RefinementSegmentName,
     _buy_and_hold,
     candidate_for,
+    generate_ablation_configurations,
     generate_score_configurations,
     generate_strategy_configurations,
     refine_historical_dataset,
@@ -367,6 +369,93 @@ def test_ablation_covers_every_signal_and_result_is_deterministic() -> None:
         "return_12",
         "volume_confirmation",
     }
+
+
+def test_ablation_configurations_disable_only_one_signal_from_production() -> None:
+    configurations = generate_ablation_configurations()
+    baseline = BASELINE_TECHNICAL_V1_PARAMETERS
+    baseline_directional = (
+        baseline.trend_weight,
+        baseline.rsi_weight,
+        baseline.return_1_weight,
+        baseline.return_12_weight,
+    )
+    assert len(configurations) == 5
+    for disabled_index, configuration in enumerate(configurations[:4]):
+        directional = (
+            configuration.trend_weight,
+            configuration.rsi_weight,
+            configuration.return_1_weight,
+            configuration.return_12_weight,
+        )
+        assert directional[disabled_index] == 0
+        assert all(
+            weight > 0
+            for index, weight in enumerate(directional)
+            if index != disabled_index
+        )
+        assert sum(directional, start=Decimal(0)) == 1
+        assert (
+            configuration.volume_confirmation_weight
+            == baseline.volume_confirmation_weight
+        )
+        enabled = tuple(index for index in range(4) if index != disabled_index)
+        for left, right in pairwise(enabled):
+            proportional_error = abs(
+                directional[left] * baseline_directional[right]
+                - directional[right] * baseline_directional[left]
+            )
+            assert proportional_error <= Decimal("0.000000000000000001")
+
+    volume_ablation = configurations[-1]
+    assert (
+        volume_ablation.trend_weight,
+        volume_ablation.rsi_weight,
+        volume_ablation.return_1_weight,
+        volume_ablation.return_12_weight,
+    ) == baseline_directional
+    assert volume_ablation.volume_confirmation_weight == 0
+
+
+def test_ablation_uses_production_strategy_screening_segment_and_counts_five() -> None:
+    calls, fake = fake_simulator()
+    with patch(
+        "app.optimization.refinement.simulate_historical_feature_matrix",
+        side_effect=fake,
+    ):
+        result = refine_historical_strategy(
+            dataset=dataset(),
+            feature_matrix=matrix(),
+            initial_cash=Decimal("10000"),
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            budget=small_budget(),
+        )
+    ablation_calls = calls[-5:]
+    assert len(ablation_calls) == 5
+    assert all(
+        size == result.screening_segment.decision_count for size, _, _ in ablation_calls
+    )
+    assert all(
+        strategy == BASELINE_LONG_ONLY_V1_PARAMETERS
+        for _, _, strategy in ablation_calls
+    )
+    assert [score for _, score, _ in ablation_calls] == list(
+        generate_ablation_configurations()
+    )
+    assert result.counts.score_configurations_screened == 176
+    assert result.counts.joint_candidates_evaluated == 60
+    assert result.counts.simulation_count_total == len(calls)
+    assert result.counts.simulation_count_total == 246
+    for item in result.ablation_summary:
+        assert item.baseline_score_parameters == BASELINE_TECHNICAL_V1_PARAMETERS
+        assert item.ablated_score_parameters == item.ablated.candidate.score_parameters
+        assert item.baseline.segment is RefinementSegmentName.SCREENING
+        assert item.ablated.segment is RefinementSegmentName.SCREENING
+        assert (
+            item.return_difference_from_baseline
+            == item.ablated.total_return - item.baseline.total_return
+        )
 
 
 def test_buy_and_hold_applies_entry_exit_fees_and_slippage() -> None:
