@@ -101,6 +101,10 @@ async def run(
                 "strategy_name": result.strategy_name,
                 "strategy_version": result.strategy_version,
                 "configuration_version": result.configuration_version,
+                "account_currency": result.account_currency,
+                "fee_rate": str(result.fee_rate),
+                "slippage_rate": str(result.slippage_rate),
+                "decision_interval_seconds": result.decision_interval.total_seconds(),
                 "initial_cash": str(result.initial_cash),
                 "final_cash": str(result.final_cash),
                 "final_equity": str(result.final_equity),
@@ -124,3 +128,4 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
