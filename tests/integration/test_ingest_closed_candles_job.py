@@ -36,11 +36,11 @@ def raw_kline() -> list[object]:
     ]
 
 
-def raw_klines(count: int) -> list[list[object]]:
+def raw_klines(count: int, *, start_time: int = OPEN_TIME) -> list[list[object]]:
     rows: list[list[object]] = []
     for index in range(count):
         row = raw_kline()
-        open_time = OPEN_TIME + index * 300_000
+        open_time = start_time + index * 300_000
         row[0] = open_time
         row[6] = open_time + 299_999
         row[4] = str(35_000 + index)
@@ -103,8 +103,11 @@ async def test_feature_failure_preserves_candles_and_next_run_recovers() -> None
         await cleanup.execute(delete(MarketCandleRecord))
         await cleanup.commit()
 
-    async def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=raw_klines(20))
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=raw_klines(20, start_time=int(request.url.params["startTime"])),
+        )
 
     settings = Settings.model_validate(
         {
