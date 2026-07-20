@@ -24,7 +24,7 @@ from app.paper.config import (
     quantize_financial,
     validate_initial_cash,
 )
-from app.paper.models import PaperPosition, PaperPositionStatus
+from app.paper.models import ExecutionCalculation, PaperPosition, PaperPositionStatus
 from app.scores.calculation import MODEL_NAME, MODEL_VERSION
 from app.scores.calculator import (
     BASELINE_TECHNICAL_V1_PARAMETERS,
@@ -42,6 +42,7 @@ DEFAULT_VALIDATION_TOP_K = 10
 DEFAULT_MAX_SCORE_CONFIGURATIONS = 200
 DEFAULT_MAX_JOINT_CANDIDATES = 1000
 MAX_VALIDATION_DRAWDOWN = Decimal("0.10")
+BUY_AND_HOLD_CASH_BUFFER_RATE = Decimal("0.000001")
 _SIMPLEX_STEP = Decimal("0.25")
 _VOLUME_WEIGHTS = tuple(
     Decimal(value) for value in ("0", "0.125", "0.25", "0.375", "0.50")
@@ -602,16 +603,9 @@ def _buy_and_hold(
     configuration: SimulationConfiguration,
 ) -> BenchmarkSegmentResult:
     first, last = matrix.rows[0], matrix.rows[-1]
-    target = (
-        Decimal(100)
-        / (Decimal(1) + configuration.fee_rate)
-        * Decimal("0.999999999999999999")
-    )
-    opened = calculate_open_position(
+    opened = _calculate_buy_and_hold_entry(
         cash=initial_cash,
-        total_equity=initial_cash,
         observed_price=first.close_price,
-        target_percentage=target,
         configuration=configuration,
     )
     position = PaperPosition(
@@ -656,6 +650,32 @@ def _buy_and_hold(
         final_equity,
         _return_over_drawdown(total_return, drawdown),
     )
+
+
+def _calculate_buy_and_hold_entry(
+    *,
+    cash: Decimal,
+    observed_price: Decimal,
+    configuration: SimulationConfiguration,
+) -> ExecutionCalculation:
+    """Fund a near-total benchmark purchase with a quantization cash buffer."""
+    target = (
+        Decimal(100)
+        * (Decimal(1) - BUY_AND_HOLD_CASH_BUFFER_RATE)
+        / (Decimal(1) + configuration.fee_rate)
+    )
+    opened = calculate_open_position(
+        cash=cash,
+        total_equity=cash,
+        observed_price=observed_price,
+        target_percentage=target,
+        configuration=configuration,
+    )
+    if opened.resulting_cash < 0:
+        raise HistoricalRefinementError(
+            "buy-and-hold entry produced negative cash after technical buffer"
+        )
+    return opened
 
 
 def _max_drawdown(equities: tuple[Decimal, ...]) -> Decimal:

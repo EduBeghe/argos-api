@@ -25,6 +25,7 @@ from app.optimization.refinement import (
     RefinementBudget,
     RefinementSegmentName,
     _buy_and_hold,
+    _calculate_buy_and_hold_entry,
     candidate_for,
     generate_ablation_configurations,
     generate_score_configurations,
@@ -478,3 +479,115 @@ def test_buy_and_hold_applies_entry_exit_fees_and_slippage() -> None:
     assert value.trade_count == 2
     assert value.fees_paid > 0
     assert value.final_equity < without_costs.final_equity
+
+
+def realistic_price_matrix(
+    entry_price: Decimal, exit_price: Decimal
+) -> HistoricalFeatureMatrix:
+    rows = matrix().rows[:2]
+    return HistoricalFeatureMatrix(
+        "fingerprint",
+        (
+            HistoricalFeatureRow(
+                rows[0].candle_open_time,
+                entry_price,
+                rows[0].ema_20,
+                rows[0].ema_50,
+                rows[0].rsi_14,
+                rows[0].atr_14,
+                rows[0].return_1,
+                rows[0].return_12,
+                rows[0].relative_volume_20,
+            ),
+            HistoricalFeatureRow(
+                rows[1].candle_open_time,
+                exit_price,
+                rows[1].ema_20,
+                rows[1].ema_50,
+                rows[1].rsi_14,
+                rows[1].atr_14,
+                rows[1].return_1,
+                rows[1].return_12,
+                rows[1].relative_volume_20,
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("initial_cash", "entry_price", "fee_rate"),
+    (
+        (Decimal("10"), Decimal("0.123456789012345678"), Decimal(0)),
+        (Decimal("100"), Decimal("12.345678901234567890"), Decimal("0.001")),
+        (Decimal("10000"), Decimal("68432.123456789012345678"), Decimal("0.001")),
+        (Decimal("1000000"), Decimal("999999.999999999999999999"), Decimal(0)),
+    ),
+)
+def test_buy_and_hold_entry_is_financeable_across_prices_cash_and_fees(
+    initial_cash: Decimal, entry_price: Decimal, fee_rate: Decimal
+) -> None:
+    configuration = SimulationConfiguration(
+        fee_rate=fee_rate, slippage_rate=Decimal("0.0005")
+    )
+    first = _calculate_buy_and_hold_entry(
+        cash=initial_cash,
+        observed_price=entry_price,
+        configuration=configuration,
+    )
+    second = _calculate_buy_and_hold_entry(
+        cash=initial_cash,
+        observed_price=entry_price,
+        configuration=configuration,
+    )
+    assert first == second
+    assert first.resulting_cash >= 0
+    assert first.quantity > 0
+    assert first.execution_price > entry_price
+    assert first.fee_amount >= 0
+
+
+def test_realistic_btc_buy_and_hold_regression_is_complete_and_deterministic() -> None:
+    history = realistic_price_matrix(
+        Decimal("68432.123456789012345678"),
+        Decimal("70123.987654321098765432"),
+    )
+    configuration = SimulationConfiguration(
+        fee_rate=Decimal("0.001"), slippage_rate=Decimal("0.0005")
+    )
+    entry = _calculate_buy_and_hold_entry(
+        cash=Decimal("10000"),
+        observed_price=history.rows[0].close_price,
+        configuration=configuration,
+    )
+    results = tuple(
+        _buy_and_hold(
+            history,
+            RefinementSegmentName.TEST,
+            INSTRUMENT,
+            Decimal("10000"),
+            configuration,
+        )
+        for _ in range(2)
+    )
+    costless = _buy_and_hold(
+        history,
+        RefinementSegmentName.TEST,
+        INSTRUMENT,
+        Decimal("10000"),
+        SimulationConfiguration(fee_rate=Decimal(0), slippage_rate=Decimal(0)),
+    )
+    without_slippage = _buy_and_hold(
+        history,
+        RefinementSegmentName.TEST,
+        INSTRUMENT,
+        Decimal("10000"),
+        SimulationConfiguration(fee_rate=Decimal("0.001"), slippage_rate=Decimal(0)),
+    )
+    assert results[0] == results[1]
+    assert entry.resulting_cash >= 0
+    assert entry.quantity > 0
+    assert results[0].trade_count == 2
+    assert results[0].final_equity > 0
+    assert results[0].fees_paid > entry.fee_amount
+    assert results[0].final_equity < without_slippage.final_equity
+    assert results[0].final_equity < costless.final_equity
