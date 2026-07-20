@@ -18,7 +18,7 @@ from app.optimization.historical_data import (
     HistoricalDatasetRange,
     read_historical_dataset,
 )
-from app.optimization.refinement import refine_historical_dataset
+from app.optimization.refinement import RefinementBudget, refine_historical_dataset
 from app.optimization.simulation import simulate_historical_strategy
 from app.paper.persistence import PaperPositionRecord, PaperTradeRecord
 from app.scores.persistence import MarketScoreRecord
@@ -148,7 +148,7 @@ async def test_historical_refinement_is_read_only(session: AsyncSession) -> None
         initial_cash=Decimal("10000"),
         fee_rate=Decimal("0.001"),
         slippage_rate=Decimal("0.0005"),
-        validation_top_k=3,
+        budget=RefinementBudget(1, 1, 200, 60),
     )
     counts_after = (
         await session.scalar(select(func.count()).select_from(MarketFeatureRecord)),
@@ -156,6 +156,7 @@ async def test_historical_refinement_is_read_only(session: AsyncSession) -> None
         await session.scalar(select(func.count()).select_from(PaperTradeRecord)),
         await session.scalar(select(func.count()).select_from(PaperPositionRecord)),
     )
-    assert result.total_candidate_count == 60
+    assert result.counts.score_configurations_generated == 176
+    assert result.counts.joint_candidates_evaluated == 60
     assert counts_after == counts_before
     assert not session.new and not session.dirty and not session.deleted

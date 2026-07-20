@@ -19,7 +19,12 @@ from app.paper.config import (
 )
 from app.paper.models import PaperPosition, PaperPositionStatus, PaperTradeSide
 from app.scores.calculation import MODEL_NAME, MODEL_VERSION
-from app.scores.calculator import BaselineScoreInput, calculate_baseline_score
+from app.scores.calculator import (
+    BASELINE_TECHNICAL_V1_PARAMETERS,
+    BaselineScoreInput,
+    BaselineTechnicalParameters,
+    calculate_baseline_score,
+)
 from app.strategies.baseline_long_only import (
     BASELINE_LONG_ONLY_V1_PARAMETERS,
     CONFIGURATION_VERSION,
@@ -96,6 +101,7 @@ class HistoricalSimulationResult:
     slippage_rate: Decimal
     decision_interval: timedelta
     strategy_parameters: BaselineLongOnlyParameters
+    score_parameters: BaselineTechnicalParameters
     initial_cash: Decimal
     final_cash: Decimal
     final_equity: Decimal
@@ -133,6 +139,7 @@ def simulate_historical_strategy(
     configuration_version: int = CONFIGURATION_VERSION,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
     strategy_parameters: BaselineLongOnlyParameters = BASELINE_LONG_ONLY_V1_PARAMETERS,
+    score_parameters: BaselineTechnicalParameters = BASELINE_TECHNICAL_V1_PARAMETERS,
 ) -> HistoricalSimulationResult:
     """Run baseline_long_only v1 deterministically against closed candle evidence."""
 
@@ -150,6 +157,7 @@ def simulate_historical_strategy(
         configuration_version=configuration_version,
         decision_interval=decision_interval,
         strategy_parameters=strategy_parameters,
+        score_parameters=score_parameters,
     )
 
 
@@ -167,6 +175,7 @@ def simulate_historical_feature_matrix(
     configuration_version: int = CONFIGURATION_VERSION,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
     strategy_parameters: BaselineLongOnlyParameters = BASELINE_LONG_ONLY_V1_PARAMETERS,
+    score_parameters: BaselineTechnicalParameters = BASELINE_TECHNICAL_V1_PARAMETERS,
 ) -> HistoricalSimulationResult:
     """Simulate a precomputed Feature matrix without rebuilding it."""
 
@@ -212,7 +221,7 @@ def simulate_historical_feature_matrix(
         equity_before = _equity(cash, quantity, observed_price)
         quantity_before = quantity
         cash_before = cash
-        score = calculate_baseline_score(_score_input(row))
+        score = calculate_baseline_score(_score_input(row), parameters=score_parameters)
         decision = evaluate_baseline_long_only(
             overall_score=score.overall_score,
             position_is_open=quantity > 0,
@@ -326,6 +335,7 @@ def simulate_historical_feature_matrix(
         configuration=configuration,
         decision_interval=decision_interval,
         strategy_parameters=strategy_parameters,
+        score_parameters=score_parameters,
         starting_cash=starting_cash,
         cash=cash,
         quantity=quantity,
@@ -436,6 +446,7 @@ def _result(
     configuration: SimulationConfiguration,
     decision_interval: timedelta,
     strategy_parameters: BaselineLongOnlyParameters,
+    score_parameters: BaselineTechnicalParameters,
     starting_cash: Decimal,
     cash: Decimal,
     quantity: Decimal,
@@ -486,6 +497,7 @@ def _result(
         configuration.slippage_rate,
         decision_interval,
         strategy_parameters,
+        score_parameters,
         starting_cash,
         cash,
         final.equity,

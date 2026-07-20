@@ -30,6 +30,12 @@ def test_refinement_command_parses_identity_costs_and_top_k() -> None:
             "0.0005",
             "--validation-top-k",
             "7",
+            "--score-screening-top-k",
+            "9",
+            "--max-score-configurations",
+            "190",
+            "--max-joint-candidates",
+            "900",
         ]
     )
     assert (args.asset, args.provider, args.market_type, args.interval) == (
@@ -44,6 +50,9 @@ def test_refinement_command_parses_identity_costs_and_top_k() -> None:
         Decimal("0.0005"),
     )
     assert args.validation_top_k == 7
+    assert args.score_screening_top_k == 9
+    assert args.max_score_configurations == 190
+    assert args.max_joint_candidates == 900
 
 
 def test_refinement_command_rejects_non_positive_top_k() -> None:

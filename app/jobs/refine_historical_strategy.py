@@ -21,9 +21,10 @@ from app.optimization.historical_data import (
     read_historical_dataset,
 )
 from app.optimization.refinement import (
-    DEFAULT_VALIDATION_TOP_K,
+    BenchmarkSegmentResult,
     CandidateSegmentResult,
     HistoricalRefinementResult,
+    RefinementBudget,
     refine_historical_dataset,
 )
 
@@ -53,8 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--validation-top-k",
         type=positive_integer,
-        default=DEFAULT_VALIDATION_TOP_K,
+        default=10,
     )
+    parser.add_argument("--score-screening-top-k", type=positive_integer, default=12)
+    parser.add_argument(
+        "--max-score-configurations", type=positive_integer, default=200
+    )
+    parser.add_argument("--max-joint-candidates", type=positive_integer, default=1000)
     return parser
 
 
@@ -86,7 +92,12 @@ async def run(
                 initial_cash=args.initial_cash,
                 fee_rate=args.fee_rate,
                 slippage_rate=args.slippage_rate,
-                validation_top_k=args.validation_top_k,
+                budget=RefinementBudget(
+                    score_screening_top_k=args.score_screening_top_k,
+                    validation_top_k=args.validation_top_k,
+                    max_score_configurations=args.max_score_configurations,
+                    max_joint_candidates=args.max_joint_candidates,
+                ),
             )
             if session.new or session.dirty or session.deleted:
                 raise RuntimeError(
@@ -94,6 +105,7 @@ async def run(
                 )
     finally:
         await engine.dispose()
+    counts = result.counts
     logger.info(
         "Historical strategy refinement completed",
         extra={
@@ -112,10 +124,32 @@ async def run(
                 "fee_rate": str(result.fee_rate),
                 "slippage_rate": str(result.slippage_rate),
                 "decision_interval_seconds": result.decision_interval.total_seconds(),
-                "candidate_count": result.total_candidate_count,
-                "validation_candidate_count": result.validation_candidate_count,
+                "refinement_counts": {
+                    "score_configurations_generated": (
+                        counts.score_configurations_generated
+                    ),
+                    "score_configurations_screened": (
+                        counts.score_configurations_screened
+                    ),
+                    "score_configurations_retained": (
+                        counts.score_configurations_retained
+                    ),
+                    "joint_candidates_evaluated": counts.joint_candidates_evaluated,
+                    "validation_candidates_evaluated": (
+                        counts.validation_candidates_evaluated
+                    ),
+                    "test_candidates_evaluated": counts.test_candidates_evaluated,
+                    "simulation_count_total": counts.simulation_count_total,
+                },
                 "recommendation_status": result.recommendation_status.value,
-                "recommended_parameters": _parameters(result),
+                "production_baseline_parameters": _candidate_parameters(
+                    result.production_baseline.training.candidate
+                ),
+                "recommended_parameters": (
+                    _candidate_parameters(result.recommendation.candidate)
+                    if result.recommendation
+                    else None
+                ),
                 "segments": [
                     {
                         "name": segment.name.value,
@@ -125,17 +159,41 @@ async def run(
                     }
                     for segment in result.segments
                 ],
-                "baseline_segments": {
-                    "training": _metric(result.baseline.training),
-                    "validation": _metric(result.baseline.validation),
-                    "test": _metric(result.baseline.test),
+                "production_baseline_segments": {
+                    "training": _metric(result.production_baseline.training),
+                    "validation": _metric(result.production_baseline.validation),
+                    "test": _metric(result.production_baseline.test),
+                },
+                "buy_and_hold_segments": {
+                    "training": _metric(result.buy_and_hold.training),
+                    "validation": _metric(result.buy_and_hold.validation),
+                    "test": _metric(result.buy_and_hold.test),
                 },
                 "recommended_validation": (
                     _metric(result.recommendation.validation)
                     if result.recommendation
                     else None
                 ),
-                "recommended_test": _metric(result.recommended_test),
+                "recommended_test": (
+                    _metric(result.recommendation.test)
+                    if result.recommendation
+                    else None
+                ),
+                "ablation_summary": [
+                    {
+                        "disabled_signal": item.disabled_signal,
+                        "return_difference_from_baseline": str(
+                            item.return_difference_from_baseline
+                        ),
+                        "drawdown_difference_from_baseline": str(
+                            item.drawdown_difference_from_baseline
+                        ),
+                        "trade_difference_from_baseline": (
+                            item.trade_difference_from_baseline
+                        ),
+                    }
+                    for item in result.ablation_summary
+                ],
                 "recommendation_explanation": result.recommendation_explanation,
                 "elapsed_seconds": perf_counter() - started,
             }
@@ -144,26 +202,45 @@ async def run(
     return result
 
 
-def _parameters(result: HistoricalRefinementResult) -> dict[str, str] | None:
-    value = result.recommended_parameters
-    if value is None:
-        return None
+def _candidate_parameters(value: object) -> dict[str, dict[str, str]]:
+    from app.optimization.refinement import RefinementCandidate
+
+    candidate = value
+    if not isinstance(candidate, RefinementCandidate):
+        raise TypeError("expected RefinementCandidate")
     return {
-        "entry_threshold": str(value.entry_threshold),
-        "exit_threshold": str(value.exit_threshold),
-        "open_position_target_percentage": str(value.open_position_target_percentage),
+        "score": {
+            "trend_weight": str(candidate.score_parameters.trend_weight),
+            "rsi_weight": str(candidate.score_parameters.rsi_weight),
+            "return_1_weight": str(candidate.score_parameters.return_1_weight),
+            "return_12_weight": str(candidate.score_parameters.return_12_weight),
+            "volume_confirmation_weight": str(
+                candidate.score_parameters.volume_confirmation_weight
+            ),
+        },
+        "strategy": {
+            "entry_threshold": str(candidate.strategy_parameters.entry_threshold),
+            "exit_threshold": str(candidate.strategy_parameters.exit_threshold),
+            "open_position_target_percentage": str(
+                candidate.strategy_parameters.open_position_target_percentage
+            ),
+        },
     }
 
 
-def _metric(value: CandidateSegmentResult | None) -> dict[str, str | int] | None:
+def _metric(
+    value: CandidateSegmentResult | BenchmarkSegmentResult | None,
+) -> dict[str, str | int] | None:
     if value is None:
         return None
     return {
         "total_return": str(value.total_return),
+        "absolute_pnl": str(value.absolute_pnl),
         "max_drawdown": str(value.max_drawdown),
         "trade_count": value.trade_count,
         "fees_paid": str(value.fees_paid),
         "final_equity": str(value.final_equity),
+        "return_over_drawdown": str(value.return_over_drawdown),
     }
 
 
