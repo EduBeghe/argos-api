@@ -27,6 +27,13 @@ from app.optimization.edge_guided_memory import (
     find_reusable_edge_guided_run,
     persist_edge_guided_result,
 )
+from app.optimization.edge_guided_read import (
+    get_edge_guided_candidate,
+    get_edge_guided_run,
+    list_edge_guided_candidates,
+    list_edge_guided_runs,
+)
+from app.optimization.edge_guided_schemas import EdgeGuidedActionFilter
 from app.optimization.predictive_edge_memory import PredictiveEdgeRunRecord
 from app.optimization.predictive_edge_service import (
     PredictiveEdgeExecution,
@@ -353,3 +360,127 @@ async def test_insertion_failure_rolls_back_the_complete_graph(
         await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
         == 0
     )
+
+
+def result_with_all_statuses() -> EdgeGuidedEvaluationResult:
+    original = result()
+    confirmed = original.evaluations[0]
+    validation_window = replace(
+        confirmed.windows[0],
+        window_ordinal=2,
+        test=None,
+        validation_passed=False,
+        test_confirmed=False,
+    )
+    validation_candidate = replace(
+        confirmed.candidate,
+        candidate_fingerprint="1" * 64,
+        source_hypothesis_id="2" * 64,
+        suggested_action=SuggestedAction.EXIT_OR_AVOID,
+    )
+    rejected_validation = replace(
+        confirmed,
+        candidate=validation_candidate,
+        windows=(validation_window,),
+        confirmed_window_count=0,
+        rejected_validation_window_count=1,
+        status=EdgeGuidedCandidateStatus.REJECTED_VALIDATION,
+        explanation="validation rejected",
+    )
+    test_window = replace(confirmed.windows[0], window_ordinal=3, test_confirmed=False)
+    test_candidate = replace(
+        confirmed.candidate,
+        candidate_fingerprint="3" * 64,
+        source_hypothesis_id="4" * 64,
+        condition=Condition.ALL,
+    )
+    rejected_test = replace(
+        confirmed,
+        candidate=test_candidate,
+        windows=(test_window,),
+        confirmed_window_count=0,
+        rejected_test_window_count=1,
+        status=EdgeGuidedCandidateStatus.REJECTED_TEST,
+        explanation="test rejected",
+    )
+    return replace(
+        original,
+        generated_count=3,
+        evaluated_count=3,
+        evaluations=(confirmed, rejected_validation, rejected_test),
+    )
+
+
+async def test_read_api_queries_are_filtered_paginated_and_decimal_safe(
+    session: AsyncSession,
+) -> None:
+    parent = await parent_run(session)
+    assert parent.run_id is not None
+    persisted = await persist_edge_guided_result(
+        session=session,
+        experiment_key=EDGE_KEY,
+        predictive_edge_run_id=parent.run_id,
+        instrument=MARKET_INSTRUMENTS[0].instrument,
+        range_start=START,
+        range_end=START + timedelta(days=1),
+        initial_cash=Decimal("10000.123456789012345678"),
+        simulation=SimulationConfiguration(),
+        decision_interval=timedelta(minutes=30),
+        started_at=START,
+        result=result_with_all_statuses(),
+    )
+    assert persisted.run_id is not None
+
+    runs = await list_edge_guided_runs(
+        session, asset=MARKET_INSTRUMENTS[0].instrument.asset, limit=1, offset=0
+    )
+    assert runs.total == 1
+    assert len(runs.items) == 1
+    assert runs.items[0].initial_cash == Decimal("10000.123456789012345678")
+    assert runs.items[0].candidate_status_counts.model_dump() == {
+        "confirmed_candidate": 1,
+        "rejected_validation": 1,
+        "rejected_test": 1,
+    }
+    assert (await get_edge_guided_run(session, persisted.run_id)).id == persisted.run_id
+
+    filtered = await list_edge_guided_candidates(
+        session,
+        run_id=persisted.run_id,
+        status=EdgeGuidedCandidateStatus.REJECTED_VALIDATION,
+        action=EdgeGuidedActionFilter.EXIT_OR_AVOID,
+        condition=Condition.HIGH_VOLATILITY,
+        predictor_name="return_1",
+        limit=1,
+        offset=0,
+    )
+    assert filtered.total == 1
+    assert len(filtered.items) == 1
+    assert not hasattr(filtered.items[0], "windows")
+    assert isinstance(filtered.items[0].training_metrics.total_return, Decimal)
+
+    detail = await get_edge_guided_candidate(
+        session, filtered.items[0].candidate_evaluation_id
+    )
+    assert tuple(item.window_ordinal for item in detail.windows) == (2,)
+    assert detail.windows[0].test_metrics is None
+
+
+async def test_empty_read_api_pages_do_not_write(session: AsyncSession) -> None:
+    before = (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedRunRecord)),
+        await session.scalar(
+            select(func.count()).select_from(EdgeGuidedCandidateRecord)
+        ),
+        await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord)),
+    )
+    assert (await list_edge_guided_runs(session)).items == ()
+    assert (await list_edge_guided_candidates(session)).items == ()
+    after = (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedRunRecord)),
+        await session.scalar(
+            select(func.count()).select_from(EdgeGuidedCandidateRecord)
+        ),
+        await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord)),
+    )
+    assert after == before == (0, 0, 0)

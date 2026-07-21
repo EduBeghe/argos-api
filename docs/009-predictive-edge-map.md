@@ -115,11 +115,20 @@ All collections use bounded deterministic keyset pagination, UTC, and Decimal.
 - `GET /optimization/predictive-edge-runs/{run_id}/edges`
 - `GET /optimization/predictive-edge-runs/{run_id}/edges/{edge_id}/windows`
 - `GET /optimization/predictive-edge-runs/{run_id}/hypotheses`
+- `GET /optimization/edge-guided/runs`
+- `GET /optimization/edge-guided/runs/{run_id}`
+- `GET /optimization/edge-guided/candidates`
+- `GET /optimization/edge-guided/candidates/{candidate_evaluation_id}`
 
 The GET endpoints are strictly read-only, do not contact providers, and never start an
 analysis. Without `--persist`, analysis performs no insert, update, reuse-count change,
 or commit. Insufficient history is persisted only as the explicit
 `insufficient_history` conclusion, never as an empty completed run.
+
+The edge-guided endpoints expose only persisted historical runs, candidate summaries,
+and candidate-detail walk-forward windows. They support bounded filtering and
+pagination, perform no historical calculation, and do not imply recommendation or
+activation.
 
 Run the optional bounded evaluation with:
 
