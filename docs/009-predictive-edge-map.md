@@ -14,8 +14,9 @@ evaluation frequency, and holding period are separate concepts.
 Windows use half-open chronological training, validation, and test ranges. Training
 alone defines predictor centers, positive/negative direction mappings, five quantile
 bins, and the high-volatility threshold. Validation selects candidate relationships
-and freezes their direction and promising ranges. Test can only confirm or reject a
-selection; it cannot discover a hypothesis or redefine earlier state. An exact
+and freezes each quantile bin, its training-defined bounds, direction mapping, and
+suggested action. Test filters observations through those exact frozen bins and can
+only confirm or reject each selection; evidence from another bin cannot confirm it. An exact
 future candle must remain inside its test phase; data at or after the test end is never
 used. Defaults are 180/60/60 days, a 60-day step, and six recent windows.
 
@@ -28,6 +29,13 @@ EMA predictors use `(EMA / close) - 1`, not nominal price levels. Directional pr
 are explicitly zero-centered or training-centered. ATR and relative volume are
 magnitude/activity predictors, while volume confirmation is confirmation-only; these
 predictors expose no fabricated directional hit rate.
+
+Correlation sign describes a mathematical relationship, not an action. Each selected
+bin derives one explicit suggestion: `long_entry`, `exit_or_avoid`, or
+`diagnostic_only`. The derivation combines the training-frozen mapping, the bin's
+position relative to its center, validation return, long-aligned net return or avoided
+downside, and friction. A negative correlation may therefore support a long entry in a
+low bin and an exit/avoid signal in a high bin. No suggestion represents short selling.
 
 The analysis reports correlation, directional precision, movement, post-friction
 outcomes, dispersion, standard error, quantile behavior, and consistency across
@@ -46,10 +54,12 @@ evidence does not guarantee future profitability.
 ## Strategy hypotheses and future flow
 
 Promising evidence creates an immutable `StrategyHypothesis` with complete instrument
-identity, predictor/version, direction, horizon, condition, long-aligned expected gross
-and net return or expected avoided downside, stability, evidence windows, rationale,
-limitations, and cautious timing
+identity, predictor and hypothesis contract versions, horizon, condition, frozen
+direction mapping, one bin/range, one suggested action, validation evidence, confirmed
+test evidence, cross-window stability, rationale, limitations, and cautious timing
 suggestions. It has no entry/exit threshold or position size and is not executable.
+Different bins of one predictor may create independent long-entry and exit/avoid
+hypotheses when each has independently selected and confirmed evidence.
 
 ```text
 Predictive Edge Map
@@ -61,8 +71,9 @@ Predictive Edge Map
 
 ## Persistence and API
 
-Only configuration, windows, aggregate metrics, training bin boundaries, stability,
-classifications, benchmark summaries, and hypotheses are relationally persisted. The
+Only configuration, windows, aggregate metrics, per-bin validation selections and test
+confirmations, training boundaries, stability, classifications, benchmark summaries,
+and hypotheses are relationally persisted. The
 dataset fingerprint and every material input form the reusable experiment identity.
 All collections use bounded deterministic keyset pagination, UTC, and Decimal.
 

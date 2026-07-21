@@ -381,8 +381,12 @@ python -m app.jobs.analyze_predictive_edges \
 ```
 
 Training defines centers, direction mappings, bins, and volatility thresholds.
-Validation selects candidate relationships and freezes their direction and ranges;
-isolated test evidence can only confirm or reject those selections. Directional
+Validation selects individual training-defined bins and freezes their direction
+mapping, range, and suggested action. Isolated test evidence from that same bin can
+only confirm or reject its selection; a different bin cannot confirm it. Correlation
+sign remains statistical and never determines an action by itself. Suggested actions
+are `long_entry`, `exit_or_avoid`, or diagnostic-only, and never imply short selling.
+Directional
 accuracy must improve on always-up, always-down, deterministic-random, and observed
 majority baselines. Signed gross return, long-aligned net return, avoided downside, and
 net movement magnitude after friction remain distinct. Without `--persist`, the job is

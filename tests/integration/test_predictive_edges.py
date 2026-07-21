@@ -16,6 +16,7 @@ from app.optimization.feature_matrix import (
 from app.optimization.predictive_edge_memory import PredictiveEdgeRunRecord
 from app.optimization.predictive_edge_read import (
     get_predictive_edge_run,
+    list_predictive_edge_windows,
     list_predictive_edges,
 )
 from app.optimization.predictive_edge_service import persist_predictive_edge_result
@@ -142,12 +143,25 @@ async def test_predictive_edge_round_trip_preserves_selection_semantics(
     detail = await get_predictive_edge_run(session, execution.run_id)
     edges = await list_predictive_edges(session, run_id=execution.run_id, limit=200)
 
-    assert detail.run.algorithm_version == 2
+    assert detail.run.algorithm_version == 3
     assert detail.run.windows_available == 1
     assert edges.items
     assert all(item.semantic_kind.value for item in edges.items)
     assert all(
         item.windows_confirmed <= item.windows_selected_for_test for item in edges.items
+    )
+    windows = await list_predictive_edge_windows(
+        session,
+        run_id=execution.run_id,
+        edge_id=edges.items[0].id,
+        limit=10,
+    )
+    assert windows.items
+    assert windows.items[0].bin_selections
+    assert all(
+        item.suggested_action.value
+        in {"long_entry", "exit_or_avoid", "diagnostic_only"}
+        for item in windows.items[0].bin_selections
     )
 
 

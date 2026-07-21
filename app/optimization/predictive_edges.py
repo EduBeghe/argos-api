@@ -16,8 +16,9 @@ from app.optimization.walk_forward import WalkForwardConfiguration, WalkForwardW
 from app.paper.config import SimulationConfiguration
 from app.scores.calculator import BaselineScoreInput, calculate_baseline_score
 
-PREDICTIVE_EDGE_ALGORITHM_VERSION = 2
-PREDICTOR_VERSION = 2
+PREDICTIVE_EDGE_ALGORITHM_VERSION = 3
+PREDICTOR_VERSION = 3
+HYPOTHESIS_CONTRACT_VERSION = 2
 DEFAULT_HORIZONS = tuple(
     timedelta(minutes=value) for value in (30, 60, 120, 360, 720, 1440, 2880)
 )
@@ -51,6 +52,12 @@ class DirectionMapping(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
     NOT_APPLICABLE = "not_applicable"
+
+
+class SuggestedAction(StrEnum):
+    LONG_ENTRY = "long_entry"
+    EXIT_OR_AVOID = "exit_or_avoid"
+    DIAGNOSTIC_ONLY = "diagnostic_only"
 
 
 class ValidationStatus(StrEnum):
@@ -304,6 +311,27 @@ class BinAggregate:
 
 
 @dataclass(frozen=True, slots=True)
+class BinSelection:
+    ordinal: int
+    lower_bound: Decimal | None
+    upper_bound: Decimal | None
+    suggested_action: SuggestedAction
+    validation_observation_count: int
+    validation_gross_return: Decimal
+    validation_long_aligned_net_return: Decimal | None
+    validation_avoided_downside: Decimal | None
+    validation_directional_hit_rate: Decimal | None
+    selected_for_test: bool
+    test_observation_count: int
+    test_confirmation_status: TestConfirmationStatus
+    test_gross_return: Decimal
+    test_long_aligned_net_return: Decimal | None
+    test_avoided_downside: Decimal | None
+    test_directional_hit_rate: Decimal | None
+    rejection_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class WindowEdge:
     window_ordinal: int
     predictor: PredictorDefinition
@@ -319,6 +347,7 @@ class WindowEdge:
     selected_for_test: bool
     selection_reason: str
     selected_bin_ordinals: tuple[int, ...]
+    bin_selections: tuple[BinSelection, ...]
     test_confirmation_status: TestConfirmationStatus
     test_metrics: EdgeMetrics
     bins: tuple[BinAggregate, ...]
@@ -331,6 +360,10 @@ class StabilityEdge:
     horizon: timedelta
     condition: Condition
     direction_mapping: DirectionMapping
+    bin_ordinal: int
+    lower_bound: Decimal | None
+    upper_bound: Decimal | None
+    suggested_action: SuggestedAction
     supporting_bin_ordinals: tuple[int, ...]
     windows_evaluated: int
     windows_selected_for_test: int
@@ -355,7 +388,12 @@ class StrategyHypothesis:
     hypothesis_id: str
     predictor_name: str
     predictor_version: int
-    direction: str
+    hypothesis_contract_version: int
+    direction_mapping: DirectionMapping
+    bin_ordinal: int
+    lower_bound: Decimal | None
+    upper_bound: Decimal | None
+    suggested_action: SuggestedAction
     horizon: timedelta
     condition: Condition
     supporting_bin_ordinals: tuple[int, ...]
@@ -483,20 +521,6 @@ def analyze_predictive_edges(
                         predictor, validation_metrics, configuration.thresholds
                     )
                     selected = validation_status is ValidationStatus.SELECTED
-                    selected_bins = (
-                        _selected_bins(
-                            validation,
-                            bounds,
-                            mapping,
-                            configuration.thresholds,
-                        )
-                        if selected
-                        else ()
-                    )
-                    if selected and not selected_bins:
-                        validation_status = ValidationStatus.REJECTED
-                        selected = False
-                        reason = "validation found no promising training-defined bin"
                     test, test_missing = _observations(
                         rows,
                         phase_start=window.test_from,
@@ -518,8 +542,35 @@ def analyze_predictive_edges(
                         friction=friction,
                         thresholds=configuration.thresholds,
                     )
-                    confirmation = _confirm_test(
-                        selected, predictor, test_metrics, configuration.thresholds
+                    bin_selections = _bin_selections(
+                        validation=validation,
+                        test=test,
+                        bounds=bounds,
+                        center=center,
+                        mapping=mapping,
+                        friction=friction,
+                        thresholds=configuration.thresholds,
+                        enabled=selected,
+                    )
+                    selected_bins = tuple(
+                        item.ordinal
+                        for item in bin_selections
+                        if item.selected_for_test
+                    )
+                    if selected and not selected_bins:
+                        validation_status = ValidationStatus.REJECTED
+                        selected = False
+                        reason = "validation found no actionable training-defined bin"
+                    confirmation = (
+                        TestConfirmationStatus.CONFIRMED
+                        if any(
+                            item.test_confirmation_status
+                            is TestConfirmationStatus.CONFIRMED
+                            for item in bin_selections
+                        )
+                        else TestConfirmationStatus.REJECTED
+                        if selected_bins
+                        else TestConfirmationStatus.NOT_SELECTED
                     )
                     bins = _bin_aggregates(test, bounds, configuration.thresholds)
                     payload = (
@@ -532,6 +583,7 @@ def analyze_predictive_edges(
                         bounds,
                         validation_status.value,
                         confirmation.value,
+                        bin_selections,
                         test_metrics,
                     )
                     window_edges.append(
@@ -550,6 +602,7 @@ def analyze_predictive_edges(
                             selected,
                             reason,
                             selected_bins,
+                            bin_selections,
                             confirmation,
                             test_metrics,
                             bins,
@@ -568,7 +621,13 @@ def analyze_predictive_edges(
                 if item.predictor == edge.predictor
                 and item.horizon == edge.horizon
                 and item.condition == edge.condition
-                and item.test_confirmation_status is TestConfirmationStatus.CONFIRMED
+                and any(
+                    selection.ordinal == edge.bin_ordinal
+                    and selection.suggested_action is edge.suggested_action
+                    and selection.test_confirmation_status
+                    is TestConfirmationStatus.CONFIRMED
+                    for selection in item.bin_selections
+                )
             ),
             configuration.decision_interval,
         )
@@ -955,24 +1014,6 @@ def _select_for_test(
     return ValidationStatus.SELECTED, "selected by frozen validation evidence"
 
 
-def _confirm_test(
-    selected: bool,
-    predictor: PredictorDefinition,
-    metrics: EdgeMetrics,
-    thresholds: EvidenceThresholds,
-) -> TestConfirmationStatus:
-    if not selected:
-        return TestConfirmationStatus.NOT_SELECTED
-    if metrics.evidence_status is EvidenceStatus.INSUFFICIENT:
-        return TestConfirmationStatus.INSUFFICIENT
-    status, _ = _select_for_test(predictor, metrics, thresholds)
-    return (
-        TestConfirmationStatus.CONFIRMED
-        if status is ValidationStatus.SELECTED
-        else TestConfirmationStatus.REJECTED
-    )
-
-
 def _direction_benchmarks(values: tuple[Observation, ...]) -> DirectionBenchmarks:
     comparable = tuple(
         item for item in values if item.direction is not Direction.NEUTRAL
@@ -1046,68 +1087,218 @@ def _bin_aggregates(
     return tuple(output)
 
 
-def _selected_bins(
-    values: tuple[Observation, ...],
-    bounds: tuple[Decimal, ...],
+def _bin_groups(
+    values: tuple[Observation, ...], bounds: tuple[Decimal, ...]
+) -> tuple[tuple[Observation, ...], ...]:
+    groups: list[list[Observation]] = [[] for _ in range(len(bounds) + 1)]
+    for value in values:
+        index = next(
+            (i for i, bound in enumerate(bounds) if value.predictor_value <= bound),
+            len(bounds),
+        )
+        groups[index].append(value)
+    return tuple(tuple(group) for group in groups)
+
+
+def _suggested_action(
+    *,
+    lower_bound: Decimal | None,
+    upper_bound: Decimal | None,
+    center: Decimal,
     mapping: DirectionMapping,
+) -> SuggestedAction:
+    if mapping is DirectionMapping.NOT_APPLICABLE:
+        return SuggestedAction.DIAGNOSTIC_ONLY
+    below = upper_bound is not None and upper_bound <= center
+    above = lower_bound is not None and lower_bound >= center
+    predicts_up = (below and mapping is DirectionMapping.NEGATIVE) or (
+        above and mapping is DirectionMapping.POSITIVE
+    )
+    predicts_down = (below and mapping is DirectionMapping.POSITIVE) or (
+        above and mapping is DirectionMapping.NEGATIVE
+    )
+    if predicts_up:
+        return SuggestedAction.LONG_ENTRY
+    if predicts_down:
+        return SuggestedAction.EXIT_OR_AVOID
+    return SuggestedAction.DIAGNOSTIC_ONLY
+
+
+def _action_evidence(
+    values: tuple[Observation, ...],
+    action: SuggestedAction,
+    friction: Decimal,
+) -> tuple[int, Decimal, Decimal | None, Decimal | None, Decimal | None]:
+    count = len(values)
+    gross = (
+        sum((item.forward_gross_return for item in values), Decimal(0)) / count
+        if count
+        else Decimal(0)
+    )
+    if action is SuggestedAction.DIAGNOSTIC_ONLY or not count:
+        return count, gross, None, None, None
+    expected = Direction.UP if action is SuggestedAction.LONG_ENTRY else Direction.DOWN
+    comparable = tuple(
+        item for item in values if item.direction is not Direction.NEUTRAL
+    )
+    hit = (
+        _ratio(sum(item.direction is expected for item in comparable), len(comparable))
+        if comparable
+        else None
+    )
+    long_net = gross - friction if action is SuggestedAction.LONG_ENTRY else None
+    avoided = (
+        max(-gross - friction, Decimal(0))
+        if action is SuggestedAction.EXIT_OR_AVOID
+        else None
+    )
+    return count, gross, long_net, avoided, hit
+
+
+def _bin_selections(
+    *,
+    validation: tuple[Observation, ...],
+    test: tuple[Observation, ...],
+    bounds: tuple[Decimal, ...],
+    center: Decimal,
+    mapping: DirectionMapping,
+    friction: Decimal,
     thresholds: EvidenceThresholds,
-) -> tuple[int, ...]:
-    bins = _bin_aggregates(values, bounds, thresholds)
+    enabled: bool,
+) -> tuple[BinSelection, ...]:
+    validation_groups = _bin_groups(validation, bounds)
+    test_groups = _bin_groups(test, bounds)
     minimum_bin_observations = max(
         2, thresholds.minimum_observations // (len(bounds) + 1)
     )
-    return tuple(
-        item.ordinal
-        for item in bins
-        if item.observation_count >= minimum_bin_observations
-        and item.mean_net_movement_magnitude_after_friction > 0
-        and (
-            (
-                mapping is DirectionMapping.POSITIVE
-                and item.mean_forward_gross_return > 0
-            )
-            or (
-                mapping is DirectionMapping.NEGATIVE
-                and item.mean_forward_gross_return < 0
+    output: list[BinSelection] = []
+    for index, validation_values in enumerate(validation_groups):
+        lower = bounds[index - 1] if index else None
+        upper = bounds[index] if index < len(bounds) else None
+        action = _suggested_action(
+            lower_bound=lower, upper_bound=upper, center=center, mapping=mapping
+        )
+        validation_evidence = _action_evidence(validation_values, action, friction)
+        test_evidence = _action_evidence(test_groups[index], action, friction)
+        v_count, v_gross, v_long_net, v_avoided, v_hit = validation_evidence
+        actionable = action is not SuggestedAction.DIAGNOSTIC_ONLY
+        favorable_validation = (
+            (v_long_net is not None and v_long_net > 0)
+            if action is SuggestedAction.LONG_ENTRY
+            else (v_avoided is not None and v_avoided > 0)
+        )
+        selected = bool(
+            enabled
+            and actionable
+            and v_count >= minimum_bin_observations
+            and v_hit is not None
+            and v_hit >= thresholds.minimum_directional_hit_rate
+            and favorable_validation
+        )
+        t_count, t_gross, t_long_net, t_avoided, t_hit = test_evidence
+        favorable_test = (
+            (t_long_net is not None and t_long_net > 0)
+            if action is SuggestedAction.LONG_ENTRY
+            else (t_avoided is not None and t_avoided > 0)
+        )
+        confirmed = bool(
+            selected
+            and t_count >= minimum_bin_observations
+            and t_hit is not None
+            and t_hit >= thresholds.minimum_directional_hit_rate
+            and favorable_test
+        )
+        status = (
+            TestConfirmationStatus.NOT_SELECTED
+            if not selected
+            else TestConfirmationStatus.INSUFFICIENT
+            if t_count < minimum_bin_observations
+            else TestConfirmationStatus.CONFIRMED
+            if confirmed
+            else TestConfirmationStatus.REJECTED
+        )
+        reason = (
+            None
+            if confirmed
+            else "validation did not select this bin and action"
+            if not selected
+            else f"requires at least {minimum_bin_observations} test observations"
+            if t_count < minimum_bin_observations
+            else "frozen bin action did not confirm after costs in test"
+        )
+        output.append(
+            BinSelection(
+                index + 1,
+                lower,
+                upper,
+                action,
+                v_count,
+                v_gross,
+                v_long_net,
+                v_avoided,
+                v_hit,
+                selected,
+                t_count,
+                status,
+                t_gross,
+                t_long_net,
+                t_avoided,
+                t_hit,
+                reason,
             )
         )
-    )
+    return tuple(output)
 
 
 def _stability(
     edges: tuple[WindowEdge, ...], thresholds: EvidenceThresholds
 ) -> tuple[StabilityEdge, ...]:
-    groups: dict[tuple[str, timedelta, Condition], list[WindowEdge]] = {}
+    groups: dict[
+        tuple[str, timedelta, Condition, DirectionMapping, int, SuggestedAction],
+        list[tuple[WindowEdge, BinSelection]],
+    ] = {}
     for edge in edges:
-        groups.setdefault(
-            (edge.predictor.name, edge.horizon, edge.condition), []
-        ).append(edge)
+        for selection in edge.bin_selections:
+            if selection.suggested_action is SuggestedAction.DIAGNOSTIC_ONLY:
+                continue
+            groups.setdefault(
+                (
+                    edge.predictor.name,
+                    edge.horizon,
+                    edge.condition,
+                    edge.direction_mapping,
+                    selection.ordinal,
+                    selection.suggested_action,
+                ),
+                [],
+            ).append((edge, selection))
     output: list[StabilityEdge] = []
-    for (_, horizon, condition), group in groups.items():
-        selected = [edge for edge in group if edge.selected_for_test]
+    for (
+        _,
+        horizon,
+        condition,
+        mapping,
+        bin_ordinal,
+        action,
+    ), group in groups.items():
+        selected = [item for item in group if item[1].selected_for_test]
         confirmed = [
-            edge
-            for edge in selected
-            if edge.test_confirmation_status is TestConfirmationStatus.CONFIRMED
+            item
+            for item in selected
+            if item[1].test_confirmation_status is TestConfirmationStatus.CONFIRMED
         ]
-        mapping = group[0].direction_mapping
-        selected_bin_sets = [set(edge.selected_bin_ordinals) for edge in confirmed]
-        supporting_bins = tuple(
-            sorted(set.intersection(*selected_bin_sets)) if selected_bin_sets else ()
-        )
-        same_mapping = sum(edge.direction_mapping is mapping for edge in confirmed)
-        stable = _ratio(same_mapping, len(selected)) if selected else Decimal(0)
+        stable = _ratio(len(confirmed), len(selected)) if selected else Decimal(0)
         correlations = tuple(
             edge.test_metrics.correlation
-            for edge in confirmed
+            for edge, _ in confirmed
             if edge.test_metrics.correlation is not None
         )
-        total = sum(edge.test_metrics.usable_count for edge in confirmed)
+        total = sum(selection.test_observation_count for _, selection in confirmed)
         weighted = (
             sum(
                 (
-                    edge.test_metrics.correlation * edge.test_metrics.usable_count
-                    for edge in confirmed
+                    edge.test_metrics.correlation * selection.test_observation_count
+                    for edge, selection in confirmed
                     if edge.test_metrics.correlation is not None
                 ),
                 Decimal(0),
@@ -1117,35 +1308,49 @@ def _stability(
             else None
         )
         hits = tuple(
-            edge.test_metrics.directional_hit_rate
-            for edge in confirmed
-            if edge.test_metrics.directional_hit_rate is not None
+            selection.test_directional_hit_rate
+            for _, selection in confirmed
+            if selection.test_directional_hit_rate is not None
         )
         aligned_gross = tuple(
-            edge.test_metrics.mean_strategy_aligned_gross_return
-            for edge in confirmed
-            if edge.test_metrics.mean_strategy_aligned_gross_return is not None
+            selection.test_gross_return
+            for _, selection in confirmed
+            if action is SuggestedAction.LONG_ENTRY
         )
         aligned_net = tuple(
-            edge.test_metrics.mean_strategy_aligned_net_return
-            for edge in confirmed
-            if edge.test_metrics.mean_strategy_aligned_net_return is not None
+            selection.test_long_aligned_net_return
+            for _, selection in confirmed
+            if selection.test_long_aligned_net_return is not None
         )
         avoided = tuple(
-            edge.test_metrics.mean_expected_avoided_downside
-            for edge in confirmed
-            if edge.test_metrics.mean_expected_avoided_downside is not None
+            selection.test_avoided_downside
+            for _, selection in confirmed
+            if selection.test_avoided_downside is not None
         )
         classification = _classify_stability(
-            group[0].predictor, selected, confirmed, stable, weighted, thresholds
+            action, len(selected), len(confirmed), stable, thresholds
+        )
+        lower_values = tuple(
+            selection.lower_bound
+            for _, selection in confirmed or selected or group
+            if selection.lower_bound is not None
+        )
+        upper_values = tuple(
+            selection.upper_bound
+            for _, selection in confirmed or selected or group
+            if selection.upper_bound is not None
         )
         output.append(
             StabilityEdge(
-                group[0].predictor,
+                group[0][0].predictor,
                 horizon,
                 condition,
                 mapping,
-                supporting_bins,
+                bin_ordinal,
+                median(lower_values) if lower_values else None,
+                median(upper_values) if upper_values else None,
+                action,
+                (bin_ordinal,),
                 len(group),
                 len(selected),
                 len(confirmed),
@@ -1156,8 +1361,11 @@ def _stability(
                 sum(hits, Decimal(0)) / len(hits) if hits else None,
                 sum(
                     (
-                        edge.test_metrics.positive_movement_after_friction_ratio
-                        for edge in confirmed
+                        Decimal(1)
+                        if (selection.test_long_aligned_net_return or Decimal(0)) > 0
+                        or (selection.test_avoided_downside or Decimal(0)) > 0
+                        else Decimal(0)
+                        for _, selection in confirmed
                     ),
                     Decimal(0),
                 )
@@ -1166,8 +1374,10 @@ def _stability(
                 else Decimal(0),
                 sum(
                     (
-                        edge.test_metrics.mean_net_movement_magnitude_after_friction
-                        for edge in confirmed
+                        selection.test_long_aligned_net_return
+                        or selection.test_avoided_downside
+                        or Decimal(0)
+                        for _, selection in confirmed
                     ),
                     Decimal(0),
                 )
@@ -1195,33 +1405,24 @@ def _stability(
 
 
 def _classify_stability(
-    predictor: PredictorDefinition,
-    selected: list[WindowEdge],
-    confirmed: list[WindowEdge],
+    action: SuggestedAction,
+    selected: int,
+    confirmed: int,
     stable: Decimal,
-    correlation: Decimal | None,
     thresholds: EvidenceThresholds,
 ) -> EvidenceStatus:
-    if predictor.semantic_kind in (
-        PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY,
-        PredictorSemanticKind.CONFIRMATION_ONLY,
-    ):
-        return EvidenceStatus.WEAK if confirmed else EvidenceStatus.NONE
-    if len(selected) < thresholds.minimum_windows:
+    if action is SuggestedAction.DIAGNOSTIC_ONLY:
+        return EvidenceStatus.NONE
+    if selected < thresholds.minimum_windows:
         return EvidenceStatus.INSUFFICIENT
     if (
-        len(confirmed) < thresholds.minimum_windows
+        confirmed < thresholds.minimum_windows
         or stable < thresholds.minimum_stable_direction_ratio
     ):
         return EvidenceStatus.UNSTABLE
-    if (
-        correlation is None
-        or abs(correlation) < thresholds.minimum_absolute_correlation
-    ):
-        return EvidenceStatus.NONE
     return (
         EvidenceStatus.PROMISING_POSITIVE
-        if correlation > 0
+        if action is SuggestedAction.LONG_ENTRY
         else EvidenceStatus.PROMISING_NEGATIVE
     )
 
@@ -1229,29 +1430,36 @@ def _classify_stability(
 def _hypothesis(
     edge: StabilityEdge, ordinals: tuple[int, ...], cadence: timedelta
 ) -> StrategyHypothesis:
-    positive = edge.classification is EvidenceStatus.PROMISING_POSITIVE
     key = _fingerprint(
         (
             edge.predictor.name,
             edge.predictor.version,
+            HYPOTHESIS_CONTRACT_VERSION,
             edge.horizon.total_seconds(),
             edge.condition.value,
             edge.direction_mapping.value,
-            edge.supporting_bin_ordinals,
-            edge.classification.value,
+            edge.bin_ordinal,
+            edge.lower_bound,
+            edge.upper_bound,
+            edge.suggested_action.value,
         )
     )
     return StrategyHypothesis(
         key,
         edge.predictor.name,
         edge.predictor.version,
-        "long-positive" if positive else "exit/avoid-negative",
+        HYPOTHESIS_CONTRACT_VERSION,
+        edge.direction_mapping,
+        edge.bin_ordinal,
+        edge.lower_bound,
+        edge.upper_bound,
+        edge.suggested_action,
         edge.horizon,
         edge.condition,
         edge.supporting_bin_ordinals,
-        edge.mean_strategy_aligned_gross_return if positive else None,
-        edge.mean_strategy_aligned_net_return if positive else None,
-        None if positive else edge.mean_expected_avoided_downside,
+        edge.mean_strategy_aligned_gross_return,
+        edge.mean_strategy_aligned_net_return,
+        edge.mean_expected_avoided_downside,
         edge.mean_directional_hit_rate,
         edge.stable_direction_ratio,
         min(cadence, edge.horizon),
@@ -1259,8 +1467,10 @@ def _hypothesis(
         edge.horizon,
         ordinals,
         edge.classification,
-        f"Validation selected {edge.predictor.name}; isolated test confirmed the "
-        f"frozen {edge.direction_mapping.value} mapping at {edge.horizon} under "
+        f"Validation selected bin {edge.bin_ordinal} for "
+        f"{edge.suggested_action.value}; "
+        f"isolated test confirmed the same frozen bounds and "
+        f"{edge.direction_mapping.value} mapping at {edge.horizon} under "
         f"{edge.condition.value}.",
         "Historical correlation is not causality or a guarantee of profitability; "
         "no entry threshold, short position, or position size is implied.",

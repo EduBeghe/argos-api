@@ -145,6 +145,9 @@ class PredictiveEdgeAggregateRecord(Base):
             "predictor_name",
             "horizon_seconds",
             "condition",
+            "direction_mapping",
+            "bin_ordinal",
+            "suggested_action",
             name="uq_predictive_edge_aggregates_identity",
         ),
         Index(
@@ -171,6 +174,10 @@ class PredictiveEdgeAggregateRecord(Base):
     condition: Mapped[str] = mapped_column(String(64), nullable=False)
     windows_evaluated: Mapped[int] = mapped_column(Integer, nullable=False)
     direction_mapping: Mapped[str] = mapped_column(String(32), nullable=False)
+    bin_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    lower_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    upper_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    suggested_action: Mapped[str] = mapped_column(String(32), nullable=False)
     supporting_bin_ordinals: Mapped[list[int]] = mapped_column(
         ARRAY(Integer), nullable=False
     )
@@ -323,6 +330,28 @@ class PredictiveEdgeBinAggregateRecord(Base):
         Numeric(38, 18), nullable=False
     )
     evidence_status: Mapped[str] = mapped_column(String(48), nullable=False)
+    suggested_action: Mapped[str] = mapped_column(String(32), nullable=False)
+    validation_observation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_gross_return: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    validation_long_aligned_net_return: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    validation_avoided_downside: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    validation_directional_hit_rate: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    selected_for_test: Mapped[bool] = mapped_column(nullable=False)
+    test_observation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_confirmation_status: Mapped[str] = mapped_column(String(48), nullable=False)
+    test_gross_return: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    test_long_aligned_net_return: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    test_avoided_downside: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    test_directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    rejection_reason: Mapped[str | None] = mapped_column(String(256))
 
 
 class StrategyHypothesisRecord(Base):
@@ -340,7 +369,12 @@ class StrategyHypothesisRecord(Base):
     )
     predictor_name: Mapped[str] = mapped_column(String(64), nullable=False)
     predictor_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    direction: Mapped[str] = mapped_column(String(32), nullable=False)
+    hypothesis_contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    direction_mapping: Mapped[str] = mapped_column(String(32), nullable=False)
+    bin_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    lower_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    upper_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    suggested_action: Mapped[str] = mapped_column(String(32), nullable=False)
     horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     condition: Mapped[str] = mapped_column(String(64), nullable=False)
     supporting_bin_ordinals: Mapped[list[int]] = mapped_column(

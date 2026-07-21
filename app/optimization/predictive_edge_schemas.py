@@ -8,6 +8,7 @@ from app.optimization.predictive_edges import (
     DirectionMapping,
     EvidenceStatus,
     PredictorSemanticKind,
+    SuggestedAction,
     TestConfirmationStatus,
     ValidationStatus,
 )
@@ -54,6 +55,10 @@ class PredictiveEdgeResponse(BaseModel):
     horizon_seconds: int
     condition: str
     direction_mapping: DirectionMapping
+    bin_ordinal: int
+    lower_bound: Decimal | None
+    upper_bound: Decimal | None
+    suggested_action: SuggestedAction
     supporting_bin_ordinals: tuple[int, ...]
     windows_evaluated: int
     windows_selected_for_test: int
@@ -77,6 +82,26 @@ class PredictiveEdgePageResponse(BaseModel):
     items: tuple[PredictiveEdgeResponse, ...]
     next_cursor: str | None
     has_more: bool
+
+
+class PredictiveEdgeBinSelectionResponse(BaseModel):
+    bin_ordinal: int
+    lower_bound: Decimal | None
+    upper_bound: Decimal | None
+    suggested_action: SuggestedAction
+    validation_observation_count: int
+    validation_gross_return: Decimal
+    validation_long_aligned_net_return: Decimal | None
+    validation_avoided_downside: Decimal | None
+    validation_directional_hit_rate: Decimal | None
+    selected_for_test: bool
+    test_observation_count: int
+    test_confirmation_status: TestConfirmationStatus
+    test_gross_return: Decimal
+    test_long_aligned_net_return: Decimal | None
+    test_avoided_downside: Decimal | None
+    test_directional_hit_rate: Decimal | None
+    rejection_reason: str | None
 
 
 class PredictiveEdgeWindowMetricResponse(BaseModel):
@@ -111,6 +136,7 @@ class PredictiveEdgeWindowMetricResponse(BaseModel):
     test_insufficient_reason: str | None
     training_bin_bounds: tuple[Decimal, ...]
     volatility_threshold: Decimal
+    bin_selections: tuple[PredictiveEdgeBinSelectionResponse, ...]
 
 
 class PredictiveEdgeWindowPageResponse(BaseModel):
@@ -123,7 +149,12 @@ class StrategyHypothesisResponse(BaseModel):
     hypothesis_id: str
     predictor_name: str
     predictor_version: int
-    direction: str
+    hypothesis_contract_version: int
+    direction_mapping: DirectionMapping
+    bin_ordinal: int
+    lower_bound: Decimal | None
+    upper_bound: Decimal | None
+    suggested_action: SuggestedAction
     horizon_seconds: int
     condition: str
     supporting_bin_ordinals: tuple[int, ...]

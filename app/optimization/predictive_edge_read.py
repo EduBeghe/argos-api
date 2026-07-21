@@ -7,12 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.optimization.predictive_edge_memory import (
     PredictiveEdgeAggregateRecord,
+    PredictiveEdgeBinAggregateRecord,
     PredictiveEdgeRunRecord,
     PredictiveEdgeWindowMetricRecord,
     PredictiveEdgeWindowRecord,
     StrategyHypothesisRecord,
 )
 from app.optimization.predictive_edge_schemas import (
+    PredictiveEdgeBinSelectionResponse,
     PredictiveEdgePageResponse,
     PredictiveEdgeResponse,
     PredictiveEdgeRunDetailResponse,
@@ -27,6 +29,7 @@ from app.optimization.predictive_edges import (
     DirectionMapping,
     EvidenceStatus,
     PredictorSemanticKind,
+    SuggestedAction,
     TestConfirmationStatus,
     ValidationStatus,
 )
@@ -209,6 +212,8 @@ async def list_predictive_edge_windows(
             PredictiveEdgeWindowMetricRecord.predictor_name == edge.predictor_name,
             PredictiveEdgeWindowMetricRecord.horizon_seconds == edge.horizon_seconds,
             PredictiveEdgeWindowMetricRecord.condition == edge.condition,
+            PredictiveEdgeWindowMetricRecord.direction_mapping
+            == edge.direction_mapping,
         )
     )
     if cursor is not None:
@@ -222,6 +227,26 @@ async def list_predictive_edge_windows(
     ).all()
     has_more = len(rows) > limit
     page = rows[:limit]
+    metric_ids = tuple(value.id for value, _ in page)
+    bin_rows = (
+        (
+            await session.scalars(
+                select(PredictiveEdgeBinAggregateRecord)
+                .where(
+                    PredictiveEdgeBinAggregateRecord.window_metric_id.in_(metric_ids)
+                )
+                .order_by(
+                    PredictiveEdgeBinAggregateRecord.window_metric_id.asc(),
+                    PredictiveEdgeBinAggregateRecord.ordinal.asc(),
+                )
+            )
+        ).all()
+        if metric_ids
+        else []
+    )
+    bins_by_metric: dict[UUID, list[PredictiveEdgeBinAggregateRecord]] = {}
+    for bin_row in bin_rows:
+        bins_by_metric.setdefault(bin_row.window_metric_id, []).append(bin_row)
     return PredictiveEdgeWindowPageResponse(
         items=tuple(
             PredictiveEdgeWindowMetricResponse(
@@ -272,6 +297,40 @@ async def list_predictive_edge_windows(
                     if item
                 ),
                 volatility_threshold=value.volatility_threshold,
+                bin_selections=tuple(
+                    PredictiveEdgeBinSelectionResponse(
+                        bin_ordinal=item.ordinal,
+                        lower_bound=item.lower_bound,
+                        upper_bound=item.upper_bound,
+                        suggested_action=SuggestedAction(item.suggested_action),
+                        validation_observation_count=(
+                            item.validation_observation_count
+                        ),
+                        validation_gross_return=item.validation_gross_return,
+                        validation_long_aligned_net_return=(
+                            item.validation_long_aligned_net_return
+                        ),
+                        validation_avoided_downside=(item.validation_avoided_downside),
+                        validation_directional_hit_rate=(
+                            item.validation_directional_hit_rate
+                        ),
+                        selected_for_test=item.selected_for_test,
+                        test_observation_count=item.test_observation_count,
+                        test_confirmation_status=TestConfirmationStatus(
+                            item.test_confirmation_status
+                        ),
+                        test_gross_return=item.test_gross_return,
+                        test_long_aligned_net_return=(
+                            item.test_long_aligned_net_return
+                        ),
+                        test_avoided_downside=item.test_avoided_downside,
+                        test_directional_hit_rate=item.test_directional_hit_rate,
+                        rejection_reason=item.rejection_reason,
+                    )
+                    for item in bins_by_metric.get(value.id, ())
+                    if item.ordinal == edge.bin_ordinal
+                    and item.suggested_action == edge.suggested_action
+                ),
             )
             for value, ordinal in page
         ),

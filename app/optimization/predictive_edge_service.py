@@ -193,6 +193,10 @@ async def persist_predictive_edge_result(
                 horizon_seconds=int(stability_edge.horizon.total_seconds()),
                 condition=stability_edge.condition.value,
                 direction_mapping=stability_edge.direction_mapping.value,
+                bin_ordinal=stability_edge.bin_ordinal,
+                lower_bound=stability_edge.lower_bound,
+                upper_bound=stability_edge.upper_bound,
+                suggested_action=stability_edge.suggested_action.value,
                 supporting_bin_ordinals=list(stability_edge.supporting_bin_ordinals),
                 windows_evaluated=stability_edge.windows_evaluated,
                 windows_selected_for_test=stability_edge.windows_selected_for_test,
@@ -280,7 +284,9 @@ async def persist_predictive_edge_result(
             )
         )
         await session.flush()
+        selections = {item.ordinal: item for item in edge.bin_selections}
         for bin_value in edge.bins:
+            selection = selections[bin_value.ordinal]
             session.add(
                 PredictiveEdgeBinAggregateRecord(
                     id=uuid4(),
@@ -301,6 +307,28 @@ async def persist_predictive_edge_result(
                         bin_value.mean_net_movement_magnitude_after_friction
                     ),
                     evidence_status=bin_value.evidence_status.value,
+                    suggested_action=selection.suggested_action.value,
+                    validation_observation_count=(
+                        selection.validation_observation_count
+                    ),
+                    validation_gross_return=selection.validation_gross_return,
+                    validation_long_aligned_net_return=(
+                        selection.validation_long_aligned_net_return
+                    ),
+                    validation_avoided_downside=(selection.validation_avoided_downside),
+                    validation_directional_hit_rate=(
+                        selection.validation_directional_hit_rate
+                    ),
+                    selected_for_test=selection.selected_for_test,
+                    test_observation_count=selection.test_observation_count,
+                    test_confirmation_status=(selection.test_confirmation_status.value),
+                    test_gross_return=selection.test_gross_return,
+                    test_long_aligned_net_return=(
+                        selection.test_long_aligned_net_return
+                    ),
+                    test_avoided_downside=selection.test_avoided_downside,
+                    test_directional_hit_rate=selection.test_directional_hit_rate,
+                    rejection_reason=selection.rejection_reason,
                 )
             )
     for value in result.hypotheses:
@@ -322,7 +350,12 @@ async def persist_predictive_edge_result(
                 run_id=run_id,
                 predictor_name=value.predictor_name,
                 predictor_version=value.predictor_version,
-                direction=value.direction,
+                hypothesis_contract_version=value.hypothesis_contract_version,
+                direction_mapping=value.direction_mapping.value,
+                bin_ordinal=value.bin_ordinal,
+                lower_bound=value.lower_bound,
+                upper_bound=value.upper_bound,
+                suggested_action=value.suggested_action.value,
                 horizon_seconds=int(value.horizon.total_seconds()),
                 condition=value.condition.value,
                 supporting_bin_ordinals=list(value.supporting_bin_ordinals),
