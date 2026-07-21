@@ -278,6 +278,7 @@ async def persist_predictive_edge_result(
                 evidence_fingerprint=edge.fingerprint,
             )
         )
+        await session.flush()
         for bin_value in edge.bins:
             session.add(
                 PredictiveEdgeBinAggregateRecord(
