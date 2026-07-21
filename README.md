@@ -386,6 +386,9 @@ mapping, range, and suggested action. Isolated test evidence from that same bin 
 only confirm or reject its selection; a different bin cannot confirm it. Correlation
 sign remains statistical and never determines an action by itself. Suggested actions
 are `long_entry`, `exit_or_avoid`, or diagnostic-only, and never imply short selling.
+Global predictor metrics remain diagnostic: each bin independently must improve on the
+validation phase's unconditional directional benchmark and remain favorable after
+costs before isolated test confirmation.
 Directional
 accuracy must improve on always-up, always-down, deterministic-random, and observed
 majority baselines. Signed gross return, long-aligned net return, avoided downside, and

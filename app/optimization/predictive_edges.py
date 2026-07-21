@@ -517,10 +517,9 @@ def analyze_predictive_edges(
                         friction=friction,
                         thresholds=configuration.thresholds,
                     )
-                    validation_status, reason = _select_for_test(
+                    global_validation_status, global_reason = _select_for_test(
                         predictor, validation_metrics, configuration.thresholds
                     )
-                    selected = validation_status is ValidationStatus.SELECTED
                     test, test_missing = _observations(
                         rows,
                         phase_start=window.test_from,
@@ -550,17 +549,35 @@ def analyze_predictive_edges(
                         mapping=mapping,
                         friction=friction,
                         thresholds=configuration.thresholds,
-                        enabled=selected,
+                        training_sufficient=(
+                            len(training)
+                            >= configuration.thresholds.minimum_observations
+                        ),
                     )
                     selected_bins = tuple(
                         item.ordinal
                         for item in bin_selections
                         if item.selected_for_test
                     )
-                    if selected and not selected_bins:
+                    selected = bool(selected_bins)
+                    if selected:
+                        validation_status = ValidationStatus.SELECTED
+                        reason = "validation selected actionable bin evidence"
+                    elif predictor.semantic_kind in (
+                        PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY,
+                        PredictorSemanticKind.CONFIRMATION_ONLY,
+                    ):
+                        validation_status = ValidationStatus.NOT_DIRECTIONAL
+                        reason = "diagnostic predictor has no actionable bins"
+                    elif len(training) < configuration.thresholds.minimum_observations:
+                        validation_status = ValidationStatus.INSUFFICIENT
+                        reason = "training has insufficient observations"
+                    else:
                         validation_status = ValidationStatus.REJECTED
-                        selected = False
-                        reason = "validation found no actionable training-defined bin"
+                        reason = (
+                            "validation selected no actionable bin; global diagnostic: "
+                            f"{global_validation_status.value}: {global_reason}"
+                        )
                     confirmation = (
                         TestConfirmationStatus.CONFIRMED
                         if any(
@@ -811,7 +828,9 @@ def _learn_direction_mapping(
         tuple(item.predictor_value for item in values),
         tuple(item.forward_gross_return for item in values),
     )
-    if correlation is None or correlation >= 0:
+    if correlation is None:
+        return DirectionMapping.NOT_APPLICABLE
+    if correlation >= 0:
         return DirectionMapping.POSITIVE
     return DirectionMapping.NEGATIVE
 
@@ -984,7 +1003,11 @@ def _select_for_test(
             ValidationStatus.NOT_DIRECTIONAL,
             "diagnostic predictor does not select directional hypotheses",
         )
-    assert metrics.direction_benchmarks is not None
+    if metrics.direction_benchmarks is None:
+        return (
+            ValidationStatus.INSUFFICIENT,
+            "training did not establish a directional mapping",
+        )
     if (
         metrics.correlation is None
         or abs(metrics.correlation) < thresholds.minimum_absolute_correlation
@@ -1164,10 +1187,12 @@ def _bin_selections(
     mapping: DirectionMapping,
     friction: Decimal,
     thresholds: EvidenceThresholds,
-    enabled: bool,
+    training_sufficient: bool,
 ) -> tuple[BinSelection, ...]:
     validation_groups = _bin_groups(validation, bounds)
     test_groups = _bin_groups(test, bounds)
+    validation_benchmarks = _direction_benchmarks(validation)
+    test_benchmarks = _direction_benchmarks(test)
     minimum_bin_observations = max(
         2, thresholds.minimum_observations // (len(bounds) + 1)
     )
@@ -1182,17 +1207,29 @@ def _bin_selections(
         test_evidence = _action_evidence(test_groups[index], action, friction)
         v_count, v_gross, v_long_net, v_avoided, v_hit = validation_evidence
         actionable = action is not SuggestedAction.DIAGNOSTIC_ONLY
+        validation_benchmark = (
+            validation_benchmarks.always_up
+            if action is SuggestedAction.LONG_ENTRY
+            else validation_benchmarks.always_down
+        )
+        validation_improves = bool(
+            v_hit is not None
+            and v_hit
+            >= validation_benchmark
+            + thresholds.minimum_hit_rate_improvement_over_benchmark
+        )
         favorable_validation = (
             (v_long_net is not None and v_long_net > 0)
             if action is SuggestedAction.LONG_ENTRY
             else (v_avoided is not None and v_avoided > 0)
         )
         selected = bool(
-            enabled
+            training_sufficient
             and actionable
             and v_count >= minimum_bin_observations
             and v_hit is not None
             and v_hit >= thresholds.minimum_directional_hit_rate
+            and validation_improves
             and favorable_validation
         )
         t_count, t_gross, t_long_net, t_avoided, t_hit = test_evidence
@@ -1201,11 +1238,22 @@ def _bin_selections(
             if action is SuggestedAction.LONG_ENTRY
             else (t_avoided is not None and t_avoided > 0)
         )
+        test_benchmark = (
+            test_benchmarks.always_up
+            if action is SuggestedAction.LONG_ENTRY
+            else test_benchmarks.always_down
+        )
+        test_improves = bool(
+            t_hit is not None
+            and t_hit
+            >= test_benchmark + thresholds.minimum_hit_rate_improvement_over_benchmark
+        )
         confirmed = bool(
             selected
             and t_count >= minimum_bin_observations
             and t_hit is not None
             and t_hit >= thresholds.minimum_directional_hit_rate
+            and test_improves
             and favorable_test
         )
         status = (
@@ -1220,7 +1268,7 @@ def _bin_selections(
         reason = (
             None
             if confirmed
-            else "validation did not select this bin and action"
+            else "validation bin did not independently clear evidence thresholds"
             if not selected
             else f"requires at least {minimum_bin_observations} test observations"
             if t_count < minimum_bin_observations

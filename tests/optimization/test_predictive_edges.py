@@ -358,7 +358,7 @@ def test_negative_mapping_assigns_actions_per_bin_not_from_correlation_sign() ->
             minimum_observations=10,
             minimum_directional_hit_rate=Decimal("0.6"),
         ),
-        enabled=True,
+        training_sufficient=True,
     )
     assert selections[0].suggested_action is SuggestedAction.LONG_ENTRY
     assert selections[0].test_confirmation_status is ConfirmationStatus.CONFIRMED
@@ -368,7 +368,9 @@ def test_negative_mapping_assigns_actions_per_bin_not_from_correlation_sign() ->
 
 
 def test_test_confirmation_cannot_leak_from_a_different_bin() -> None:
-    validation = tuple(_observation(index, "-3", "0.02") for index in range(10))
+    validation = tuple(
+        _observation(index, "-3", "0.02") for index in range(10)
+    ) + tuple(_observation(index + 10, "0", "-0.02") for index in range(10))
     test = tuple(_observation(index, "-3", "-0.02") for index in range(10)) + tuple(
         _observation(index + 10, "3", "-0.02") for index in range(10)
     )
@@ -383,7 +385,7 @@ def test_test_confirmation_cannot_leak_from_a_different_bin() -> None:
             minimum_observations=10,
             minimum_directional_hit_rate=Decimal("0.6"),
         ),
-        enabled=True,
+        training_sufficient=True,
     )
     assert selections[0].selected_for_test is True
     assert selections[0].test_confirmation_status is ConfirmationStatus.REJECTED
@@ -400,7 +402,7 @@ def test_diagnostic_predictors_never_imply_short_or_directional_action() -> None
         mapping=DirectionMapping.NOT_APPLICABLE,
         friction=Decimal("0.003"),
         thresholds=EvidenceThresholds(minimum_observations=10),
-        enabled=True,
+        training_sufficient=True,
     )
     assert {item.suggested_action for item in selections} == {
         SuggestedAction.DIAGNOSTIC_ONLY
@@ -480,3 +482,97 @@ def test_two_bins_create_independent_action_hypotheses() -> None:
         (5, SuggestedAction.EXIT_OR_AVOID),
     }
     assert len({item.hypothesis_id for item in hypotheses}) == 2
+
+
+def test_actionable_bin_survives_weak_global_predictor_diagnostics() -> None:
+    predictor = next(item for item in PREDICTORS if item.name == "return_1")
+    validation = tuple(
+        _observation(index, "-2", "0.02") for index in range(10)
+    ) + tuple(
+        _observation(
+            index + 10,
+            "2",
+            "0.02" if index % 2 else "-0.02",
+        )
+        for index in range(20)
+    )
+    thresholds = EvidenceThresholds(
+        minimum_observations=10,
+        minimum_windows=1,
+        minimum_stable_direction_ratio=Decimal("1"),
+        minimum_absolute_correlation=Decimal("0.99"),
+        minimum_directional_hit_rate=Decimal("0.70"),
+        minimum_hit_rate_improvement_over_benchmark=Decimal("0.10"),
+    )
+    global_metrics = _metrics(
+        validation,
+        0,
+        predictor=predictor,
+        center=Decimal(0),
+        mapping=DirectionMapping.NEGATIVE,
+        friction=Decimal("0.003"),
+        thresholds=thresholds,
+    )
+    global_status, _ = _select_for_test(predictor, global_metrics, thresholds)
+    assert global_status is ValidationStatus.REJECTED
+
+    selections = _bin_selections(
+        validation=validation,
+        test=validation,
+        bounds=(Decimal(0),),
+        center=Decimal(0),
+        mapping=DirectionMapping.NEGATIVE,
+        friction=Decimal("0.003"),
+        thresholds=thresholds,
+        training_sufficient=True,
+    )
+    assert selections[0].selected_for_test is True
+    assert selections[0].test_confirmation_status is ConfirmationStatus.CONFIRMED
+
+    analyzed = analyze_predictive_edges(
+        matrix=_matrix(),
+        windows=(_window(),),
+        simulation=SimulationConfiguration(),
+        configuration=_configuration(),
+    )
+    original = next(
+        item for item in analyzed.window_edges if item.predictor.name == "return_1"
+    )
+    edge = replace(
+        original,
+        direction_mapping=DirectionMapping.NEGATIVE,
+        selected_for_test=True,
+        selected_bin_ordinals=(1,),
+        bin_selections=(selections[0],),
+        test_confirmation_status=ConfirmationStatus.CONFIRMED,
+    )
+    stability = _stability((edge,), thresholds)
+    hypotheses = tuple(
+        _hypothesis(item, (edge.window_ordinal,), timedelta(minutes=30))
+        for item in stability
+        if item.classification is EvidenceStatus.PROMISING_POSITIVE
+    )
+    assert len(hypotheses) == 1
+    assert hypotheses[0].suggested_action is SuggestedAction.LONG_ENTRY
+
+
+def test_bin_must_improve_unconditional_validation_benchmark() -> None:
+    validation = tuple(_observation(index, "-2", "0.02") for index in range(5)) + tuple(
+        _observation(index + 5, "2", "0.02") for index in range(95)
+    )
+    selections = _bin_selections(
+        validation=validation,
+        test=validation,
+        bounds=(Decimal(0),),
+        center=Decimal(0),
+        mapping=DirectionMapping.NEGATIVE,
+        friction=Decimal("0.003"),
+        thresholds=EvidenceThresholds(
+            minimum_observations=10,
+            minimum_directional_hit_rate=Decimal("0.70"),
+            minimum_hit_rate_improvement_over_benchmark=Decimal("0.02"),
+        ),
+        training_sufficient=True,
+    )
+    assert selections[0].validation_directional_hit_rate == Decimal(1)
+    assert selections[0].selected_for_test is False

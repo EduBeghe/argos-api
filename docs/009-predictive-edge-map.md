@@ -36,6 +36,11 @@ bin derives one explicit suggestion: `long_entry`, `exit_or_avoid`, or
 position relative to its center, validation return, long-aligned net return or avoided
 downside, and friction. A negative correlation may therefore support a long entry in a
 low bin and an exit/avoid signal in a high bin. No suggestion represents short selling.
+Global predictor correlation and hit metrics remain diagnostics and do not enable or
+disable all bins. Validation evaluates each directional bin independently and requires
+its hit rate to improve materially over the phase's unconditional always-up or
+always-down benchmark for the suggested action; the bin's own majority is not used as
+its benchmark.
 
 The analysis reports correlation, directional precision, movement, post-friction
 outcomes, dispersion, standard error, quantile behavior, and consistency across
