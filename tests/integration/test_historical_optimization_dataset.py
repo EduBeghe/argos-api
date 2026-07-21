@@ -63,6 +63,18 @@ from app.optimization.simulation import (
     SIMULATION_ENGINE_VERSION,
     simulate_historical_strategy,
 )
+from app.optimization.walk_forward import (
+    WalkForwardConclusion,
+    WalkForwardConfiguration,
+)
+from app.optimization.walk_forward_memory import (
+    WalkForwardRunRecord,
+    execute_walk_forward,
+)
+from app.optimization.walk_forward_read import (
+    read_refinement_walk_forward,
+    read_walk_forward_run,
+)
 from app.paper.persistence import PaperPositionRecord, PaperTradeRecord
 from app.scores.calculation import MODEL_NAME, MODEL_VERSION
 from app.scores.persistence import MarketScoreRecord
@@ -825,3 +837,96 @@ async def test_failed_run_exposes_only_sanitized_failure_reason(
     response = await read_refinement_run(session, run.id)
     assert response.run.failure_reason == PUBLIC_FAILURE_REASON
     assert secret not in response.model_dump_json()
+
+
+async def test_walk_forward_insufficient_history_is_persisted_and_reused_exactly(
+    session: AsyncSession,
+) -> None:
+    dataset = await read_historical_dataset(
+        session=session,
+        identity=HistoricalDatasetIdentity(
+            INSTRUMENT, HistoricalDatasetRange(START, END)
+        ),
+        now=END + timedelta(days=1),
+    )
+    refinement = await execute_memory_refinement(
+        session, dataset, START + timedelta(days=30)
+    )
+    result = refinement.result
+    assert result is not None
+    source = await session.scalar(
+        select(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.experiment_key == result.experiment_key
+        )
+    )
+    assert source is not None
+    configuration = WalkForwardConfiguration(
+        training_days=1,
+        validation_days=1,
+        test_days=1,
+        step_days=1,
+        maximum_windows=2,
+        maximum_candidates=2,
+        minimum_valid_windows=1,
+    )
+    started_at = START + timedelta(days=31)
+
+    first = await execute_walk_forward(
+        session=session,
+        dataset=dataset,
+        refinement_run_id=source.id,
+        initial_cash=Decimal("10000"),
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        configuration=configuration,
+        started_at=started_at,
+    )
+    assert first.result is not None
+    assert first.result.conclusion is WalkForwardConclusion.INSUFFICIENT_HISTORY
+    assert first.result.recommended_candidate_id is None
+
+    second = await execute_walk_forward(
+        session=session,
+        dataset=dataset,
+        refinement_run_id=source.id,
+        initial_cash=Decimal("10000"),
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        configuration=configuration,
+        started_at=started_at + timedelta(minutes=1),
+    )
+    assert second.run_id == first.run_id
+    assert second.reused_existing_experiment is True
+    assert (
+        await session.scalar(
+            select(func.count())
+            .select_from(WalkForwardRunRecord)
+            .where(WalkForwardRunRecord.refinement_run_id == source.id)
+        )
+        == 1
+    )
+    summary = await read_refinement_walk_forward(session, source.id)
+    detail = await read_walk_forward_run(session, first.run_id)
+    assert summary.id == first.run_id
+    assert detail.run.status == "insufficient_history"
+    assert detail.windows == ()
+
+    changed = await execute_walk_forward(
+        session=session,
+        dataset=dataset,
+        refinement_run_id=source.id,
+        initial_cash=Decimal("10000"),
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        configuration=replace(configuration, maximum_candidates=3),
+        started_at=started_at + timedelta(minutes=2),
+    )
+    assert changed.run_id != first.run_id
+
+    await session.execute(
+        delete(StrategyRefinementRunRecord).where(
+            StrategyRefinementRunRecord.id == source.id
+        )
+    )
+    await session.commit()
+
