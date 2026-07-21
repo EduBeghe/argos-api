@@ -420,6 +420,19 @@ limit, contract version, or input hypotheses creates a different experiment iden
 No candidate is activated or sent to Paper Trading, and historical confirmation is
 not a guarantee of future performance.
 
+Persisted edge-guided evidence is available through four read-only endpoints:
+
+- `GET /optimization/edge-guided/runs`
+- `GET /optimization/edge-guided/runs/{run_id}`
+- `GET /optimization/edge-guided/candidates`
+- `GET /optimization/edge-guided/candidates/{candidate_evaluation_id}`
+
+Run filters cover instrument identity and status. Candidate filters additionally cover
+run, candidate status, suggested action, predictor, and condition. List responses use
+bounded `limit`/`offset` pagination; candidate windows are returned only by candidate
+detail. These records are historical evaluation evidence, not active or recommended
+Strategies.
+
 ## Historical optimization memory API
 
 Persisted refinement evidence is exposed through read-only endpoints:

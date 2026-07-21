@@ -5,6 +5,24 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
+from app.market.enums import Asset, Interval, MarketType, Provider
+from app.optimization.edge_guided import EdgeGuidedCandidateStatus
+from app.optimization.edge_guided_read import (
+    MAX_EDGE_GUIDED_PAGE_LIMIT,
+    EdgeGuidedReadNotFoundError,
+    get_edge_guided_candidate,
+    get_edge_guided_run,
+    list_edge_guided_candidates,
+    list_edge_guided_runs,
+)
+from app.optimization.edge_guided_schemas import (
+    EdgeGuidedActionFilter,
+    EdgeGuidedCandidateDetailResponse,
+    EdgeGuidedCandidatePageResponse,
+    EdgeGuidedRunPageResponse,
+    EdgeGuidedRunResponse,
+    EdgeGuidedRunStatus,
+)
 from app.optimization.predictive_edge_read import (
     MAX_PAGE_LIMIT,
     PredictiveEdgeNotFoundError,
@@ -21,7 +39,10 @@ from app.optimization.predictive_edge_schemas import (
     PredictiveEdgeWindowPageResponse,
     StrategyHypothesisPageResponse,
 )
-from app.optimization.predictive_edges import EvidenceStatus
+from app.optimization.predictive_edges import (
+    Condition,
+    EvidenceStatus,
+)
 from app.optimization.read_service import (
     OptimizationReadNotFoundError,
     read_candidate,
@@ -58,6 +79,84 @@ from app.optimization.walk_forward_read import (
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 RunQuery = Annotated[RefinementRunQuery, Query()]
 CandidatesQuery = Annotated[CandidateQuery, Query()]
+
+
+@router.get("/edge-guided/runs", response_model=EdgeGuidedRunPageResponse)
+async def edge_guided_runs(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    asset: Annotated[Asset | None, Query()] = None,
+    provider: Annotated[Provider | None, Query()] = None,
+    market_type: Annotated[MarketType | None, Query()] = None,
+    interval: Annotated[Interval | None, Query()] = None,
+    status: Annotated[EdgeGuidedRunStatus | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_EDGE_GUIDED_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> EdgeGuidedRunPageResponse:
+    return await list_edge_guided_runs(
+        session,
+        asset=asset,
+        provider=provider,
+        market_type=market_type,
+        interval=interval,
+        status=status.value if status else None,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/edge-guided/runs/{run_id}", response_model=EdgeGuidedRunResponse)
+async def edge_guided_run(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> EdgeGuidedRunResponse:
+    try:
+        return await get_edge_guided_run(session, run_id)
+    except EdgeGuidedReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/edge-guided/candidates", response_model=EdgeGuidedCandidatePageResponse)
+async def edge_guided_candidates(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    run_id: Annotated[UUID | None, Query()] = None,
+    asset: Annotated[Asset | None, Query()] = None,
+    provider: Annotated[Provider | None, Query()] = None,
+    market_type: Annotated[MarketType | None, Query()] = None,
+    interval: Annotated[Interval | None, Query()] = None,
+    status: Annotated[EdgeGuidedCandidateStatus | None, Query()] = None,
+    action: Annotated[EdgeGuidedActionFilter | None, Query()] = None,
+    predictor_name: Annotated[str | None, Query()] = None,
+    condition: Annotated[Condition | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_EDGE_GUIDED_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> EdgeGuidedCandidatePageResponse:
+    return await list_edge_guided_candidates(
+        session,
+        run_id=run_id,
+        asset=asset,
+        provider=provider,
+        market_type=market_type,
+        interval=interval,
+        status=status,
+        action=action,
+        predictor_name=predictor_name,
+        condition=condition,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/edge-guided/candidates/{candidate_evaluation_id}",
+    response_model=EdgeGuidedCandidateDetailResponse,
+)
+async def edge_guided_candidate(
+    candidate_evaluation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> EdgeGuidedCandidateDetailResponse:
+    try:
+        return await get_edge_guided_candidate(session, candidate_evaluation_id)
+    except EdgeGuidedReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get("/predictive-edge-runs", response_model=PredictiveEdgeRunPageResponse)
