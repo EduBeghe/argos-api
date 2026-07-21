@@ -404,4 +404,3 @@ class WalkForwardWindowEvaluationPageResponse(BaseModel):
     items: tuple[WalkForwardWindowEvaluationResponse, ...]
     has_more: bool
     next_cursor: str | None
-
