@@ -137,4 +137,3 @@ def test_refinement_command_parses_walk_forward_configuration() -> None:
     assert args.walk_forward_step_days == 60
     assert args.walk_forward_max_windows == 6
     assert args.walk_forward_max_candidates == 10
-
