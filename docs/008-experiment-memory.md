@@ -133,16 +133,22 @@ resources:
 - `GET /optimization/refinement-runs` lists experiments newest first and supports
   complete instrument identity, lifecycle, recommendation, and UTC start filters.
 - `GET /optimization/refinement-runs/{run_id}` composes the typed run summary, search
-  plan, segment benchmarks, recommendation, digest, and grouped compact evaluations.
+  plan, segment benchmarks, recommendation, digest, and grouped evaluation counts.
+- `GET /optimization/refinement-runs/{run_id}/evaluations` pages compact evaluations
+  without materializing an unbounded experiment history in the run detail.
 - `GET /optimization/candidates` lists canonical parameters with profiles calculated by
   the same versioned `experience.py` rules used by planning.
 - `GET /optimization/candidates/{stable_candidate_id}` returns the canonical definition,
   current profile, chronological paginated evidence, related run identities, and
   recommendation attribution.
 
-Collection pages use `limit` and `offset`, with a maximum limit of 200. Queries are
-deterministic, data-driven by full instrument identity, and use a constant number of
-PostgreSQL operations rather than one query per candidate. Decimal values and UTC
+Run summaries use `limit` and `offset`. Candidate collections and evaluation histories
+use deterministic keyset cursors with `has_more` and `next_cursor`; every page has a
+maximum limit of 200. Classification filters are composed over bounded candidate batches
+until a complete public page or the real end of the dataset is reached, so there is no
+silent global scan cap. Profile evidence uses the same centrally defined compatible
+phases and versions as optimization planning. Queries are data-driven by full instrument
+identity and avoid one query per candidate. Decimal values and UTC
 timestamps remain exact. The contract maps stored budgets, allocations, plans, and
 parameters into explicit versionable schemas; it does not expose raw JSONB, candles,
 Features, matrices, or unsafe failure details. GET requests never write, start a

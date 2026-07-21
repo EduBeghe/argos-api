@@ -11,12 +11,14 @@ from app.optimization.read_service import (
     read_candidates,
     read_refinement_run,
     read_refinement_runs,
+    read_run_evaluations,
 )
 from app.optimization.schemas import (
     MAX_OPTIMIZATION_PAGE_SIZE,
     CandidateDetailResponse,
+    CandidatePageResponse,
     CandidateQuery,
-    CandidateSummaryResponse,
+    EvaluationPageResponse,
     RefinementRunDetailResponse,
     RefinementRunQuery,
     RefinementRunSummaryResponse,
@@ -44,10 +46,27 @@ async def refinement_run(
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-@router.get("/candidates", response_model=list[CandidateSummaryResponse])
+@router.get(
+    "/refinement-runs/{run_id}/evaluations", response_model=EvaluationPageResponse
+)
+async def refinement_run_evaluations(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    limit: Annotated[int, Query(ge=1, le=MAX_OPTIMIZATION_PAGE_SIZE)] = 100,
+    cursor: Annotated[str | None, Query()] = None,
+) -> EvaluationPageResponse:
+    try:
+        return await read_run_evaluations(session, run_id, limit=limit, cursor=cursor)
+    except OptimizationReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.get("/candidates", response_model=CandidatePageResponse)
 async def candidates(
     query: CandidatesQuery, session: Annotated[AsyncSession, Depends(get_db_session)]
-) -> tuple[CandidateSummaryResponse, ...]:
+) -> CandidatePageResponse:
     return await read_candidates(session, query)
 
 
@@ -56,11 +75,13 @@ async def candidate(
     stable_candidate_id: str,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     limit: Annotated[int, Query(ge=1, le=MAX_OPTIMIZATION_PAGE_SIZE)] = 100,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> CandidateDetailResponse:
     try:
         return await read_candidate(
-            session, stable_candidate_id, limit=limit, offset=offset
+            session, stable_candidate_id, limit=limit, cursor=cursor
         )
     except OptimizationReadNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error

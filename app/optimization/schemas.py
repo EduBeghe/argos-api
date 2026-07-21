@@ -186,6 +186,18 @@ class EvaluationGroupResponse(BaseModel):
     evaluations: tuple[EvaluationResponse, ...]
 
 
+class EvaluationGroupCountResponse(BaseModel):
+    phase: str
+    segment: str
+    count: int
+
+
+class EvaluationPageResponse(BaseModel):
+    items: tuple[EvaluationResponse, ...]
+    has_more: bool
+    next_cursor: str | None
+
+
 class CandidateDefinitionResponse(BaseModel):
     stable_candidate_id: str
     score_model_name: str
@@ -205,7 +217,7 @@ class RefinementRunDetailResponse(BaseModel):
     recommended_candidate: CandidateDefinitionResponse | None
     explanation: str | None
     result_digest: str | None
-    evaluations: tuple[EvaluationGroupResponse, ...]
+    evaluation_summary: tuple[EvaluationGroupCountResponse, ...]
 
 
 class CandidateQuery(BaseModel):
@@ -220,7 +232,7 @@ class CandidateQuery(BaseModel):
     strategy_version: int | None = Field(default=None, ge=1)
     minimum_validation_runs: int = Field(default=0, ge=0)
     limit: int = Field(default=50, ge=1, le=MAX_OPTIMIZATION_PAGE_SIZE)
-    offset: int = Field(default=0, ge=0)
+    cursor: str | None = None
 
 
 class CandidateProfileResponse(BaseModel):
@@ -250,6 +262,12 @@ class CandidateSummaryResponse(BaseModel):
     profile: CandidateProfileResponse
 
 
+class CandidatePageResponse(BaseModel):
+    items: tuple[CandidateSummaryResponse, ...]
+    has_more: bool
+    next_cursor: str | None
+
+
 class CandidateEvaluationHistoryResponse(EvaluationResponse):
     run_id: UUID
     instrument: InstrumentIdentityResponse
@@ -257,9 +275,15 @@ class CandidateEvaluationHistoryResponse(EvaluationResponse):
     was_recommended: bool
 
 
+class CandidateEvaluationPageResponse(BaseModel):
+    items: tuple[CandidateEvaluationHistoryResponse, ...]
+    has_more: bool
+    next_cursor: str | None
+
+
 class CandidateDetailResponse(BaseModel):
     definition: CandidateDefinitionResponse
     profile: CandidateProfileResponse
     was_ever_recommended: bool
     related_run_ids: tuple[UUID, ...]
-    evaluations: tuple[CandidateEvaluationHistoryResponse, ...]
+    evaluations: CandidateEvaluationPageResponse

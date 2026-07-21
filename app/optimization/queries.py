@@ -1,13 +1,15 @@
 from collections.abc import Sequence
+from datetime import datetime
 from decimal import Decimal
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.optimization.memory import (
+    COMPATIBLE_PROFILE_PHASES,
     StrategyBenchmarkEvaluationRecord,
     StrategyCandidateEvaluationRecord,
     StrategyCandidateRecord,
@@ -16,7 +18,7 @@ from app.optimization.memory import (
 from app.optimization.schemas import CandidateQuery, RefinementRunQuery
 from app.optimization.simulation import SIMULATION_ENGINE_VERSION
 
-MAX_PROFILE_CANDIDATE_SCAN = 2000
+CANDIDATE_SCAN_BATCH_SIZE = 200
 
 
 def _run_filters(query: RefinementRunQuery) -> list[ColumnElement[bool]]:
@@ -78,8 +80,12 @@ def _candidate_evidence_filters(
     return values
 
 
-async def list_candidate_definitions(
-    session: AsyncSession, query: CandidateQuery
+async def list_candidate_definition_batch(
+    session: AsyncSession,
+    query: CandidateQuery,
+    *,
+    after_candidate_id: str | None,
+    batch_size: int = CANDIDATE_SCAN_BATCH_SIZE,
 ) -> tuple[StrategyCandidateRecord, ...]:
     candidate_ids = (
         select(StrategyCandidateEvaluationRecord.stable_candidate_id)
@@ -94,6 +100,8 @@ async def list_candidate_definitions(
     filters: list[ColumnElement[bool]] = [
         StrategyCandidateRecord.stable_candidate_id.in_(candidate_ids)
     ]
+    if after_candidate_id is not None:
+        filters.append(StrategyCandidateRecord.stable_candidate_id > after_candidate_id)
     for name in (
         "score_model_name",
         "score_model_version",
@@ -107,7 +115,7 @@ async def list_candidate_definitions(
         select(StrategyCandidateRecord)
         .where(*filters)
         .order_by(StrategyCandidateRecord.stable_candidate_id)
-        .limit(MAX_PROFILE_CANDIDATE_SCAN)
+        .limit(batch_size)
     )
     return tuple((await session.scalars(statement)).all())
 
@@ -136,6 +144,7 @@ async def load_profile_evidence(
         == StrategyCandidateRecord.strategy_version,
         StrategyRefinementRunRecord.simulation_engine_version
         == SIMULATION_ENGINE_VERSION,
+        StrategyCandidateEvaluationRecord.phase.in_(COMPATIBLE_PROFILE_PHASES),
     ]
     if query is not None:
         filters.extend(_candidate_evidence_filters(query)[1:])
@@ -184,23 +193,52 @@ async def load_profile_evidence(
     )
 
 
-async def load_run_evaluations(
-    session: AsyncSession, run_id: UUID
+async def load_run_evaluation_page(
+    session: AsyncSession,
+    run_id: UUID,
+    *,
+    after_id: UUID | None,
+    limit: int,
 ) -> tuple[StrategyCandidateEvaluationRecord, ...]:
+    filters: list[ColumnElement[bool]] = [
+        StrategyCandidateEvaluationRecord.refinement_run_id == run_id
+    ]
+    if after_id is not None:
+        filters.append(StrategyCandidateEvaluationRecord.id > after_id)
     return tuple(
         (
             await session.scalars(
                 select(StrategyCandidateEvaluationRecord)
-                .where(StrategyCandidateEvaluationRecord.refinement_run_id == run_id)
-                .order_by(
-                    StrategyCandidateEvaluationRecord.phase,
-                    StrategyCandidateEvaluationRecord.segment,
-                    StrategyCandidateEvaluationRecord.rank.asc().nulls_last(),
-                    StrategyCandidateEvaluationRecord.stable_candidate_id,
-                )
+                .where(*filters)
+                .order_by(StrategyCandidateEvaluationRecord.id)
+                .limit(limit + 1)
             )
         ).all()
     )
+
+
+async def load_run_evaluation_counts(
+    session: AsyncSession, run_id: UUID
+) -> tuple[tuple[str, str, int], ...]:
+    rows = (
+        await session.execute(
+            select(
+                StrategyCandidateEvaluationRecord.phase,
+                StrategyCandidateEvaluationRecord.segment,
+                func.count(),
+            )
+            .where(StrategyCandidateEvaluationRecord.refinement_run_id == run_id)
+            .group_by(
+                StrategyCandidateEvaluationRecord.phase,
+                StrategyCandidateEvaluationRecord.segment,
+            )
+            .order_by(
+                StrategyCandidateEvaluationRecord.phase,
+                StrategyCandidateEvaluationRecord.segment,
+            )
+        )
+    ).all()
+    return tuple(cast(Sequence[tuple[str, str, int]], rows))
 
 
 async def load_run_benchmarks(
@@ -225,7 +263,7 @@ async def load_candidate_history(
     candidate_id: str,
     *,
     limit: int,
-    offset: int,
+    after: tuple[datetime, UUID] | None,
 ) -> list[
     tuple[StrategyCandidateEvaluationRecord, StrategyRefinementRunRecord, Decimal]
 ]:
@@ -249,13 +287,25 @@ async def load_candidate_history(
                 baseline.c.segment == StrategyCandidateEvaluationRecord.segment,
             ),
         )
-        .where(StrategyCandidateEvaluationRecord.stable_candidate_id == candidate_id)
+        .where(
+            StrategyCandidateEvaluationRecord.stable_candidate_id == candidate_id,
+            *(
+                (
+                    tuple_(
+                        StrategyCandidateEvaluationRecord.evaluated_at,
+                        StrategyCandidateEvaluationRecord.id,
+                    )
+                    > after,
+                )
+                if after is not None
+                else ()
+            ),
+        )
         .order_by(
             StrategyCandidateEvaluationRecord.evaluated_at,
             StrategyCandidateEvaluationRecord.id,
         )
-        .limit(limit)
-        .offset(offset)
+        .limit(limit + 1)
     )
     rows = (await session.execute(statement)).all()
     return list(

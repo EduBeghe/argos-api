@@ -1,4 +1,4 @@
-from collections import defaultdict
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -18,23 +18,28 @@ from app.optimization.memory import (
     StrategyRefinementRunRecord,
 )
 from app.optimization.queries import (
+    CANDIDATE_SCAN_BATCH_SIZE,
     get_candidate,
     get_refinement_run,
-    list_candidate_definitions,
+    list_candidate_definition_batch,
     list_refinement_runs,
     load_candidate_history,
     load_profile_evidence,
     load_run_benchmarks,
-    load_run_evaluations,
+    load_run_evaluation_counts,
+    load_run_evaluation_page,
 )
 from app.optimization.schemas import (
     CandidateDefinitionResponse,
     CandidateDetailResponse,
     CandidateEvaluationHistoryResponse,
+    CandidateEvaluationPageResponse,
+    CandidatePageResponse,
     CandidateProfileResponse,
     CandidateQuery,
     CandidateSummaryResponse,
-    EvaluationGroupResponse,
+    EvaluationGroupCountResponse,
+    EvaluationPageResponse,
     EvaluationResponse,
     InstrumentIdentityResponse,
     PlannerAllocationResponse,
@@ -74,16 +79,13 @@ async def read_refinement_run(
     run = await get_refinement_run(session, run_id)
     if run is None:
         raise OptimizationReadNotFoundError("refinement run not found")
-    evaluations = await load_run_evaluations(session, run_id)
+    evaluation_counts = await load_run_evaluation_counts(session, run_id)
     benchmarks = await load_run_benchmarks(session, run_id)
     recommended = (
         await get_candidate(session, run.recommended_candidate_id)
         if run.recommended_candidate_id is not None
         else None
     )
-    grouped: dict[tuple[str, str], list[EvaluationResponse]] = defaultdict(list)
-    for evaluation in evaluations:
-        grouped[(evaluation.phase, evaluation.segment)].append(_evaluation(evaluation))
     return RefinementRunDetailResponse(
         run=_run_summary(run),
         search_plan=_search_plan(run.search_plan),
@@ -100,41 +102,79 @@ async def read_refinement_run(
         ),
         explanation=run.recommendation_explanation,
         result_digest=_result_digest(run.result_payload),
-        evaluations=tuple(
-            EvaluationGroupResponse(
-                phase=key[0], segment=key[1], evaluations=tuple(values)
-            )
-            for key, values in sorted(grouped.items())
+        evaluation_summary=tuple(
+            EvaluationGroupCountResponse(phase=phase, segment=segment, count=count)
+            for phase, segment, count in evaluation_counts
         ),
+    )
+
+
+async def read_run_evaluations(
+    session: AsyncSession,
+    run_id: UUID,
+    *,
+    limit: int,
+    cursor: str | None,
+) -> EvaluationPageResponse:
+    if await get_refinement_run(session, run_id) is None:
+        raise OptimizationReadNotFoundError("refinement run not found")
+    rows = await load_run_evaluation_page(
+        session, run_id, after_id=_uuid_cursor(cursor), limit=limit
+    )
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    return EvaluationPageResponse(
+        items=tuple(_evaluation(item) for item in page),
+        has_more=has_more,
+        next_cursor=str(page[-1].id) if has_more and page else None,
     )
 
 
 async def read_candidates(
     session: AsyncSession, query: CandidateQuery
-) -> tuple[CandidateSummaryResponse, ...]:
-    definitions = await list_candidate_definitions(session, query)
-    rows = await load_profile_evidence(
-        session,
-        candidate_ids=tuple(value.stable_candidate_id for value in definitions),
-        query=query,
+) -> CandidatePageResponse:
+    selected: list[CandidateSummaryResponse] = []
+    scan_cursor = query.cursor
+    while len(selected) <= query.limit:
+        definitions = await list_candidate_definition_batch(
+            session,
+            query,
+            after_candidate_id=scan_cursor,
+            batch_size=CANDIDATE_SCAN_BATCH_SIZE,
+        )
+        if not definitions:
+            break
+        rows = await load_profile_evidence(
+            session,
+            candidate_ids=tuple(value.stable_candidate_id for value in definitions),
+            query=query,
+        )
+        profiles = _profiles(rows)
+        for definition in definitions:
+            profile = profiles.get(definition.stable_candidate_id)
+            if profile is not None and _profile_matches(profile, query):
+                selected.append(
+                    CandidateSummaryResponse(
+                        definition=_candidate_definition(definition),
+                        profile=_profile(profile),
+                    )
+                )
+                if len(selected) > query.limit:
+                    break
+        if len(selected) > query.limit:
+            break
+        scan_cursor = definitions[-1].stable_candidate_id
+        if len(definitions) < CANDIDATE_SCAN_BATCH_SIZE:
+            break
+    has_more = len(selected) > query.limit
+    page = selected[: query.limit]
+    return CandidatePageResponse(
+        items=tuple(page),
+        has_more=has_more,
+        next_cursor=(
+            page[-1].definition.stable_candidate_id if has_more and page else None
+        ),
     )
-    profiles = _profiles(rows)
-    selected = [
-        CandidateSummaryResponse(
-            definition=_candidate_definition(definition),
-            profile=_profile(profiles[definition.stable_candidate_id]),
-        )
-        for definition in definitions
-        if definition.stable_candidate_id in profiles
-        and profiles[definition.stable_candidate_id].validation_evaluation_count
-        >= query.minimum_validation_runs
-        and (
-            query.evidence_classification is None
-            or profiles[definition.stable_candidate_id].evidence_classification
-            is query.evidence_classification
-        )
-    ]
-    return tuple(selected[query.offset : query.offset + query.limit])
 
 
 async def read_candidate(
@@ -142,7 +182,7 @@ async def read_candidate(
     candidate_id: str,
     *,
     limit: int,
-    offset: int,
+    cursor: str | None,
 ) -> CandidateDetailResponse:
     definition = await get_candidate(session, candidate_id)
     if definition is None:
@@ -152,7 +192,7 @@ async def read_candidate(
     if candidate_id not in profiles:
         raise OptimizationReadNotFoundError("candidate has no completed evidence")
     history = await load_candidate_history(
-        session, candidate_id, limit=limit, offset=offset
+        session, candidate_id, limit=limit, after=_history_cursor(cursor)
     )
     run_ids = tuple(sorted({run.id for _, run, _ in profile_rows}, key=str))
     return CandidateDetailResponse(
@@ -162,17 +202,57 @@ async def read_candidate(
             run.recommended_candidate_id == candidate_id for _, run, _ in profile_rows
         ),
         related_run_ids=run_ids,
-        evaluations=tuple(
-            CandidateEvaluationHistoryResponse(
-                **_evaluation(evaluation).model_dump(),
-                run_id=run.id,
-                instrument=_instrument(run),
-                excess_return_against_baseline=evaluation.total_return - baseline,
-                was_recommended=run.recommended_candidate_id == candidate_id,
-            )
-            for evaluation, run, baseline in history
+        evaluations=CandidateEvaluationPageResponse(
+            items=tuple(
+                CandidateEvaluationHistoryResponse(
+                    **_evaluation(evaluation).model_dump(),
+                    run_id=run.id,
+                    instrument=_instrument(run),
+                    excess_return_against_baseline=evaluation.total_return - baseline,
+                    was_recommended=run.recommended_candidate_id == candidate_id,
+                )
+                for evaluation, run, baseline in history[:limit]
+            ),
+            has_more=len(history) > limit,
+            next_cursor=(
+                _encode_history_cursor(history[limit - 1][0])
+                if len(history) > limit
+                else None
+            ),
         ),
     )
+
+
+def _profile_matches(
+    profile: CandidateHistoricalProfile, query: CandidateQuery
+) -> bool:
+    return profile.validation_evaluation_count >= query.minimum_validation_runs and (
+        query.evidence_classification is None
+        or profile.evidence_classification is query.evidence_classification
+    )
+
+
+def _uuid_cursor(value: str | None) -> UUID | None:
+    if value is None:
+        return None
+    try:
+        return UUID(value)
+    except ValueError as error:
+        raise ValueError("invalid evaluation cursor") from error
+
+
+def _history_cursor(value: str | None) -> tuple[datetime, UUID] | None:
+    if value is None:
+        return None
+    try:
+        timestamp, identifier = value.rsplit("|", 1)
+        return datetime.fromisoformat(timestamp), UUID(identifier)
+    except (ValueError, TypeError) as error:
+        raise ValueError("invalid candidate evaluation cursor") from error
+
+
+def _encode_history_cursor(value: StrategyCandidateEvaluationRecord) -> str:
+    return f"{value.evaluated_at.isoformat()}|{value.id}"
 
 
 def _profiles(

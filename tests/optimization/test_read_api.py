@@ -8,6 +8,7 @@ from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.experience import EvidenceClassification
 from app.optimization.read_service import OptimizationReadNotFoundError
+from app.optimization.schemas import CandidatePageResponse, EvaluationPageResponse
 from main import app
 
 
@@ -54,7 +55,9 @@ def test_run_collection_passes_typed_filters_and_bounded_pagination(
 def test_candidate_collection_uses_versioned_classification_filter(
     client: TestClient,
 ) -> None:
-    reader = AsyncMock(return_value=())
+    reader = AsyncMock(
+        return_value=CandidatePageResponse(items=(), has_more=False, next_cursor=None)
+    )
     app.dependency_overrides[get_db_session] = fake_session
     try:
         with patch("app.optimization.router.read_candidates", reader):
@@ -70,6 +73,7 @@ def test_candidate_collection_uses_versioned_classification_filter(
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert response.json() == {"items": [], "has_more": False, "next_cursor": None}
     awaited = reader.await_args
     assert awaited is not None
     query = awaited.args[1]
@@ -118,10 +122,38 @@ def test_candidate_history_pagination_is_forwarded(client: TestClient) -> None:
     try:
         with patch("app.optimization.router.read_candidate", reader):
             response = client.get(
-                "/optimization/candidates/missing", params={"limit": 20, "offset": 40}
+                "/optimization/candidates/missing",
+                params={"limit": 20, "cursor": "cursor-value"},
             )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 404
-    reader.assert_awaited_once_with(ANY, "missing", limit=20, offset=40)
+    reader.assert_awaited_once_with(ANY, "missing", limit=20, cursor="cursor-value")
+
+
+def test_run_evaluations_use_bounded_cursor_pagination(client: TestClient) -> None:
+    run_id = uuid4()
+    cursor = uuid4()
+    reader = AsyncMock(
+        return_value=EvaluationPageResponse(items=(), has_more=False, next_cursor=None)
+    )
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch("app.optimization.router.read_run_evaluations", reader):
+            response = client.get(
+                f"/optimization/refinement-runs/{run_id}/evaluations",
+                params={"limit": 25, "cursor": str(cursor)},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "has_more": False, "next_cursor": None}
+    reader.assert_awaited_once_with(ANY, run_id, limit=25, cursor=str(cursor))
+
+    too_large = client.get(
+        f"/optimization/refinement-runs/{run_id}/evaluations",
+        params={"limit": 201},
+    )
+    assert too_large.status_code == 422
