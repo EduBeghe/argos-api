@@ -1,4 +1,3 @@
-
 import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -149,7 +148,6 @@ class WalkForwardWindow:
     validation_to: datetime
     test_from: datetime
     test_to: datetime
-
     decision_count: int
     dataset_fingerprint: str
     selection_fingerprint: str
@@ -300,7 +298,6 @@ def build_walk_forward_windows(
     valid_count = int(available // step) + 1
     first_index = max(0, valid_count - configuration.maximum_windows)
     selected_count = valid_count - first_index
-
     windows: list[WalkForwardWindow] = []
     for ordinal, index in enumerate(range(first_index, valid_count), start=1):
         training_from = start + index * step
@@ -451,7 +448,6 @@ def evaluate_walk_forward(
             cash,
             paper_configuration,
             decision_interval,
-
         )
         benchmarks.append(
             WalkForwardBenchmarkEvaluation(
@@ -602,7 +598,6 @@ def _select_candidates(
             _simulate_metrics(
                 dataset,
                 matrices.validation,
-
                 initial_cash,
                 fee_rate,
                 slippage_rate,
@@ -753,7 +748,6 @@ def _aggregate(
     metrics = tuple(item.metrics for item in completed if item.metrics is not None)
     returns = tuple(item.total_return for item in metrics)
     drawdowns = tuple(item.max_drawdown for item in metrics)
-
     profitable = sum(value > 0 for value in returns)
     ratio = _ratio(profitable, len(returns))
     mean_return = _mean(returns)
@@ -904,7 +898,6 @@ def _window_fingerprint(
     test: HistoricalFeatureMatrix,
     ranges: tuple[
         tuple[datetime, datetime],
-
         tuple[datetime, datetime],
         tuple[datetime, datetime],
     ],
