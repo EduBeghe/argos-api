@@ -1,4 +1,3 @@
-
 # Experiment Memory and Experience-Guided Search
 
 Argos can persist compact historical refinement evidence and use compatible completed
@@ -149,7 +148,6 @@ maximum limit of 200. Classification filters are composed over bounded candidate
 until a complete public page or the real end of the dataset is reached, so there is no
 silent global scan cap. Profile evidence uses the same centrally defined compatible
 phases and versions as optimization planning. Queries are data-driven by full instrument
-
 identity and avoid one query per candidate. Decimal values and UTC
 timestamps remain exact. The contract maps stored budgets, allocations, plans, and
 parameters into explicit versionable schemas; it does not expose raw JSONB, candles,
