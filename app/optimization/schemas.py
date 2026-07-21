@@ -1,4 +1,3 @@
-
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -149,7 +148,6 @@ class RefinementRunSummaryResponse(BaseModel):
 
 class SearchPlanResponse(BaseModel):
     planner_version: int
-
     known_rechecks: tuple[str, ...]
     promising_neighborhoods: tuple[str, ...]
     uncertain_rechecks: tuple[str, ...]
@@ -300,7 +298,6 @@ class WalkForwardConfigurationResponse(BaseModel):
     maximum_candidates: int
     minimum_valid_windows: int
     minimum_profitable_window_ratio: Decimal
-
     maximum_drawdown: Decimal
     maximum_return_standard_deviation: Decimal
 
