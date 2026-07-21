@@ -22,6 +22,18 @@ from app.optimization.schemas import (
     RefinementRunDetailResponse,
     RefinementRunQuery,
     RefinementRunSummaryResponse,
+    WalkForwardCandidatePageResponse,
+    WalkForwardRunDetailResponse,
+    WalkForwardRunResponse,
+    WalkForwardWindowEvaluationPageResponse,
+)
+from app.optimization.walk_forward import WalkForwardClassification
+from app.optimization.walk_forward_read import (
+    WalkForwardReadNotFoundError,
+    read_refinement_walk_forward,
+    read_walk_forward_candidate_windows,
+    read_walk_forward_candidates,
+    read_walk_forward_run,
 )
 
 router = APIRouter(prefix="/optimization", tags=["optimization"])
@@ -85,3 +97,77 @@ async def candidate(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.get(
+    "/refinement-runs/{run_id}/walk-forward",
+    response_model=WalkForwardRunResponse,
+)
+async def refinement_walk_forward(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> WalkForwardRunResponse:
+    try:
+        return await read_refinement_walk_forward(session, run_id)
+    except WalkForwardReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/walk-forward-runs/{run_id}", response_model=WalkForwardRunDetailResponse)
+async def walk_forward_run(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> WalkForwardRunDetailResponse:
+    try:
+        return await read_walk_forward_run(session, run_id)
+    except WalkForwardReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/walk-forward-runs/{run_id}/candidates",
+    response_model=WalkForwardCandidatePageResponse,
+)
+async def walk_forward_candidates(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    classification: Annotated[WalkForwardClassification | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_OPTIMIZATION_PAGE_SIZE)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> WalkForwardCandidatePageResponse:
+    try:
+        return await read_walk_forward_candidates(
+            session,
+            run_id,
+            classification=classification,
+            limit=limit,
+            cursor=cursor,
+        )
+    except WalkForwardReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.get(
+    "/walk-forward-runs/{run_id}/candidates/{candidate_id}/windows",
+    response_model=WalkForwardWindowEvaluationPageResponse,
+)
+async def walk_forward_candidate_windows(
+    run_id: UUID,
+    candidate_id: str,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    limit: Annotated[int, Query(ge=1, le=MAX_OPTIMIZATION_PAGE_SIZE)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> WalkForwardWindowEvaluationPageResponse:
+    try:
+        return await read_walk_forward_candidate_windows(
+            session,
+            run_id,
+            candidate_id,
+            limit=limit,
+            cursor=cursor,
+        )
+    except WalkForwardReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
