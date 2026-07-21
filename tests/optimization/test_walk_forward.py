@@ -1,4 +1,3 @@
-
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -149,7 +148,6 @@ def test_evaluation_is_deterministic_and_uses_only_test_rows() -> None:
     assert first == second
     assert first.conclusion is WalkForwardConclusion.COMPLETED
     assert len(first.windows) == 3
-
     assert all(
         item.window.test_from < item.window.test_to
         for item in first.candidate_evaluations
@@ -300,7 +298,6 @@ def test_configuration_change_changes_window_fingerprints() -> None:
         ),
         refinement_budget=BUDGET,
     )
-
     second = build_walk_forward_windows(
         dataset=dataset,
         feature_matrix=matrix,
@@ -451,7 +448,6 @@ def test_future_test_values_cannot_change_window_selection_or_rank(
         training_days=10,
         validation_days=5,
         test_days=5,
-
         step_days=5,
         maximum_windows=1,
         maximum_candidates=1,
@@ -602,7 +598,6 @@ def _metrics(total_return: Decimal) -> WalkForwardMetrics:
     return WalkForwardMetrics(
         total_return=total_return,
         absolute_pnl=total_return * Decimal("10000"),
-
         max_drawdown=Decimal("0.05"),
         final_equity=Decimal("10000") * (Decimal(1) + total_return),
         fees_paid=Decimal("10"),
