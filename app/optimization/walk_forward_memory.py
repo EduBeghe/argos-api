@@ -1,3 +1,4 @@
+
 import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -7,6 +8,7 @@ from time import perf_counter
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -27,30 +29,30 @@ from app.core.database.base import Base
 from app.optimization.feature_matrix import build_historical_feature_matrix
 from app.optimization.historical_data import HistoricalDataset
 from app.optimization.memory import (
-    StrategyCandidateEvaluationRecord,
-    StrategyCandidateRecord,
     StrategyRefinementRunRecord,
+    upsert_candidates,
 )
-from app.optimization.refinement import RefinementCandidate, candidate_for
+from app.optimization.refinement import (
+    RefinementBudget,
+    RefinementCandidate,
+    canonical_candidate_parameters,
+)
 from app.optimization.simulation import DEFAULT_DECISION_INTERVAL
 from app.optimization.walk_forward import (
     WALK_FORWARD_ALGORITHM_VERSION,
     WalkForwardBenchmarkEvaluation,
     WalkForwardCandidateEvaluation,
+    WalkForwardCandidateSelection,
     WalkForwardClassification,
     WalkForwardConfiguration,
-    WalkForwardEvaluationStatus,
     WalkForwardResult,
     completed_window_count,
     evaluate_walk_forward,
 )
-from app.scores.calculator import (
-    BASELINE_TECHNICAL_V1_PARAMETERS,
-    BaselineTechnicalParameters,
-)
+from app.scores.calculation import MODEL_NAME, MODEL_VERSION
 from app.strategies.baseline_long_only import (
-    BASELINE_LONG_ONLY_V1_PARAMETERS,
-    BaselineLongOnlyParameters,
+    STRATEGY_NAME,
+    STRATEGY_VERSION,
 )
 
 
@@ -147,6 +149,7 @@ class WalkForwardWindowRecord(Base):
     training_to: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
     validation_from: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -157,6 +160,79 @@ class WalkForwardWindowRecord(Base):
     test_to: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     decision_count: Mapped[int] = mapped_column(Integer, nullable=False)
     dataset_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    selection_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class WalkForwardCandidateSelectionRecord(Base):
+    __tablename__ = "walk_forward_candidate_selections"
+    __table_args__ = (
+        CheckConstraint(
+            "validation_rank > 0",
+            name="ck_walk_forward_candidate_selections_rank",
+        ),
+        CheckConstraint(
+            "selection_reason IN ('selected_by_window_validation_rank', "
+            "'outside_window_test_candidate_limit')",
+            name="ck_walk_forward_candidate_selections_reason",
+        ),
+        CheckConstraint(
+            "(selected_for_test AND selection_reason = "
+            "'selected_by_window_validation_rank') OR "
+            "(NOT selected_for_test AND selection_reason = "
+            "'outside_window_test_candidate_limit')",
+            name="ck_walk_forward_candidate_selections_outcome",
+        ),
+        UniqueConstraint(
+            "walk_forward_run_id",
+            "window_id",
+            "stable_candidate_id",
+            name="uq_walk_forward_candidate_selections_identity",
+        ),
+        Index(
+            "ix_walk_forward_candidate_selections_page",
+            "walk_forward_run_id",
+            "stable_candidate_id",
+            "window_id",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    walk_forward_run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("walk_forward_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    window_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("walk_forward_windows.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    stable_candidate_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("strategy_candidates.stable_candidate_id"),
+        nullable=False,
+    )
+    validation_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_for_test: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    selection_reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    validation_total_return: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    validation_absolute_pnl: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    validation_max_drawdown: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    validation_final_equity: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    validation_fees_paid: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    validation_trade_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_return_over_drawdown: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
 
 
 class WalkForwardCandidateEvaluationRecord(Base):
@@ -224,6 +300,7 @@ class WalkForwardBenchmarkEvaluationRecord(Base):
     __table_args__ = (
         CheckConstraint(
             "benchmark IN ('production_baseline', 'buy_and_hold')",
+
             name="ck_walk_forward_benchmark_evaluations_name",
         ),
         CheckConstraint(
@@ -374,6 +451,7 @@ async def execute_walk_forward(
     key = _experiment_key(
         dataset,
         refinement_run_id,
+
         initial_cash,
         fee_rate,
         slippage_rate,
@@ -386,17 +464,15 @@ async def execute_walk_forward(
     if existing is not None:
         avoided = existing.evaluations_computed
         return WalkForwardExecution(existing.id, None, True, 0, avoided, avoided)
-    candidates = await _source_candidates(
-        session, refinement_run_id, configuration.maximum_candidates
-    )
+    refinement_budget = _refinement_budget(source.refinement_budget)
     started = perf_counter()
     result = evaluate_walk_forward(
         dataset=dataset,
         feature_matrix=build_historical_feature_matrix(dataset),
-        candidates=candidates,
         initial_cash=initial_cash,
         fee_rate=fee_rate,
         slippage_rate=slippage_rate,
+        refinement_budget=refinement_budget,
         configuration=configuration,
         decision_interval=decision_interval,
     )
@@ -436,11 +512,19 @@ async def execute_walk_forward(
         )
         for window in result.windows
     )
-    baseline_evaluations = tuple(
-        evaluation
-        for evaluation in result.candidate_evaluations
-        if evaluation.candidate.is_production_baseline
-        and evaluation.metrics is not None
+    candidates = tuple(
+        {
+            selection.candidate.stable_candidate_id: selection.candidate
+            for selection in result.selections
+        }.values()
+    )
+    await upsert_candidates(
+        session,
+        tuple(_candidate_definition(candidate, started_at) for candidate in candidates),
+    )
+    session.add_all(
+        _selection_record(run_id, window_ids, selection)
+        for selection in result.selections
     )
     session.add_all(
         _candidate_evaluation_record(run_id, window_ids, evaluation)
@@ -449,10 +533,6 @@ async def execute_walk_forward(
     session.add_all(
         _benchmark_record(run_id, window_ids, benchmark)
         for benchmark in result.benchmark_evaluations
-    )
-    session.add_all(
-        _production_benchmark_record(run_id, window_ids, evaluation)
-        for evaluation in baseline_evaluations
     )
     ranked = sorted(
         result.stability,
@@ -517,60 +597,19 @@ async def execute_walk_forward(
     )
 
 
-async def _source_candidates(
-    session: AsyncSession, refinement_run_id: UUID, maximum: int
-) -> tuple[RefinementCandidate, ...]:
-    rows = (
-        (
-            await session.execute(
-                select(StrategyCandidateRecord)
-                .join(
-                    StrategyCandidateEvaluationRecord,
-                    StrategyCandidateEvaluationRecord.stable_candidate_id
-                    == StrategyCandidateRecord.stable_candidate_id,
-                )
-                .where(
-                    StrategyCandidateEvaluationRecord.refinement_run_id
-                    == refinement_run_id,
-                    StrategyCandidateEvaluationRecord.phase == "validation",
-                    StrategyCandidateEvaluationRecord.eligible.is_(True),
-                )
-                .order_by(
-                    StrategyCandidateEvaluationRecord.rank.asc().nulls_last(),
-                    StrategyCandidateRecord.stable_candidate_id.asc(),
-                )
-                .limit(maximum)
-            )
+def _refinement_budget(value: dict[str, object]) -> RefinementBudget:
+    try:
+        return RefinementBudget(
+            score_screening_top_k=int(str(value["score_screening_top_k"])),
+            validation_top_k=int(str(value["validation_top_k"])),
+
+            max_score_configurations=int(str(value["max_score_configurations"])),
+            max_joint_candidates=int(str(value["max_joint_candidates"])),
         )
-        .scalars()
-        .all()
-    )
-    baseline = candidate_for(
-        BASELINE_TECHNICAL_V1_PARAMETERS, BASELINE_LONG_ONLY_V1_PARAMETERS
-    )
-    candidates = (baseline, *(_candidate_from_record(row) for row in rows))
-    return tuple(
-        {candidate.stable_candidate_id: candidate for candidate in candidates}.values()
-    )[:maximum]
-
-
-def _candidate_from_record(record: StrategyCandidateRecord) -> RefinementCandidate:
-    score = record.score_parameters
-    strategy = record.strategy_parameters
-    return candidate_for(
-        BaselineTechnicalParameters(
-            Decimal(str(score["trend_weight"])),
-            Decimal(str(score["rsi_weight"])),
-            Decimal(str(score["return_1_weight"])),
-            Decimal(str(score["return_12_weight"])),
-            Decimal(str(score["volume_confirmation_weight"])),
-        ),
-        BaselineLongOnlyParameters(
-            Decimal(str(strategy["entry_threshold"])),
-            Decimal(str(strategy["exit_threshold"])),
-            Decimal(str(strategy["open_position_target_percentage"])),
-        ),
-    )
+    except (KeyError, TypeError, ValueError) as error:
+        raise WalkForwardMemoryError(
+            "source refinement run has an invalid persisted budget"
+        ) from error
 
 
 def _experiment_key(
@@ -623,6 +662,30 @@ def _candidate_evaluation_record(
     )
 
 
+def _selection_record(
+    run_id: UUID,
+    window_ids: dict[int, UUID],
+    selection: WalkForwardCandidateSelection,
+) -> WalkForwardCandidateSelectionRecord:
+    metrics = selection.validation_metrics
+    return WalkForwardCandidateSelectionRecord(
+        id=uuid4(),
+        walk_forward_run_id=run_id,
+        window_id=window_ids[selection.window.ordinal],
+        stable_candidate_id=selection.candidate.stable_candidate_id,
+        validation_rank=selection.validation_rank,
+        selected_for_test=selection.selected_for_test,
+        selection_reason=selection.selection_reason,
+        validation_total_return=metrics.total_return,
+        validation_absolute_pnl=metrics.absolute_pnl,
+        validation_max_drawdown=metrics.max_drawdown,
+        validation_final_equity=metrics.final_equity,
+        validation_fees_paid=metrics.fees_paid,
+        validation_trade_count=metrics.trade_count,
+        validation_return_over_drawdown=metrics.return_over_drawdown,
+    )
+
+
 def _benchmark_record(
     run_id: UUID,
     window_ids: dict[int, UUID],
@@ -646,26 +709,41 @@ def _benchmark_record(
     )
 
 
-def _production_benchmark_record(
-    run_id: UUID,
-    window_ids: dict[int, UUID],
-    evaluation: WalkForwardCandidateEvaluation,
-) -> WalkForwardBenchmarkEvaluationRecord:
-    metrics = evaluation.metrics
-    if metrics is None:
-        raise WalkForwardMemoryError("completed production baseline has no metrics")
-    return WalkForwardBenchmarkEvaluationRecord(
-        id=uuid4(),
-        walk_forward_run_id=run_id,
-        window_id=window_ids[evaluation.window.ordinal],
-        benchmark="production_baseline",
-        status=WalkForwardEvaluationStatus.COMPLETED.value,
-        total_return=metrics.total_return,
-        absolute_pnl=metrics.absolute_pnl,
-        max_drawdown=metrics.max_drawdown,
-        final_equity=metrics.final_equity,
-        fees_paid=metrics.fees_paid,
-        trade_count=metrics.trade_count,
-        return_over_drawdown=metrics.return_over_drawdown,
-        failure_reason=None,
-    )
+def _candidate_definition(
+    candidate: RefinementCandidate, created_at: datetime
+) -> dict[str, object]:
+    score = {
+        name: str(getattr(candidate.score_parameters, name))
+        for name in (
+            "trend_weight",
+            "rsi_weight",
+            "return_1_weight",
+            "return_12_weight",
+            "volume_confirmation_weight",
+        )
+    }
+    strategy = {
+        name: str(getattr(candidate.strategy_parameters, name))
+        for name in (
+            "entry_threshold",
+            "exit_threshold",
+            "open_position_target_percentage",
+        )
+    }
+    return {
+        "stable_candidate_id": candidate.stable_candidate_id,
+        "score_model_name": MODEL_NAME,
+        "score_model_version": MODEL_VERSION,
+        "strategy_name": STRATEGY_NAME,
+        "strategy_version": STRATEGY_VERSION,
+        "score_parameters": score,
+        "strategy_parameters": strategy,
+        "canonical_parameters": {
+            "ordered_values": list(
+                canonical_candidate_parameters(
+                    candidate.score_parameters, candidate.strategy_parameters
+                )
+            )
+        },
+        "created_at": created_at,
+    }
