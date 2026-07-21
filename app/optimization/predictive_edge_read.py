@@ -23,7 +23,13 @@ from app.optimization.predictive_edge_schemas import (
     StrategyHypothesisPageResponse,
     StrategyHypothesisResponse,
 )
-from app.optimization.predictive_edges import EvidenceStatus
+from app.optimization.predictive_edges import (
+    DirectionMapping,
+    EvidenceStatus,
+    PredictorSemanticKind,
+    TestConfirmationStatus,
+    ValidationStatus,
+)
 
 DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 200
@@ -127,6 +133,9 @@ async def get_predictive_edge_run(
             "bin_count": run.bin_count,
             "minimum_observations": run.minimum_observations,
             "minimum_windows": run.minimum_windows,
+            "minimum_hit_rate_improvement_over_benchmark": (
+                run.minimum_hit_rate_improvement_over_benchmark
+            ),
         },
     )
 
@@ -218,16 +227,45 @@ async def list_predictive_edge_windows(
             PredictiveEdgeWindowMetricResponse(
                 id=value.id,
                 window_ordinal=ordinal,
-                usable_count=value.usable_count,
-                missing_count=value.missing_count,
-                correlation=value.correlation,
-                directional_hit_rate=value.directional_hit_rate,
-                mean_gross_return=value.mean_gross_return,
-                mean_net_return=value.mean_net_return,
-                positive_net_ratio=value.positive_net_ratio,
-                standard_error=value.standard_error,
-                evidence_status=EvidenceStatus(value.evidence_status),
-                insufficient_reason=value.insufficient_reason,
+                semantic_kind=PredictorSemanticKind(value.semantic_kind),
+                training_center=value.training_center,
+                direction_mapping=DirectionMapping(value.direction_mapping),
+                validation_status=ValidationStatus(value.validation_status),
+                validation_direction=DirectionMapping(value.validation_direction),
+                validation_usable_count=value.validation_usable_count,
+                validation_correlation=value.validation_correlation,
+                validation_directional_hit_rate=(value.validation_directional_hit_rate),
+                validation_mean_strategy_aligned_net_return=(
+                    value.validation_mean_strategy_aligned_net_return
+                ),
+                selected_for_test=value.selected_for_test,
+                selection_reason=value.selection_reason,
+                selected_bin_ordinals=tuple(value.selected_bin_ordinals),
+                test_confirmation_status=TestConfirmationStatus(
+                    value.test_confirmation_status
+                ),
+                test_usable_count=value.test_usable_count,
+                test_missing_count=value.test_missing_count,
+                test_correlation=value.test_correlation,
+                test_directional_hit_rate=value.test_directional_hit_rate,
+                mean_forward_gross_return=value.mean_forward_gross_return,
+                mean_absolute_movement=value.mean_absolute_movement,
+                mean_net_movement_magnitude_after_friction=(
+                    value.mean_net_movement_magnitude_after_friction
+                ),
+                positive_movement_after_friction_ratio=(
+                    value.positive_movement_after_friction_ratio
+                ),
+                mean_strategy_aligned_gross_return=(
+                    value.mean_strategy_aligned_gross_return
+                ),
+                mean_strategy_aligned_net_return=(
+                    value.mean_strategy_aligned_net_return
+                ),
+                mean_expected_avoided_downside=(value.mean_expected_avoided_downside),
+                test_standard_error=value.test_standard_error,
+                test_evidence_status=EvidenceStatus(value.test_evidence_status),
+                test_insufficient_reason=value.test_insufficient_reason,
                 training_bin_bounds=tuple(
                     Decimal(item)
                     for item in value.training_bin_bounds.split(",")

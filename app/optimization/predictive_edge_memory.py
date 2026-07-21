@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,7 +24,7 @@ class PredictiveEdgeRunRecord(Base):
     __tablename__ = "predictive_edge_runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('running', 'completed', 'failed')",
+            "status IN ('running', 'completed', 'insufficient_history', 'failed')",
             name="ck_predictive_edge_runs_status",
         ),
         CheckConstraint(
@@ -78,6 +79,12 @@ class PredictiveEdgeRunRecord(Base):
     minimum_directional_hit_rate: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
     )
+    minimum_hit_rate_improvement_over_benchmark: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    windows_available: Mapped[int] = mapped_column(Integer, nullable=False)
+    windows_required: Mapped[int] = mapped_column(Integer, nullable=False)
+    conclusion_reason: Mapped[str | None] = mapped_column(String(256))
     windows_generated: Mapped[int] = mapped_column(Integer, nullable=False)
     aggregate_metrics_computed: Mapped[int] = mapped_column(Integer, nullable=False)
     metrics_reused: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -157,12 +164,18 @@ class PredictiveEdgeAggregateRecord(Base):
     predictor_name: Mapped[str] = mapped_column(String(64), nullable=False)
     predictor_version: Mapped[int] = mapped_column(Integer, nullable=False)
     predictor_source: Mapped[str] = mapped_column(String(128), nullable=False)
+    semantic_kind: Mapped[str] = mapped_column(String(48), nullable=False)
     direction_convention: Mapped[str] = mapped_column(String(128), nullable=False)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     condition: Mapped[str] = mapped_column(String(64), nullable=False)
     windows_evaluated: Mapped[int] = mapped_column(Integer, nullable=False)
-    sufficient_windows: Mapped[int] = mapped_column(Integer, nullable=False)
+    direction_mapping: Mapped[str] = mapped_column(String(32), nullable=False)
+    supporting_bin_ordinals: Mapped[list[int]] = mapped_column(
+        ARRAY(Integer), nullable=False
+    )
+    windows_selected_for_test: Mapped[int] = mapped_column(Integer, nullable=False)
+    windows_confirmed: Mapped[int] = mapped_column(Integer, nullable=False)
     total_usable_observations: Mapped[int] = mapped_column(Integer, nullable=False)
     stable_direction_ratio: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
@@ -171,10 +184,21 @@ class PredictiveEdgeAggregateRecord(Base):
     median_correlation: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     worst_correlation: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     mean_directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
-    mean_positive_net_ratio: Mapped[Decimal] = mapped_column(
+    mean_movement_after_friction_ratio: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
     )
-    mean_net_return: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    mean_net_movement_magnitude_after_friction: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    mean_strategy_aligned_gross_return: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    mean_strategy_aligned_net_return: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    mean_expected_avoided_downside: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
     correlation_dispersion: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     classification: Mapped[str] = mapped_column(String(48), nullable=False)
 
@@ -208,18 +232,55 @@ class PredictiveEdgeWindowMetricRecord(Base):
         nullable=False,
     )
     predictor_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    semantic_kind: Mapped[str] = mapped_column(String(48), nullable=False)
     horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     condition: Mapped[str] = mapped_column(String(64), nullable=False)
-    usable_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    missing_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    correlation: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
-    directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
-    mean_gross_return: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
-    mean_net_return: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
-    positive_net_ratio: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
-    standard_error: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
-    evidence_status: Mapped[str] = mapped_column(String(48), nullable=False)
-    insufficient_reason: Mapped[str | None] = mapped_column(String(256))
+    training_center: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    direction_mapping: Mapped[str] = mapped_column(String(32), nullable=False)
+    validation_status: Mapped[str] = mapped_column(String(48), nullable=False)
+    validation_direction: Mapped[str] = mapped_column(String(32), nullable=False)
+    validation_usable_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_correlation: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    validation_directional_hit_rate: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    validation_mean_strategy_aligned_net_return: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    selected_for_test: Mapped[bool] = mapped_column(nullable=False)
+    selection_reason: Mapped[str] = mapped_column(String(256), nullable=False)
+    selected_bin_ordinals: Mapped[list[int]] = mapped_column(
+        ARRAY(Integer), nullable=False
+    )
+    test_confirmation_status: Mapped[str] = mapped_column(String(48), nullable=False)
+    test_usable_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_missing_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_correlation: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    test_directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    mean_forward_gross_return: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    mean_absolute_movement: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    mean_net_movement_magnitude_after_friction: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    positive_movement_after_friction_ratio: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    mean_strategy_aligned_gross_return: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    mean_strategy_aligned_net_return: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    mean_expected_avoided_downside: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18)
+    )
+    test_standard_error: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    test_evidence_status: Mapped[str] = mapped_column(String(48), nullable=False)
+    test_insufficient_reason: Mapped[str | None] = mapped_column(String(256))
     training_bin_bounds: Mapped[str] = mapped_column(Text, nullable=False)
     volatility_threshold: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
@@ -246,17 +307,21 @@ class PredictiveEdgeBinAggregateRecord(Base):
     lower_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     upper_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     observation_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    mean_forward_return: Mapped[Decimal] = mapped_column(
+    mean_forward_gross_return: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
     )
-    median_forward_return: Mapped[Decimal] = mapped_column(
+    median_forward_gross_return: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
     )
     up_count: Mapped[int] = mapped_column(Integer, nullable=False)
     down_count: Mapped[int] = mapped_column(Integer, nullable=False)
     neutral_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    positive_net_ratio: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
-    mean_net_return: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    positive_movement_after_friction_ratio: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    mean_net_movement_magnitude_after_friction: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
     evidence_status: Mapped[str] = mapped_column(String(48), nullable=False)
 
 
@@ -278,12 +343,12 @@ class StrategyHypothesisRecord(Base):
     direction: Mapped[str] = mapped_column(String(32), nullable=False)
     horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     condition: Mapped[str] = mapped_column(String(64), nullable=False)
-    expected_gross_return: Mapped[Decimal] = mapped_column(
-        Numeric(38, 18), nullable=False
+    supporting_bin_ordinals: Mapped[list[int]] = mapped_column(
+        ARRAY(Integer), nullable=False
     )
-    expected_net_return: Mapped[Decimal] = mapped_column(
-        Numeric(38, 18), nullable=False
-    )
+    expected_gross_return: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    expected_net_return: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    expected_avoided_loss: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     stability_ratio: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
     evaluation_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -314,4 +379,6 @@ class PredictiveEdgeBenchmarkRecord(Base):
     benchmark: Mapped[str] = mapped_column(String(64), nullable=False)
     observation_count: Mapped[int] = mapped_column(Integer, nullable=False)
     directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
-    mean_return: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    mean_forward_gross_return: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )

@@ -16,8 +16,8 @@ from app.optimization.walk_forward import WalkForwardConfiguration, WalkForwardW
 from app.paper.config import SimulationConfiguration
 from app.scores.calculator import BaselineScoreInput, calculate_baseline_score
 
-PREDICTIVE_EDGE_ALGORITHM_VERSION = 1
-PREDICTOR_VERSION = 1
+PREDICTIVE_EDGE_ALGORITHM_VERSION = 2
+PREDICTOR_VERSION = 2
 DEFAULT_HORIZONS = tuple(
     timedelta(minutes=value) for value in (30, 60, 120, 360, 720, 1440, 2880)
 )
@@ -38,6 +38,38 @@ class Direction(StrEnum):
     UP = "up"
     DOWN = "down"
     NEUTRAL = "neutral"
+
+
+class PredictorSemanticKind(StrEnum):
+    DIRECTIONAL_CENTERED = "directional_centered"
+    DIRECTIONAL_TRAINING_CENTERED = "directional_training_centered"
+    MAGNITUDE_OR_ACTIVITY = "magnitude_or_activity"
+    CONFIRMATION_ONLY = "confirmation_only"
+
+
+class DirectionMapping(StrEnum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ValidationStatus(StrEnum):
+    SELECTED = "selected"
+    REJECTED = "rejected"
+    INSUFFICIENT = "insufficient_evidence"
+    NOT_DIRECTIONAL = "not_directional"
+
+
+class TestConfirmationStatus(StrEnum):
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    NOT_SELECTED = "not_selected"
+    INSUFFICIENT = "insufficient_evidence"
+
+
+class PredictiveEdgeConclusion(StrEnum):
+    COMPLETED = "completed"
+    INSUFFICIENT_HISTORY = "insufficient_history"
 
 
 class EvidenceStatus(StrEnum):
@@ -62,72 +94,109 @@ class PredictorDefinition:
     name: str
     explanation: str
     source: str
+    semantic_kind: PredictorSemanticKind
     direction_convention: str
     version: int = PREDICTOR_VERSION
 
 
 PREDICTORS = (
-    PredictorDefinition("ema_20", "EMA 20 level.", "feature:ema_20", "higher value"),
-    PredictorDefinition("ema_50", "EMA 50 level.", "feature:ema_50", "higher value"),
     PredictorDefinition(
-        "rsi_14", "RSI 14 oscillator.", "feature:rsi_14", "higher is more positive"
+        "ema_20_relative",
+        "EMA 20 relative to the current close: EMA 20 / close - 1.",
+        "feature:ema_20",
+        PredictorSemanticKind.DIRECTIONAL_TRAINING_CENTERED,
+        "training learns center and positive/negative return mapping",
     ),
     PredictorDefinition(
-        "atr_14", "ATR 14 volatility.", "feature:atr_14", "higher is more volatile"
+        "ema_50_relative",
+        "EMA 50 relative to the current close: EMA 50 / close - 1.",
+        "feature:ema_50",
+        PredictorSemanticKind.DIRECTIONAL_TRAINING_CENTERED,
+        "training learns center and positive/negative return mapping",
     ),
     PredictorDefinition(
-        "return_1", "One-candle return.", "feature:return_1", "positive is upward"
+        "rsi_14",
+        "RSI 14 oscillator centered from training evidence.",
+        "feature:rsi_14",
+        PredictorSemanticKind.DIRECTIONAL_TRAINING_CENTERED,
+        "training learns center and positive/negative return mapping",
     ),
     PredictorDefinition(
-        "return_12", "Twelve-candle return.", "feature:return_12", "positive is upward"
+        "atr_14_relative",
+        "ATR 14 divided by close; predicts movement magnitude, not direction.",
+        "feature:atr_14",
+        PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY,
+        "higher/lower values relate only to absolute future movement",
+    ),
+    PredictorDefinition(
+        "return_1",
+        "One-candle return.",
+        "feature:return_1",
+        PredictorSemanticKind.DIRECTIONAL_CENTERED,
+        "zero-centered; training freezes positive or negative mapping",
+    ),
+    PredictorDefinition(
+        "return_12",
+        "Twelve-candle return.",
+        "feature:return_12",
+        PredictorSemanticKind.DIRECTIONAL_CENTERED,
+        "zero-centered; training freezes positive or negative mapping",
     ),
     PredictorDefinition(
         "relative_volume_20",
-        "Volume relative to its prior baseline.",
+        "Volume relative to its prior baseline; an activity predictor.",
         "feature:relative_volume_20",
-        "higher confirms activity",
+        PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY,
+        "relates to absolute movement; never implies UP by itself",
     ),
     PredictorDefinition(
         "trend_component",
         "ATR-normalized EMA separation.",
         "score:baseline_technical:1",
-        "positive is upward",
+        PredictorSemanticKind.DIRECTIONAL_CENTERED,
+        "zero-centered; training freezes positive or negative mapping",
     ),
     PredictorDefinition(
         "rsi_contribution",
         "Weighted RSI contribution.",
         "score:baseline_technical:1",
-        "positive is upward",
+        PredictorSemanticKind.DIRECTIONAL_CENTERED,
+        "zero-centered; training freezes positive or negative mapping",
     ),
     PredictorDefinition(
         "return_1_contribution",
         "Weighted short-return contribution.",
         "score:baseline_technical:1",
-        "positive is upward",
+        PredictorSemanticKind.DIRECTIONAL_CENTERED,
+        "zero-centered; training freezes positive or negative mapping",
     ),
     PredictorDefinition(
         "return_12_contribution",
         "Weighted long-return contribution.",
         "score:baseline_technical:1",
-        "positive is upward",
+        PredictorSemanticKind.DIRECTIONAL_CENTERED,
+        "zero-centered; training freezes positive or negative mapping",
     ),
     PredictorDefinition(
         "volume_confirmation",
-        "Score volume confirmation factor.",
+        "Score volume-confirmation factor; confirmation is not direction.",
         "score:baseline_technical:1",
-        "higher confirms direction",
+        PredictorSemanticKind.CONFIRMATION_ONLY,
+        "confirmation-only; directional metrics are not applicable",
     ),
     PredictorDefinition(
         "directional_score",
-        "Sum of directional contributions.",
+        "Sum of persisted directional contributions.",
         "score:baseline_technical:1",
-        "positive is upward",
+        PredictorSemanticKind.DIRECTIONAL_CENTERED,
+        "zero-centered; training freezes positive or negative mapping",
     ),
     PredictorDefinition(
         "overall_score",
-        "Final baseline technical score.",
+        "Final baseline technical score; training center is explicit.",
         "score:baseline_technical:1",
-        "positive is upward",
+        PredictorSemanticKind.DIRECTIONAL_TRAINING_CENTERED,
+        "training learns center and positive/negative return mapping",
     ),
 )
 
@@ -139,6 +208,7 @@ class EvidenceThresholds:
     minimum_stable_direction_ratio: Decimal = Decimal("0.60")
     minimum_absolute_correlation: Decimal = Decimal("0.10")
     minimum_directional_hit_rate: Decimal = Decimal("0.55")
+    minimum_hit_rate_improvement_over_benchmark: Decimal = Decimal("0.02")
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,10 +240,27 @@ class PredictiveEdgeConfiguration:
 class Observation:
     boundary: datetime
     predictor_value: Decimal
-    forward_return: Decimal
-    net_return: Decimal
+    forward_gross_return: Decimal
+    absolute_movement: Decimal
+    net_movement_magnitude_after_friction: Decimal
     direction: Direction
-    condition: Condition
+
+
+@dataclass(frozen=True, slots=True)
+class DirectionBenchmarks:
+    always_up: Decimal
+    always_down: Decimal
+    deterministic_random: Decimal
+    observed_majority: Decimal
+
+    @property
+    def strongest(self) -> Decimal:
+        return max(
+            self.always_up,
+            self.always_down,
+            self.deterministic_random,
+            self.observed_majority,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,13 +272,17 @@ class EdgeMetrics:
     up_precision: Decimal | None
     down_precision: Decimal | None
     neutral_rate: Decimal
-    mean_gross_return: Decimal
-    median_gross_return: Decimal
-    mean_net_return: Decimal
-    positive_net_ratio: Decimal
-    average_absolute_movement: Decimal
+    mean_forward_gross_return: Decimal
+    median_forward_gross_return: Decimal
+    mean_absolute_movement: Decimal
+    mean_net_movement_magnitude_after_friction: Decimal
+    positive_movement_after_friction_ratio: Decimal
+    mean_strategy_aligned_gross_return: Decimal | None
+    mean_strategy_aligned_net_return: Decimal | None
+    mean_expected_avoided_downside: Decimal | None
     sample_standard_deviation: Decimal | None
     standard_error: Decimal | None
+    direction_benchmarks: DirectionBenchmarks | None
     evidence_status: EvidenceStatus
     insufficient_reason: str | None
 
@@ -202,13 +293,13 @@ class BinAggregate:
     lower_bound: Decimal | None
     upper_bound: Decimal | None
     observation_count: int
-    mean_forward_return: Decimal
-    median_forward_return: Decimal
+    mean_forward_gross_return: Decimal
+    median_forward_gross_return: Decimal
     up_count: int
     down_count: int
     neutral_count: int
-    positive_net_ratio: Decimal
-    mean_net_return: Decimal
+    positive_movement_after_friction_ratio: Decimal
+    mean_net_movement_magnitude_after_friction: Decimal
     evidence_status: EvidenceStatus
 
 
@@ -218,9 +309,18 @@ class WindowEdge:
     predictor: PredictorDefinition
     horizon: timedelta
     condition: Condition
+    training_center: Decimal
+    direction_mapping: DirectionMapping
     training_bin_bounds: tuple[Decimal, ...]
     volatility_threshold: Decimal
-    metrics: EdgeMetrics
+    validation_status: ValidationStatus
+    validation_direction: DirectionMapping
+    validation_metrics: EdgeMetrics
+    selected_for_test: bool
+    selection_reason: str
+    selected_bin_ordinals: tuple[int, ...]
+    test_confirmation_status: TestConfirmationStatus
+    test_metrics: EdgeMetrics
     bins: tuple[BinAggregate, ...]
     fingerprint: str
 
@@ -230,17 +330,21 @@ class StabilityEdge:
     predictor: PredictorDefinition
     horizon: timedelta
     condition: Condition
+    direction_mapping: DirectionMapping
+    supporting_bin_ordinals: tuple[int, ...]
     windows_evaluated: int
-    sufficient_windows: int
-    positive_correlation_windows: int
-    negative_correlation_windows: int
+    windows_selected_for_test: int
+    windows_confirmed: int
     stable_direction_ratio: Decimal
     weighted_mean_correlation: Decimal | None
     median_correlation: Decimal | None
     worst_correlation: Decimal | None
     mean_directional_hit_rate: Decimal | None
-    mean_positive_net_ratio: Decimal
-    mean_net_return: Decimal
+    mean_movement_after_friction_ratio: Decimal
+    mean_net_movement_magnitude_after_friction: Decimal
+    mean_strategy_aligned_gross_return: Decimal | None
+    mean_strategy_aligned_net_return: Decimal | None
+    mean_expected_avoided_downside: Decimal | None
     correlation_dispersion: Decimal | None
     total_usable_observations: int
     classification: EvidenceStatus
@@ -254,8 +358,10 @@ class StrategyHypothesis:
     direction: str
     horizon: timedelta
     condition: Condition
-    expected_gross_return: Decimal
-    expected_net_return: Decimal
+    supporting_bin_ordinals: tuple[int, ...]
+    expected_gross_return: Decimal | None
+    expected_net_return: Decimal | None
+    expected_avoided_loss: Decimal | None
     directional_hit_rate: Decimal | None
     stability_ratio: Decimal
     minimum_evaluation_interval: timedelta
@@ -273,11 +379,15 @@ class BenchmarkAggregate:
     benchmark: str
     observation_count: int
     directional_hit_rate: Decimal | None
-    mean_return: Decimal
+    mean_forward_gross_return: Decimal
 
 
 @dataclass(frozen=True, slots=True)
 class PredictiveEdgeResult:
+    conclusion: PredictiveEdgeConclusion
+    windows_available: int
+    windows_required: int
+    reason: str | None
     configuration: PredictiveEdgeConfiguration
     window_edges: tuple[WindowEdge, ...]
     stability_edges: tuple[StabilityEdge, ...]
@@ -292,6 +402,19 @@ def analyze_predictive_edges(
     simulation: SimulationConfiguration,
     configuration: PredictiveEdgeConfiguration,
 ) -> PredictiveEdgeResult:
+    required = configuration.thresholds.minimum_windows
+    if len(windows) < required:
+        return PredictiveEdgeResult(
+            PredictiveEdgeConclusion.INSUFFICIENT_HISTORY,
+            len(windows),
+            required,
+            f"requires at least {required} valid walk-forward windows",
+            configuration,
+            (),
+            (),
+            (),
+            (),
+        )
     rows = {row.candle_open_time: row for row in matrix.rows}
     friction = Decimal(2) * (simulation.fee_rate + simulation.slippage_rate)
     neutral = (
@@ -302,44 +425,114 @@ def analyze_predictive_edges(
     window_edges: list[WindowEdge] = []
     benchmark_observations: dict[timedelta, list[Observation]] = {}
     for window in windows:
-        training = _phase_rows(matrix.rows, window.training_from, window.training_to)
+        training_rows = _phase_rows(
+            matrix.rows, window.training_from, window.training_to
+        )
         volatility = _quantile(
-            tuple(_predictors(row)["atr_14"] / row.close_price for row in training),
+            tuple(row.atr_14 / row.close_price for row in training_rows),
             Decimal("0.80"),
         )
         for predictor in PREDICTORS:
             training_values = tuple(
-                _predictors(row)[predictor.name] for row in training
+                _predictors(row)[predictor.name] for row in training_rows
+            )
+            center = (
+                median(training_values)
+                if predictor.semantic_kind
+                is PredictorSemanticKind.DIRECTIONAL_TRAINING_CENTERED
+                else Decimal(0)
             )
             bounds = _quantile_bounds(training_values, configuration.bins)
             for horizon in configuration.horizons:
                 for condition in configuration.conditions:
-                    observations, missing = _observations(
+                    training, _ = _observations(
                         rows,
-                        window,
-                        predictor,
-                        horizon,
-                        condition,
-                        volatility,
-                        friction,
-                        neutral,
-                        configuration.decision_interval,
+                        phase_start=window.training_from,
+                        phase_end=window.training_to,
+                        predictor=predictor,
+                        horizon=horizon,
+                        condition=condition,
+                        volatility_threshold=volatility,
+                        friction=friction,
+                        neutral=neutral,
+                        cadence=configuration.decision_interval,
                     )
-                    if predictor.name == "overall_score" and condition is Condition.ALL:
-                        benchmark_observations.setdefault(horizon, []).extend(
-                            observations
+                    mapping = _learn_direction_mapping(predictor, training)
+                    validation, validation_missing = _observations(
+                        rows,
+                        phase_start=window.validation_from,
+                        phase_end=window.validation_to,
+                        predictor=predictor,
+                        horizon=horizon,
+                        condition=condition,
+                        volatility_threshold=volatility,
+                        friction=friction,
+                        neutral=neutral,
+                        cadence=configuration.decision_interval,
+                    )
+                    validation_metrics = _metrics(
+                        validation,
+                        validation_missing,
+                        predictor=predictor,
+                        center=center,
+                        mapping=mapping,
+                        friction=friction,
+                        thresholds=configuration.thresholds,
+                    )
+                    validation_status, reason = _select_for_test(
+                        predictor, validation_metrics, configuration.thresholds
+                    )
+                    selected = validation_status is ValidationStatus.SELECTED
+                    selected_bins = (
+                        _selected_bins(
+                            validation,
+                            bounds,
+                            mapping,
+                            configuration.thresholds,
                         )
-                    metrics = _metrics(observations, missing, configuration.thresholds)
-                    bin_metrics = _bin_aggregates(
-                        observations, bounds, configuration.thresholds
+                        if selected
+                        else ()
                     )
+                    if selected and not selected_bins:
+                        validation_status = ValidationStatus.REJECTED
+                        selected = False
+                        reason = "validation found no promising training-defined bin"
+                    test, test_missing = _observations(
+                        rows,
+                        phase_start=window.test_from,
+                        phase_end=window.test_to,
+                        predictor=predictor,
+                        horizon=horizon,
+                        condition=condition,
+                        volatility_threshold=volatility,
+                        friction=friction,
+                        neutral=neutral,
+                        cadence=configuration.decision_interval,
+                    )
+                    test_metrics = _metrics(
+                        test,
+                        test_missing,
+                        predictor=predictor,
+                        center=center,
+                        mapping=mapping,
+                        friction=friction,
+                        thresholds=configuration.thresholds,
+                    )
+                    confirmation = _confirm_test(
+                        selected, predictor, test_metrics, configuration.thresholds
+                    )
+                    bins = _bin_aggregates(test, bounds, configuration.thresholds)
                     payload = (
                         window.ordinal,
                         predictor.name,
                         int(horizon.total_seconds()),
                         condition.value,
+                        center,
+                        mapping.value,
                         bounds,
-                        metrics,
+                        validation_status.value,
+                        confirmation.value,
+                        test_metrics,
                     )
                     window_edges.append(
                         WindowEdge(
@@ -347,234 +540,96 @@ def analyze_predictive_edges(
                             predictor,
                             horizon,
                             condition,
+                            center,
+                            mapping,
                             bounds,
                             volatility,
-                            metrics,
-                            bin_metrics,
+                            validation_status,
+                            mapping,
+                            validation_metrics,
+                            selected,
+                            reason,
+                            selected_bins,
+                            confirmation,
+                            test_metrics,
+                            bins,
                             _fingerprint(payload),
                         )
                     )
-    stability = _stability(tuple(window_edges), configuration.thresholds)
-    hypotheses = tuple(
-        _hypothesis(
-            edge,
-            tuple(
-                item.window_ordinal
-                for item in window_edges
-                if item.predictor == edge.predictor
-                and item.horizon == edge.horizon
-                and item.condition == edge.condition
-                and item.metrics.evidence_status is not EvidenceStatus.INSUFFICIENT
-            ),
-            configuration.decision_interval,
+                    if predictor.name == "overall_score" and condition is Conditio…1962 tokens truncated…torSemanticKind.MAGNITUDE_OR_ACTIVITY,
+            PredictorSemanticKind.CONFIRMATION_ONLY,
         )
-        for edge in stability
-        if edge.classification
-        in (EvidenceStatus.PROMISING_POSITIVE, EvidenceStatus.PROMISING_NEGATIVE)
+        else signed
     )
-    benchmarks = _benchmarks(benchmark_observations)
-    return PredictiveEdgeResult(
-        configuration, tuple(window_edges), stability, hypotheses, benchmarks
-    )
-
-
-def build_predictive_windows(
-    *,
-    dataset: HistoricalDataset,
-    matrix: HistoricalFeatureMatrix,
-    configuration: PredictiveEdgeConfiguration,
-) -> tuple[WalkForwardWindow, ...]:
-    """Build recent half-open windows without coupling evidence to a Strategy."""
-
-    if dataset.fingerprint != matrix.dataset_fingerprint:
-        raise PredictiveEdgeError("dataset and feature matrix fingerprints differ")
-    window = configuration.windows
-    training = timedelta(days=window.training_days)
-    validation = timedelta(days=window.validation_days)
-    test = timedelta(days=window.test_days)
-    step = timedelta(days=window.step_days)
-    start = dataset.identity.range.start
-    end = dataset.identity.range.end
-    available = end - start - training - validation - test
-    if available < timedelta(0):
-        return ()
-    count = int(available // step) + 1
-    first = max(0, count - window.maximum_windows)
-    output: list[WalkForwardWindow] = []
-    for ordinal, index in enumerate(range(first, count), start=1):
-        training_from = start + index * step
-        training_to = training_from + training
-        validation_to = training_to + validation
-        test_to = validation_to + test
-        identity = (
-            dataset.fingerprint,
-            training_from,
-            training_to,
-            validation_to,
-            test_to,
-        )
-        output.append(
-            WalkForwardWindow(
-                ordinal,
-                training_from,
-                training_to,
-                training_to,
-                validation_to,
-                validation_to,
-                test_to,
-                sum(
-                    validation_to <= row.candle_open_time < test_to
-                    for row in matrix.rows
-                ),
-                _fingerprint(identity),
-                _fingerprint((*identity, "training-only-selection")),
-            )
-        )
-    return tuple(output)
-
-
-def _predictors(row: HistoricalFeatureRow) -> dict[str, Decimal]:
-    score = calculate_baseline_score(
-        BaselineScoreInput(
-            row.close_price,
-            row.ema_20,
-            row.ema_50,
-            row.rsi_14,
-            row.atr_14,
-            row.return_1,
-            row.return_12,
-            row.relative_volume_20,
-        )
-    )
-    return {
-        "ema_20": row.ema_20,
-        "ema_50": row.ema_50,
-        "rsi_14": row.rsi_14,
-        "atr_14": row.atr_14,
-        "return_1": row.return_1,
-        "return_12": row.return_12,
-        "relative_volume_20": row.relative_volume_20,
-        "trend_component": score.trend_score,
-        "rsi_contribution": score.rsi_contribution,
-        "return_1_contribution": score.return_1_contribution,
-        "return_12_contribution": score.return_12_contribution,
-        "volume_confirmation": score.volume_confirmation_factor,
-        "directional_score": score.directional_score,
-        "overall_score": score.overall_score,
-    }
-
-
-def _phase_rows(
-    rows: tuple[HistoricalFeatureRow, ...], start: datetime, end: datetime
-) -> tuple[HistoricalFeatureRow, ...]:
-    return tuple(row for row in rows if start <= row.candle_open_time < end)
-
-
-def _observations(
-    rows: dict[datetime, HistoricalFeatureRow],
-    window: WalkForwardWindow,
-    predictor: PredictorDefinition,
-    horizon: timedelta,
-    condition: Condition,
-    volatility_threshold: Decimal,
-    friction: Decimal,
-    neutral: Decimal,
-    cadence: timedelta,
-) -> tuple[tuple[Observation, ...], int]:
-    result: list[Observation] = []
-    missing = 0
-    for boundary, row in sorted(rows.items()):
-        if (
-            not window.test_from <= boundary < window.test_to
-            or (boundary - window.test_from) % cadence
-        ):
-            continue
-        future_time = boundary + horizon
-        if future_time >= window.test_to or future_time not in rows:
-            missing += 1
-            continue
-        ratio = row.atr_14 / row.close_price
-        if (
-            (condition is Condition.EMA_ABOVE and row.ema_20 <= row.ema_50)
-            or (condition is Condition.EMA_BELOW and row.ema_20 >= row.ema_50)
-            or (condition is Condition.HIGH_VOLATILITY and ratio < volatility_threshold)
-            or (
-                condition is Condition.NORMAL_VOLATILITY
-                and ratio >= volatility_threshold
-            )
-        ):
-            continue
-        value = _predictors(row)[predictor.name]
-        gross = rows[future_time].close_price / row.close_price - Decimal(1)
-        direction = (
+    correlation = _correlation(x, correlation_target)
+    directional = mapping is not DirectionMapping.NOT_APPLICABLE
+    predicted: tuple[Direction, ...] = ()
+    hit: Decimal | None = None
+    up_precision: Decimal | None = None
+    down_precision: Decimal | None = None
+    benchmarks: DirectionBenchmarks | None = None
+    aligned_gross: Decimal | None = None
+    aligned_net: Decimal | None = None
+    avoided_downside: Decimal | None = None
+    if directional:
+        multiplier = Decimal(1) if mapping is DirectionMapping.POSITIVE else Decimal(-1)
+        predicted = tuple(
             Direction.UP
-            if gross > neutral
+            if (item.predictor_value - center) * multiplier > 0
             else Direction.DOWN
-            if gross < -neutral
+            if (item.predictor_value - center) * multiplier < 0
             else Direction.NEUTRAL
+            for item in values
         )
-        result.append(
-            Observation(
-                boundary, value, gross, abs(gross) - friction, direction, condition
+        comparable = tuple(
+            (prediction, item)
+            for prediction, item in zip(predicted, values, strict=True)
+            if prediction is not Direction.NEUTRAL
+            and item.direction is not Direction.NEUTRAL
+        )
+        hit = (
+            _ratio(
+                sum(prediction is item.direction for prediction, item in comparable),
+                len(comparable),
             )
+            if comparable
+            else None
         )
-    return tuple(result), missing
-
-
-def _metrics(
-    values: tuple[Observation, ...], missing: int, thresholds: EvidenceThresholds
-) -> EdgeMetrics:
-    count = len(values)
-    if not count:
-        return EdgeMetrics(
-            0,
-            missing,
-            None,
-            None,
-            None,
-            None,
-            Decimal(0),
-            Decimal(0),
-            Decimal(0),
-            Decimal(0),
-            Decimal(0),
-            Decimal(0),
-            None,
-            None,
-            EvidenceStatus.INSUFFICIENT,
-            "no usable observations",
+        up = tuple(
+            item for prediction, item in comparable if prediction is Direction.UP
         )
-    x = tuple(item.predictor_value for item in values)
-    y = tuple(item.forward_return for item in values)
-    correlation = _correlation(x, y)
-    predicted = tuple(
-        Direction.UP
-        if item.predictor_value > 0
-        else Direction.DOWN
-        if item.predictor_value < 0
-        else Direction.NEUTRAL
-        for item in values
-    )
-    nonneutral = tuple(
-        (p, item.direction)
-        for p, item in zip(predicted, values, strict=True)
-        if item.direction is not Direction.NEUTRAL
-    )
-    hit = (
-        _ratio(sum(p is actual for p, actual in nonneutral), len(nonneutral))
-        if nonneutral
-        else None
-    )
-    up = tuple(actual for p, actual in nonneutral if p is Direction.UP)
-    down = tuple(actual for p, actual in nonneutral if p is Direction.DOWN)
-    gross_mean = sum(y, Decimal(0)) / count
-    net_mean = sum((item.net_return for item in values), Decimal(0)) / count
-    std = _sample_std(y)
-    status = (
-        EvidenceStatus.INSUFFICIENT
-        if count < thresholds.minimum_observations or correlation is None
-        else EvidenceStatus.WEAK
-    )
+        down = tuple(
+            item for prediction, item in comparable if prediction is Direction.DOWN
+        )
+        up_precision = (
+            _ratio(sum(item.direction is Direction.UP for item in up), len(up))
+            if up
+            else None
+        )
+        down_precision = (
+            _ratio(sum(item.direction is Direction.DOWN for item in down), len(down))
+            if down
+            else None
+        )
+        benchmarks = _direction_benchmarks(values)
+        long_signals = tuple(
+            item.forward_gross_return
+            for prediction, item in zip(predicted, values, strict=True)
+            if prediction is Direction.UP
+        )
+        if long_signals:
+            aligned_gross = sum(long_signals, Decimal(0)) / len(long_signals)
+            aligned_net = aligned_gross - friction
+        avoided = tuple(
+            abs(item.forward_gross_return)
+            for prediction, item in zip(predicted, values, strict=True)
+            if prediction is Direction.DOWN and item.forward_gross_return < 0
+        )
+        if avoided:
+            avoided_downside = sum(avoided, Decimal(0)) / len(avoided)
+    mean_gross = sum(signed, Decimal(0)) / count
+    std = _sample_std(correlation_target)
+    insufficient = count < thresholds.minimum_observations or correlation is None
     reason = (
         f"requires at least {thresholds.minimum_observations} observations"
         if count < thresholds.minimum_observations
@@ -587,19 +642,116 @@ def _metrics(
         missing,
         correlation,
         hit,
-        _ratio(sum(v is Direction.UP for v in up), len(up)) if up else None,
-        _ratio(sum(v is Direction.DOWN for v in down), len(down)) if down else None,
+        up_precision,
+        down_precision,
         _ratio(sum(item.direction is Direction.NEUTRAL for item in values), count),
-        gross_mean,
-        median(y),
-        net_mean,
-        _ratio(sum(item.net_return > 0 for item in values), count),
-        sum((abs(v) for v in y), Decimal(0)) / count,
+        mean_gross,
+        median(signed),
+        sum(magnitude, Decimal(0)) / count,
+        sum((item.net_movement_magnitude_after_friction for item in values), Decimal(0))
+        / count,
+        _ratio(
+            sum(item.net_movement_magnitude_after_friction > 0 for item in values),
+            count,
+        ),
+        aligned_gross,
+        aligned_net,
+        avoided_downside,
         std,
         std / Decimal(str(sqrt(count))) if std is not None else None,
-        status,
+        benchmarks,
+        EvidenceStatus.INSUFFICIENT if insufficient else EvidenceStatus.WEAK,
         reason,
     )
+
+
+def _select_for_test(
+    predictor: PredictorDefinition,
+    metrics: EdgeMetrics,
+    thresholds: EvidenceThresholds,
+) -> tuple[ValidationStatus, str]:
+    if metrics.evidence_status is EvidenceStatus.INSUFFICIENT:
+        return (
+            ValidationStatus.INSUFFICIENT,
+            metrics.insufficient_reason or "insufficient evidence",
+        )
+    if predictor.semantic_kind in (
+        PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY,
+        PredictorSemanticKind.CONFIRMATION_ONLY,
+    ):
+        return (
+            ValidationStatus.NOT_DIRECTIONAL,
+            "diagnostic predictor does not select directional hypotheses",
+        )
+    assert metrics.direction_benchmarks is not None
+    if (
+        metrics.correlation is None
+        or abs(metrics.correlation) < thresholds.minimum_absolute_correlation
+    ):
+        return ValidationStatus.REJECTED, "validation correlation threshold not met"
+    if (
+        metrics.directional_hit_rate is None
+        or metrics.directional_hit_rate < thresholds.minimum_directional_hit_rate
+    ):
+        return ValidationStatus.REJECTED, "validation directional hit threshold not met"
+    if (
+        metrics.directional_hit_rate
+        < metrics.direction_benchmarks.strongest
+        + thresholds.minimum_hit_rate_improvement_over_benchmark
+    ):
+        return (
+            ValidationStatus.REJECTED,
+            "validation does not improve materially over directional benchmark",
+        )
+    if (metrics.mean_strategy_aligned_net_return or Decimal(0)) <= 0 and (
+        metrics.mean_expected_avoided_downside or Decimal(0)
+    ) <= 0:
+        return (
+            ValidationStatus.REJECTED,
+            "validation has no favorable long return or avoided downside",
+        )
+    return ValidationStatus.SELECTED, "selected by frozen validation evidence"
+
+
+def _confirm_test(
+    selected: bool,
+    predictor: PredictorDefinition,
+    metrics: EdgeMetrics,
+    thresholds: EvidenceThresholds,
+) -> TestConfirmationStatus:
+    if not selected:
+        return TestConfirmationStatus.NOT_SELECTED
+    if metrics.evidence_status is EvidenceStatus.INSUFFICIENT:
+        return TestConfirmationStatus.INSUFFICIENT
+    status, _ = _select_for_test(predictor, metrics, thresholds)
+    return (
+        TestConfirmationStatus.CONFIRMED
+        if status is ValidationStatus.SELECTED
+        else TestConfirmationStatus.REJECTED
+    )
+
+
+def _direction_benchmarks(values: tuple[Observation, ...]) -> DirectionBenchmarks:
+    comparable = tuple(
+        item for item in values if item.direction is not Direction.NEUTRAL
+    )
+    if not comparable:
+        return DirectionBenchmarks(*(Decimal(0) for _ in range(4)))
+    count = len(comparable)
+    up = _ratio(sum(item.direction is Direction.UP for item in comparable), count)
+    down = _ratio(sum(item.direction is Direction.DOWN for item in comparable), count)
+    random_hits = sum(
+        (
+            Direction.UP
+            if int(hashlib.sha256(item.boundary.isoformat().encode()).hexdigest(), 16)
+            % 2
+            else Direction.DOWN
+        )
+        is item.direction
+        for item in comparable
+    )
+    random = _ratio(random_hits, count)
+    return DirectionBenchmarks(up, down, random, max(up, down))
 
 
 def _bin_aggregates(
@@ -617,93 +769,67 @@ def _bin_aggregates(
     output: list[BinAggregate] = []
     for index, group in enumerate(groups):
         count = len(group)
-        gross = tuple(item.forward_return for item in group)
+        gross = tuple(item.forward_gross_return for item in group)
         output.append(
             BinAggregate(
-                ordinal=index + 1,
-                lower_bound=bounds[index - 1] if index else None,
-                upper_bound=bounds[index] if index < len(bounds) else None,
-                observation_count=count,
-                mean_forward_return=(
-                    sum(gross, Decimal(0)) / count if count else Decimal(0)
-                ),
-                median_forward_return=median(gross) if gross else Decimal(0),
-                up_count=sum(item.direction is Direction.UP for item in group),
-                down_count=sum(item.direction is Direction.DOWN for item in group),
-                neutral_count=sum(
-                    item.direction is Direction.NEUTRAL for item in group
-                ),
-                positive_net_ratio=(
-                    _ratio(sum(item.net_return > 0 for item in group), count)
-                    if count
-                    else Decimal(0)
-                ),
-                mean_net_return=(
-                    sum((item.net_return for item in group), Decimal(0)) / count
-                    if count
-                    else Decimal(0)
-                ),
-                evidence_status=(
-                    EvidenceStatus.WEAK
-                    if count >= thresholds.minimum_observations
-                    else EvidenceStatus.INSUFFICIENT
-                ),
-            )
-        )
-    return tuple(output)
-
-
-def _benchmarks(
-    groups: dict[timedelta, list[Observation]],
-) -> tuple[BenchmarkAggregate, ...]:
-    output: list[BenchmarkAggregate] = []
-    for horizon, values in sorted(groups.items()):
-        count = len(values)
-        mean = (
-            sum((item.forward_return for item in values), Decimal(0)) / count
-            if count
-            else Decimal(0)
-        )
-        up_hit = (
-            _ratio(sum(item.direction is Direction.UP for item in values), count)
-            if count
-            else None
-        )
-        down_hit = (
-            _ratio(sum(item.direction is Direction.DOWN for item in values), count)
-            if count
-            else None
-        )
-        random_hits = sum(
-            (
-                Direction.UP
-                if int(
-                    hashlib.sha256(item.boundary.isoformat().encode()).hexdigest(), 16
-                )
-                % 2
-                else Direction.DOWN
-            )
-            is item.direction
-            for item in values
-        )
-        output.extend(
-            (
-                BenchmarkAggregate(
-                    horizon,
-                    "deterministic_random_v1",
+                index + 1,
+                bounds[index - 1] if index else None,
+                bounds[index] if index < len(bounds) else None,
+                count,
+                sum(gross, Decimal(0)) / count if count else Decimal(0),
+                median(gross) if gross else Decimal(0),
+                sum(item.direction is Direction.UP for item in group),
+                sum(item.direction is Direction.DOWN for item in group),
+                sum(item.direction is Direction.NEUTRAL for item in group),
+                _ratio(
+                    sum(
+                        item.net_movement_magnitude_after_friction > 0 for item in group
+                    ),
                     count,
-                    _ratio(random_hits, count) if count else None,
-                    mean,
-                ),
-                BenchmarkAggregate(horizon, "always_up", count, up_hit, mean),
-                BenchmarkAggregate(horizon, "always_down", count, down_hit, mean),
-                BenchmarkAggregate(horizon, "no_signal", count, None, mean),
-                BenchmarkAggregate(
-                    horizon, "unconditional_asset_return", count, None, mean
-                ),
+                )
+                if count
+                else Decimal(0),
+                sum(
+                    (item.net_movement_magnitude_after_friction for item in group),
+                    Decimal(0),
+                )
+                / count
+                if count
+                else Decimal(0),
+                EvidenceStatus.WEAK
+                if count >= thresholds.minimum_observations
+                else EvidenceStatus.INSUFFICIENT,
             )
         )
     return tuple(output)
+
+
+def _selected_bins(
+    values: tuple[Observation, ...],
+    bounds: tuple[Decimal, ...],
+    mapping: DirectionMapping,
+    thresholds: EvidenceThresholds,
+) -> tuple[int, ...]:
+    bins = _bin_aggregates(values, bounds, thresholds)
+    minimum_bin_observations = max(
+        2, thresholds.minimum_observations // (len(bounds) + 1)
+    )
+    return tuple(
+        item.ordinal
+        for item in bins
+        if item.observation_count >= minimum_bin_observations
+        and item.mean_net_movement_magnitude_after_friction > 0
+        and (
+            (
+                mapping is DirectionMapping.POSITIVE
+                and item.mean_forward_gross_return > 0
+            )
+            or (
+                mapping is DirectionMapping.NEGATIVE
+                and item.mean_forward_gross_return < 0
+            )
+        )
+    )
 
 
 def _stability(
@@ -716,28 +842,31 @@ def _stability(
         ).append(edge)
     output: list[StabilityEdge] = []
     for (_, horizon, condition), group in groups.items():
-        sufficient = [
-            e
-            for e in group
-            if e.metrics.evidence_status is not EvidenceStatus.INSUFFICIENT
-            and e.metrics.correlation is not None
+        selected = [edge for edge in group if edge.selected_for_test]
+        confirmed = [
+            edge
+            for edge in selected
+            if edge.test_confirmation_status is TestConfirmationStatus.CONFIRMED
         ]
-        correlations = tuple(
-            e.metrics.correlation
-            for e in sufficient
-            if e.metrics.correlation is not None
+        mapping = group[0].direction_mapping
+        selected_bin_sets = [set(edge.selected_bin_ordinals) for edge in confirmed]
+        supporting_bins = tuple(
+            sorted(set.intersection(*selected_bin_sets)) if selected_bin_sets else ()
         )
-        positive = sum(v > 0 for v in correlations)
-        negative = sum(v < 0 for v in correlations)
-        dominant = max(positive, negative)
-        stable = _ratio(dominant, len(correlations)) if correlations else Decimal(0)
-        total = sum(e.metrics.usable_count for e in group)
+        same_mapping = sum(edge.direction_mapping is mapping for edge in confirmed)
+        stable = _ratio(same_mapping, len(selected)) if selected else Decimal(0)
+        correlations = tuple(
+            edge.test_metrics.correlation
+            for edge in confirmed
+            if edge.test_metrics.correlation is not None
+        )
+        total = sum(edge.test_metrics.usable_count for edge in confirmed)
         weighted = (
             sum(
                 (
-                    e.metrics.correlation * e.metrics.usable_count
-                    for e in sufficient
-                    if e.metrics.correlation is not None
+                    edge.test_metrics.correlation * edge.test_metrics.usable_count
+                    for edge in confirmed
+                    if edge.test_metrics.correlation is not None
                 ),
                 Decimal(0),
             )
@@ -745,99 +874,128 @@ def _stability(
             if total and correlations
             else None
         )
-        mean_net = (
-            sum((e.metrics.mean_net_return for e in sufficient), Decimal(0))
-            / len(sufficient)
-            if sufficient
-            else Decimal(0)
+        hits = tuple(
+            edge.test_metrics.directional_hit_rate
+            for edge in confirmed
+            if edge.test_metrics.directional_hit_rate is not None
         )
-        mean_hit_values = tuple(
-            e.metrics.directional_hit_rate
-            for e in sufficient
-            if e.metrics.directional_hit_rate is not None
+        aligned_gross = tuple(
+            edge.test_metrics.mean_strategy_aligned_gross_return
+            for edge in confirmed
+            if edge.test_metrics.mean_strategy_aligned_gross_return is not None
         )
-        classification = _classify(
-            len(sufficient),
-            total,
-            stable,
-            weighted,
-            mean_hit_values,
-            mean_net,
-            thresholds,
+        aligned_net = tuple(
+            edge.test_metrics.mean_strategy_aligned_net_return
+            for edge in confirmed
+            if edge.test_metrics.mean_strategy_aligned_net_return is not None
+        )
+        avoided = tuple(
+            edge.test_metrics.mean_expected_avoided_downside
+            for edge in confirmed
+            if edge.test_metrics.mean_expected_avoided_downside is not None
+        )
+        classification = _classify_stability(
+            group[0].predictor, selected, confirmed, stable, weighted, thresholds
         )
         output.append(
             StabilityEdge(
                 group[0].predictor,
                 horizon,
                 condition,
+                mapping,
+                supporting_bins,
                 len(group),
-                len(sufficient),
-                positive,
-                negative,
+                len(selected),
+                len(confirmed),
                 stable,
                 weighted,
                 median(correlations) if correlations else None,
-                min(correlations, key=abs) if correlations else None,
-                sum(mean_hit_values, Decimal(0)) / len(mean_hit_values)
-                if mean_hit_values
-                else None,
-                sum((e.metrics.positive_net_ratio for e in sufficient), Decimal(0))
-                / len(sufficient)
-                if sufficient
+                min(correlations) if correlations else None,
+                sum(hits, Decimal(0)) / len(hits) if hits else None,
+                sum(
+                    (
+                        edge.test_metrics.positive_movement_after_friction_ratio
+                        for edge in confirmed
+                    ),
+                    Decimal(0),
+                )
+                / len(confirmed)
+                if confirmed
                 else Decimal(0),
-                mean_net,
+                sum(
+                    (
+                        edge.test_metrics.mean_net_movement_magnitude_after_friction
+                        for edge in confirmed
+                    ),
+                    Decimal(0),
+                )
+                / len(confirmed)
+                if confirmed
+                else Decimal(0),
+                sum(aligned_gross, Decimal(0)) / len(aligned_gross)
+                if aligned_gross
+                else None,
+                sum(aligned_net, Decimal(0)) / len(aligned_net)
+                if aligned_net
+                else None,
+                sum(avoided, Decimal(0)) / len(avoided) if avoided else None,
                 _sample_std(correlations),
                 total,
                 classification,
             )
         )
     return tuple(
-        sorted(output, key=lambda e: (e.predictor.name, e.horizon, e.condition.value))
+        sorted(
+            output,
+            key=lambda edge: (edge.predictor.name, edge.horizon, edge.condition.value),
+        )
     )
 
 
-def _classify(
-    windows: int,
-    observations: int,
+def _classify_stability(
+    predictor: PredictorDefinition,
+    selected: list[WindowEdge],
+    confirmed: list[WindowEdge],
     stable: Decimal,
     correlation: Decimal | None,
-    hits: tuple[Decimal, ...],
-    net: Decimal,
     thresholds: EvidenceThresholds,
 ) -> EvidenceStatus:
-    if (
-        windows < thresholds.minimum_windows
-        or observations < thresholds.minimum_observations
+    if predictor.semantic_kind in (
+        PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY,
+        PredictorSemanticKind.CONFIRMATION_ONLY,
     ):
+        return EvidenceStatus.WEAK if confirmed else EvidenceStatus.NONE
+    if len(selected) < thresholds.minimum_windows:
         return EvidenceStatus.INSUFFICIENT
-    if stable < thresholds.minimum_stable_direction_ratio:
-        return EvidenceStatus.UNSTABLE
-    hit = sum(hits, Decimal(0)) / len(hits) if hits else Decimal(0)
     if (
-        correlation is not None
-        and abs(correlation) >= thresholds.minimum_absolute_correlation
-        and hit >= thresholds.minimum_directional_hit_rate
-        and net > 0
+        len(confirmed) < thresholds.minimum_windows
+        or stable < thresholds.minimum_stable_direction_ratio
     ):
-        return (
-            EvidenceStatus.PROMISING_POSITIVE
-            if correlation > 0
-            else EvidenceStatus.PROMISING_NEGATIVE
-        )
-    if correlation is None or abs(correlation) < Decimal("0.02"):
+        return EvidenceStatus.UNSTABLE
+    if (
+        correlation is None
+        or abs(correlation) < thresholds.minimum_absolute_correlation
+    ):
         return EvidenceStatus.NONE
-    return EvidenceStatus.WEAK
+    return (
+        EvidenceStatus.PROMISING_POSITIVE
+        if correlation > 0
+        else EvidenceStatus.PROMISING_NEGATIVE
+    )
 
 
 def _hypothesis(
     edge: StabilityEdge, ordinals: tuple[int, ...], cadence: timedelta
 ) -> StrategyHypothesis:
+    positive = edge.classification is EvidenceStatus.PROMISING_POSITIVE
     key = _fingerprint(
         (
             edge.predictor.name,
             edge.predictor.version,
             edge.horizon.total_seconds(),
             edge.condition.value,
+            edge.direction_mapping.value,
+            edge.supporting_bin_ordinals,
             edge.classification.value,
         )
     )
@@ -845,13 +1003,13 @@ def _hypothesis(
         key,
         edge.predictor.name,
         edge.predictor.version,
-        "long-positive"
-        if edge.classification is EvidenceStatus.PROMISING_POSITIVE
-        else "exit/avoid-negative",
+        "long-positive" if positive else "exit/avoid-negative",
         edge.horizon,
         edge.condition,
-        edge.mean_net_return,
-        edge.mean_net_return,
+        edge.supporting_bin_ordinals,
+        edge.mean_strategy_aligned_gross_return if positive else None,
+        edge.mean_strategy_aligned_net_return if positive else None,
+        None if positive else edge.mean_expected_avoided_downside,
         edge.mean_directional_hit_rate,
         edge.stable_direction_ratio,
         min(cadence, edge.horizon),
@@ -859,11 +1017,36 @@ def _hypothesis(
         edge.horizon,
         ordinals,
         edge.classification,
-        f"{edge.predictor.name} shows repeatable {edge.classification.value} "
-        f"evidence at {edge.horizon} under {edge.condition.value}.",
+        f"Validation selected {edge.predictor.name}; isolated test confirmed the "
+        f"frozen {edge.direction_mapping.value} mapping at {edge.horizon} under "
+        f"{edge.condition.value}.",
         "Historical correlation is not causality or a guarantee of profitability; "
-        "no entry threshold or position size is implied.",
+        "no entry threshold, short position, or position size is implied.",
     )
+
+
+def _benchmarks(
+    groups: dict[timedelta, list[Observation]],
+) -> tuple[BenchmarkAggregate, ...]:
+    output: list[BenchmarkAggregate] = []
+    for horizon, values in sorted(groups.items()):
+        count = len(values)
+        mean = (
+            sum((item.forward_gross_return for item in values), Decimal(0)) / count
+            if count
+            else Decimal(0)
+        )
+        benchmarks = _direction_benchmarks(tuple(values))
+        for name, hit in (
+            ("always_up", benchmarks.always_up),
+            ("always_down", benchmarks.always_down),
+            ("deterministic_random_v1", benchmarks.deterministic_random),
+            ("observed_majority", benchmarks.observed_majority),
+            ("no_signal", None),
+            ("unconditional_asset_return", None),
+        ):
+            output.append(BenchmarkAggregate(horizon, name, count, hit, mean))
+    return tuple(output)
 
 
 def _quantile_bounds(values: tuple[Decimal, ...], bins: int) -> tuple[Decimal, ...]:
@@ -886,24 +1069,25 @@ def _quantile(values: tuple[Decimal, ...], q: Decimal) -> Decimal:
 def _correlation(x: tuple[Decimal, ...], y: tuple[Decimal, ...]) -> Decimal | None:
     if len(x) < 2:
         return None
-    mx = sum(x, Decimal(0)) / len(x)
-    my = sum(y, Decimal(0)) / len(y)
+    mean_x = sum(x, Decimal(0)) / len(x)
+    mean_y = sum(y, Decimal(0)) / len(y)
     numerator = sum(
-        ((a - mx) * (b - my) for a, b in zip(x, y, strict=True)), Decimal(0)
+        ((a - mean_x) * (b - mean_y) for a, b in zip(x, y, strict=True)), Decimal(0)
     )
-    dx = sum(((a - mx) ** 2 for a in x), Decimal(0))
-    dy = sum(((b - my) ** 2 for b in y), Decimal(0))
-    if dx == 0 or dy == 0:
+    x_variance = sum(((a - mean_x) ** 2 for a in x), Decimal(0))
+    y_variance = sum(((b - mean_y) ** 2 for b in y), Decimal(0))
+    if x_variance == 0 or y_variance == 0:
         return None
-    return numerator / (dx * dy).sqrt()
+    return numerator / (x_variance * y_variance).sqrt()
 
 
 def _sample_std(values: tuple[Decimal, ...]) -> Decimal | None:
     if len(values) < 2:
         return None
-    mean = sum(values, Decimal(0)) / len(values)
+    mean_value = sum(values, Decimal(0)) / len(values)
     return (
-        sum(((value - mean) ** 2 for value in values), Decimal(0)) / (len(values) - 1)
+        sum(((value - mean_value) ** 2 for value in values), Decimal(0))
+        / (len(values) - 1)
     ).sqrt()
 
 

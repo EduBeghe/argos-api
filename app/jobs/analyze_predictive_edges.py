@@ -80,10 +80,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def run(args: argparse.Namespace) -> None:
+async def run(
+    args: argparse.Namespace, *, now: datetime | None = None
+) -> PredictiveEdgeExecution:
     settings = get_settings()
     configure_logging(settings.log_level)
-    started_at = datetime.now(UTC)
+    started_at = now or datetime.now(UTC)
     clock = perf_counter()
     definition = resolve_instrument(
         asset=args.asset,
@@ -131,7 +133,11 @@ async def run(args: argparse.Namespace) -> None:
                 fee_rate=args.fee_rate,
                 slippage_rate=args.slippage_rate,
             )
-            execution = await find_reusable_predictive_edge_run(session, key)
+            execution = (
+                await find_reusable_predictive_edge_run(session, key)
+                if args.persist
+                else None
+            )
             if execution is None:
                 result = analyze_predictive_edges(
                     matrix=matrix,
@@ -154,6 +160,10 @@ async def run(args: argparse.Namespace) -> None:
                         started_at=started_at,
                     )
                 else:
+                    if session.new or session.dirty or session.deleted:
+                        raise RuntimeError(
+                            "non-persisted predictive-edge analysis mutated the session"
+                        )
                     execution = PredictiveEdgeExecution(None, False, result, 0, 0)
             if execution is None:
                 raise RuntimeError("predictive-edge execution was not initialized")
@@ -210,6 +220,7 @@ async def run(args: argparse.Namespace) -> None:
             }
         },
     )
+    return execution
 
 
 def main(argv: Sequence[str] | None = None) -> None:

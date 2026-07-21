@@ -380,9 +380,14 @@ python -m app.jobs.analyze_predictive_edges \
   --fee-rate 0.001 --slippage-rate 0.0005 --persist
 ```
 
-Training alone defines bins and volatility thresholds; isolated test targets and
-round-trip friction drive the conclusions. The command reuses identical completed
-experiments and never creates executable Strategies or mutates Paper Trading. See
+Training defines centers, direction mappings, bins, and volatility thresholds.
+Validation selects candidate relationships and freezes their direction and ranges;
+isolated test evidence can only confirm or reject those selections. Directional
+accuracy must improve on always-up, always-down, deterministic-random, and observed
+majority baselines. Signed gross return, long-aligned net return, avoided downside, and
+net movement magnitude after friction remain distinct. Without `--persist`, the job is
+strictly read-only and does not record reuse. The command never creates executable
+Strategies or mutates Paper Trading. See
 [`docs/009-predictive-edge-map.md`](docs/009-predictive-edge-map.md).
 
 ## Historical optimization memory API
@@ -734,4 +739,3 @@ python -m app.jobs.reset_paper_account --initial-cash 10000 --reason "baseline b
 ```
 
 The command parses money as `Decimal`, stops the active experiment, and creates a fresh linked run in one transaction. Stopping a run does not liquidate it: open Positions retain their quantity and entry state, and no synthetic Trade is created. Historical runs are queryable through `GET /paper/runs` and `GET /paper/runs/{run_id}`; positions and trades accept an optional `run_id`. Reset remains CLI-only until authenticated mutation endpoints exist, and a future authenticated frontend action must reuse this use case.
-

@@ -72,7 +72,7 @@ async def find_reusable_predictive_edge_run(
     record = await session.scalar(
         select(PredictiveEdgeRunRecord).where(
             PredictiveEdgeRunRecord.experiment_key == experiment_key,
-            PredictiveEdgeRunRecord.status == "completed",
+            PredictiveEdgeRunRecord.status.in_(("completed", "insufficient_history")),
         )
     )
     if record is None:
@@ -114,7 +114,7 @@ async def persist_predictive_edge_result(
     run = PredictiveEdgeRunRecord(
         id=run_id,
         experiment_key=experiment_key,
-        status="completed",
+        status=result.conclusion.value,
         asset=instrument.asset.value,
         provider=instrument.provider.value,
         market_type=instrument.market_type.value,
@@ -140,6 +140,12 @@ async def persist_predictive_edge_result(
         minimum_stable_direction_ratio=configuration.thresholds.minimum_stable_direction_ratio,
         minimum_absolute_correlation=configuration.thresholds.minimum_absolute_correlation,
         minimum_directional_hit_rate=configuration.thresholds.minimum_directional_hit_rate,
+        minimum_hit_rate_improvement_over_benchmark=(
+            configuration.thresholds.minimum_hit_rate_improvement_over_benchmark
+        ),
+        windows_available=result.windows_available,
+        windows_required=result.windows_required,
+        conclusion_reason=result.reason,
         windows_generated=len(windows),
         aggregate_metrics_computed=len(result.window_edges),
         metrics_reused=0,
@@ -179,26 +185,44 @@ async def persist_predictive_edge_result(
                 predictor_name=stability_edge.predictor.name,
                 predictor_version=stability_edge.predictor.version,
                 predictor_source=stability_edge.predictor.source,
+                semantic_kind=stability_edge.predictor.semantic_kind.value,
                 direction_convention=stability_edge.predictor.direction_convention,
                 explanation=stability_edge.predictor.explanation,
                 horizon_seconds=int(stability_edge.horizon.total_seconds()),
                 condition=stability_edge.condition.value,
+                direction_mapping=stability_edge.direction_mapping.value,
+                supporting_bin_ordinals=list(stability_edge.supporting_bin_ordinals),
                 windows_evaluated=stability_edge.windows_evaluated,
-                sufficient_windows=stability_edge.sufficient_windows,
+                windows_selected_for_test=stability_edge.windows_selected_for_test,
+                windows_confirmed=stability_edge.windows_confirmed,
                 total_usable_observations=stability_edge.total_usable_observations,
                 stable_direction_ratio=stability_edge.stable_direction_ratio,
                 weighted_mean_correlation=stability_edge.weighted_mean_correlation,
                 median_correlation=stability_edge.median_correlation,
                 worst_correlation=stability_edge.worst_correlation,
                 mean_directional_hit_rate=stability_edge.mean_directional_hit_rate,
-                mean_positive_net_ratio=stability_edge.mean_positive_net_ratio,
-                mean_net_return=stability_edge.mean_net_return,
+                mean_movement_after_friction_ratio=(
+                    stability_edge.mean_movement_after_friction_ratio
+                ),
+                mean_net_movement_magnitude_after_friction=(
+                    stability_edge.mean_net_movement_magnitude_after_friction
+                ),
+                mean_strategy_aligned_gross_return=(
+                    stability_edge.mean_strategy_aligned_gross_return
+                ),
+                mean_strategy_aligned_net_return=(
+                    stability_edge.mean_strategy_aligned_net_return
+                ),
+                mean_expected_avoided_downside=(
+                    stability_edge.mean_expected_avoided_downside
+                ),
                 correlation_dispersion=stability_edge.correlation_dispersion,
                 classification=stability_edge.classification.value,
             )
         )
     for edge in result.window_edges:
-        metrics = edge.metrics
+        validation = edge.validation_metrics
+        test = edge.test_metrics
         metric_id = uuid4()
         session.add(
             PredictiveEdgeWindowMetricRecord(
@@ -206,18 +230,45 @@ async def persist_predictive_edge_result(
                 run_id=run_id,
                 window_id=window_ids[edge.window_ordinal],
                 predictor_name=edge.predictor.name,
+                semantic_kind=edge.predictor.semantic_kind.value,
                 horizon_seconds=int(edge.horizon.total_seconds()),
                 condition=edge.condition.value,
-                usable_count=metrics.usable_count,
-                missing_count=metrics.missing_count,
-                correlation=metrics.correlation,
-                directional_hit_rate=metrics.directional_hit_rate,
-                mean_gross_return=metrics.mean_gross_return,
-                mean_net_return=metrics.mean_net_return,
-                positive_net_ratio=metrics.positive_net_ratio,
-                standard_error=metrics.standard_error,
-                evidence_status=metrics.evidence_status.value,
-                insufficient_reason=metrics.insufficient_reason,
+                training_center=edge.training_center,
+                direction_mapping=edge.direction_mapping.value,
+                validation_status=edge.validation_status.value,
+                validation_direction=edge.validation_direction.value,
+                validation_usable_count=validation.usable_count,
+                validation_correlation=validation.correlation,
+                validation_directional_hit_rate=validation.directional_hit_rate,
+                validation_mean_strategy_aligned_net_return=(
+                    validation.mean_strategy_aligned_net_return
+                ),
+                selected_for_test=edge.selected_for_test,
+                selection_reason=edge.selection_reason,
+                selected_bin_ordinals=list(edge.selected_bin_ordinals),
+                test_confirmation_status=edge.test_confirmation_status.value,
+                test_usable_count=test.usable_count,
+                test_missing_count=test.missing_count,
+                test_correlation=test.correlation,
+                test_directional_hit_rate=test.directional_hit_rate,
+                mean_forward_gross_return=test.mean_forward_gross_return,
+                mean_absolute_movement=test.mean_absolute_movement,
+                mean_net_movement_magnitude_after_friction=(
+                    test.mean_net_movement_magnitude_after_friction
+                ),
+                positive_movement_after_friction_ratio=(
+                    test.positive_movement_after_friction_ratio
+                ),
+                mean_strategy_aligned_gross_return=(
+                    test.mean_strategy_aligned_gross_return
+                ),
+                mean_strategy_aligned_net_return=(
+                    test.mean_strategy_aligned_net_return
+                ),
+                mean_expected_avoided_downside=test.mean_expected_avoided_downside,
+                test_standard_error=test.standard_error,
+                test_evidence_status=test.evidence_status.value,
+                test_insufficient_reason=test.insufficient_reason,
                 training_bin_bounds=",".join(
                     str(value) for value in edge.training_bin_bounds
                 ),
@@ -234,29 +285,46 @@ async def persist_predictive_edge_result(
                     lower_bound=bin_value.lower_bound,
                     upper_bound=bin_value.upper_bound,
                     observation_count=bin_value.observation_count,
-                    mean_forward_return=bin_value.mean_forward_return,
-                    median_forward_return=bin_value.median_forward_return,
+                    mean_forward_gross_return=bin_value.mean_forward_gross_return,
+                    median_forward_gross_return=bin_value.median_forward_gross_return,
                     up_count=bin_value.up_count,
                     down_count=bin_value.down_count,
                     neutral_count=bin_value.neutral_count,
-                    positive_net_ratio=bin_value.positive_net_ratio,
-                    mean_net_return=bin_value.mean_net_return,
+                    positive_movement_after_friction_ratio=(
+                        bin_value.positive_movement_after_friction_ratio
+                    ),
+                    mean_net_movement_magnitude_after_friction=(
+                        bin_value.mean_net_movement_magnitude_after_friction
+                    ),
                     evidence_status=bin_value.evidence_status.value,
                 )
             )
     for value in result.hypotheses:
+        hypothesis_id = hashlib.sha256(
+            "|".join(
+                (
+                    instrument.asset.value,
+                    instrument.provider.value,
+                    instrument.market_type.value,
+                    instrument.interval.value,
+                    value.hypothesis_id,
+                )
+            ).encode()
+        ).hexdigest()
         session.add(
             StrategyHypothesisRecord(
                 id=uuid4(),
-                hypothesis_id=value.hypothesis_id,
+                hypothesis_id=hypothesis_id,
                 run_id=run_id,
                 predictor_name=value.predictor_name,
                 predictor_version=value.predictor_version,
                 direction=value.direction,
                 horizon_seconds=int(value.horizon.total_seconds()),
                 condition=value.condition.value,
+                supporting_bin_ordinals=list(value.supporting_bin_ordinals),
                 expected_gross_return=value.expected_gross_return,
                 expected_net_return=value.expected_net_return,
+                expected_avoided_loss=value.expected_avoided_loss,
                 directional_hit_rate=value.directional_hit_rate,
                 stability_ratio=value.stability_ratio,
                 evaluation_interval_seconds=int(
@@ -282,7 +350,7 @@ async def persist_predictive_edge_result(
                 benchmark=benchmark.benchmark,
                 observation_count=benchmark.observation_count,
                 directional_hit_rate=benchmark.directional_hit_rate,
-                mean_return=benchmark.mean_return,
+                mean_forward_gross_return=benchmark.mean_forward_gross_return,
             )
         )
     await session.commit()

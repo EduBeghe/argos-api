@@ -8,16 +8,27 @@ from app.optimization.feature_matrix import (
     HistoricalFeatureRow,
 )
 from app.optimization.predictive_edges import (
+    PREDICTORS,
     Condition,
     Direction,
+    DirectionMapping,
     EvidenceStatus,
     EvidenceThresholds,
+    Observation,
+    PredictiveEdgeConclusion,
     PredictiveEdgeConfiguration,
     PredictiveEdgeError,
+    PredictorSemanticKind,
+    ValidationStatus,
+    _confirm_test,
     _correlation,
     _metrics,
     _quantile_bounds,
+    _select_for_test,
     analyze_predictive_edges,
+)
+from app.optimization.predictive_edges import (
+    TestConfirmationStatus as ConfirmationStatus,
 )
 from app.optimization.walk_forward import WalkForwardConfiguration, WalkForwardWindow
 from app.paper.config import SimulationConfiguration
@@ -130,10 +141,13 @@ def test_targets_are_exact_bounded_and_include_round_trip_friction() -> None:
         if item.predictor.name == "overall_score"
         and item.horizon == timedelta(minutes=30)
     )
-    assert edge.metrics.usable_count == 47
-    assert edge.metrics.missing_count == 1
-    assert edge.metrics.mean_net_return < edge.metrics.average_absolute_movement
-    assert edge.metrics.neutral_rate >= 0
+    assert edge.test_metrics.usable_count == 47
+    assert edge.test_metrics.missing_count == 1
+    assert (
+        edge.test_metrics.mean_net_movement_magnitude_after_friction
+        < edge.test_metrics.mean_absolute_movement
+    )
+    assert edge.test_metrics.neutral_rate >= 0
 
 
 def test_future_mutation_does_not_change_prior_window_evidence() -> None:
@@ -158,7 +172,15 @@ def test_future_mutation_does_not_change_prior_window_evidence() -> None:
 
 
 def test_insufficient_observations_are_not_replaced_with_zero_correlation() -> None:
-    metrics = _metrics((), 3, EvidenceThresholds())
+    metrics = _metrics(
+        (),
+        3,
+        predictor=next(item for item in PREDICTORS if item.name == "overall_score"),
+        center=Decimal(0),
+        mapping=DirectionMapping.POSITIVE,
+        friction=Decimal("0.003"),
+        thresholds=EvidenceThresholds(),
+    )
     assert metrics.evidence_status is EvidenceStatus.INSUFFICIENT
     assert metrics.correlation is None
     assert metrics.insufficient_reason == "no usable observations"
@@ -166,3 +188,151 @@ def test_insufficient_observations_are_not_replaced_with_zero_correlation() -> N
 
 def test_direction_vocabulary_is_explicit() -> None:
     assert tuple(Direction) == (Direction.UP, Direction.DOWN, Direction.NEUTRAL)
+
+
+def _observation(
+    index: int, predictor: str, gross: str, *, friction: Decimal = Decimal("0.003")
+) -> Observation:
+    return Observation(
+        datetime(2025, 1, 1, tzinfo=UTC) + timedelta(minutes=30 * index),
+        Decimal(predictor),
+        Decimal(gross),
+        abs(Decimal(gross)),
+        max(abs(Decimal(gross)) - friction, Decimal(0)),
+        Direction.UP if Decimal(gross) > 0 else Direction.DOWN,
+    )
+
+
+def test_training_center_prevents_positive_only_rsi_from_becoming_always_up() -> None:
+    predictor = next(item for item in PREDICTORS if item.name == "rsi_14")
+    values = tuple(
+        _observation(index, str(value), gross)
+        for index, (value, gross) in enumerate(
+            ((40, "-0.02"), (45, "-0.01"), (55, "0.01"), (60, "0.02"))
+        )
+    )
+    metrics = _metrics(
+        values,
+        0,
+        predictor=predictor,
+        center=Decimal(50),
+        mapping=DirectionMapping.POSITIVE,
+        friction=Decimal("0.003"),
+        thresholds=EvidenceThresholds(minimum_observations=2),
+    )
+    assert metrics.directional_hit_rate == Decimal(1)
+    assert metrics.up_precision == Decimal(1)
+    assert metrics.down_precision == Decimal(1)
+    assert metrics.direction_benchmarks is not None
+    assert metrics.direction_benchmarks.always_up == Decimal("0.5")
+
+
+@pytest.mark.parametrize("name", ("atr_14_relative", "relative_volume_20"))
+def test_magnitude_predictors_do_not_fabricate_directional_accuracy(name: str) -> None:
+    predictor = next(item for item in PREDICTORS if item.name == name)
+    assert predictor.semantic_kind is PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY
+    metrics = _metrics(
+        (
+            _observation(0, "1", "0.01"),
+            _observation(1, "2", "-0.03"),
+            _observation(2, "3", "0.05"),
+        ),
+        0,
+        predictor=predictor,
+        center=Decimal(0),
+        mapping=DirectionMapping.NOT_APPLICABLE,
+        friction=Decimal("0.003"),
+        thresholds=EvidenceThresholds(minimum_observations=2),
+    )
+    assert metrics.correlation is not None
+    assert metrics.directional_hit_rate is None
+    assert metrics.direction_benchmarks is None
+    assert metrics.mean_strategy_aligned_net_return is None
+
+
+def test_strategy_return_movement_and_avoided_downside_are_distinct() -> None:
+    predictor = next(item for item in PREDICTORS if item.name == "return_1")
+    metrics = _metrics(
+        (
+            _observation(0, "1", "0.010"),
+            _observation(1, "-1", "-0.100"),
+        ),
+        0,
+        predictor=predictor,
+        center=Decimal(0),
+        mapping=DirectionMapping.POSITIVE,
+        friction=Decimal("0.003"),
+        thresholds=EvidenceThresholds(minimum_observations=2),
+    )
+    assert metrics.mean_strategy_aligned_gross_return == Decimal("0.010")
+    assert metrics.mean_strategy_aligned_net_return == Decimal("0.007")
+    assert metrics.mean_expected_avoided_downside == Decimal("0.100")
+    assert metrics.mean_forward_gross_return == Decimal("-0.045")
+    assert metrics.mean_net_movement_magnitude_after_friction == Decimal("0.052")
+
+
+def test_validation_selection_is_required_before_test_confirmation() -> None:
+    predictor = next(item for item in PREDICTORS if item.name == "return_1")
+    values = tuple(
+        _observation(
+            index, "1" if index % 2 else "-1", "0.02" if index % 2 else "-0.02"
+        )
+        for index in range(20)
+    )
+    thresholds = EvidenceThresholds(
+        minimum_observations=10,
+        minimum_absolute_correlation=Decimal("0.1"),
+        minimum_directional_hit_rate=Decimal("0.6"),
+        minimum_hit_rate_improvement_over_benchmark=Decimal("0.1"),
+    )
+    metrics = _metrics(
+        values,
+        0,
+        predictor=predictor,
+        center=Decimal(0),
+        mapping=DirectionMapping.POSITIVE,
+        friction=Decimal("0.003"),
+        thresholds=thresholds,
+    )
+    status, _ = _select_for_test(predictor, metrics, thresholds)
+    assert status is ValidationStatus.SELECTED
+    assert (
+        _confirm_test(False, predictor, metrics, thresholds)
+        is ConfirmationStatus.NOT_SELECTED
+    )
+    contradictory = tuple(
+        _observation(
+            index, "1" if index % 2 else "-1", "-0.02" if index % 2 else "0.02"
+        )
+        for index in range(20)
+    )
+    contradiction_metrics = _metrics(
+        contradictory,
+        0,
+        predictor=predictor,
+        center=Decimal(0),
+        mapping=DirectionMapping.POSITIVE,
+        friction=Decimal("0.003"),
+        thresholds=thresholds,
+    )
+    assert (
+        _confirm_test(True, predictor, contradiction_metrics, thresholds)
+        is ConfirmationStatus.REJECTED
+    )
+
+
+def test_insufficient_history_is_explicit_and_has_no_hypotheses() -> None:
+    configuration = PredictiveEdgeConfiguration(
+        horizons=(timedelta(minutes=30),),
+        thresholds=EvidenceThresholds(minimum_windows=2),
+    )
+    result = analyze_predictive_edges(
+        matrix=_matrix(),
+        windows=(_window(),),
+        simulation=SimulationConfiguration(),
+        configuration=configuration,
+    )
+    assert result.conclusion is PredictiveEdgeConclusion.INSUFFICIENT_HISTORY
+    assert result.windows_available == 1
+    assert result.windows_required == 2
+    assert result.hypotheses == ()
