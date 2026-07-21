@@ -1,23 +1,51 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import pytest
+
+import app.optimization.edge_guided as edge_guided_module
 from app.jobs.analyze_predictive_edges import build_parser
+from app.market.catalog import Instrument
+from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.edge_guided import (
     EdgeGuidedCandidate,
+    EdgeGuidedCandidateStatus,
+    EdgeGuidedEvaluationResult,
+    EdgeGuidedSegmentEvaluation,
     apply_edge_guided_action,
+    edge_guided_summary,
+    evaluate_edge_guided_candidates,
     generate_edge_guided_candidates,
 )
-from app.optimization.feature_matrix import HistoricalFeatureRow
+from app.optimization.feature_matrix import (
+    HistoricalFeatureMatrix,
+    HistoricalFeatureRow,
+)
+from app.optimization.historical_data import (
+    HistoricalDataset,
+    HistoricalDatasetIdentity,
+    HistoricalDatasetRange,
+)
 from app.optimization.predictive_edges import (
     Condition,
     DirectionMapping,
     EvidenceStatus,
+    EvidenceThresholds,
     StrategyHypothesis,
     SuggestedAction,
 )
+from app.optimization.refinement import RefinementSegmentName
+from app.optimization.walk_forward import WalkForwardWindow
 from app.paper.config import SimulationConfiguration
 from app.strategies.baseline_long_only import StrategyAction
+
+START = datetime(2026, 1, 1, tzinfo=UTC)
+INSTRUMENT = Instrument(
+    Asset.BTC_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
+)
 
 
 def hypothesis(
@@ -27,6 +55,7 @@ def hypothesis(
     lower: Decimal | None = Decimal("-0.02"),
     upper: Decimal | None = Decimal("-0.01"),
     horizon: timedelta = timedelta(minutes=30),
+    condition: Condition = Condition.ALL,
 ) -> StrategyHypothesis:
     return StrategyHypothesis(
         identifier,
@@ -39,7 +68,7 @@ def hypothesis(
         upper,
         action,
         horizon,
-        Condition.ALL,
+        condition,
         (1,),
         Decimal("0.01") if action is SuggestedAction.LONG_ENTRY else None,
         Decimal("0.007") if action is SuggestedAction.LONG_ENTRY else None,
@@ -58,14 +87,20 @@ def hypothesis(
     )
 
 
-def row(return_1: str) -> HistoricalFeatureRow:
+def row(
+    return_1: str,
+    *,
+    ema_20: str = "99",
+    ema_50: str = "98",
+    atr_14: str = "2",
+) -> HistoricalFeatureRow:
     return HistoricalFeatureRow(
         datetime(2026, 1, 1, tzinfo=UTC),
         Decimal("100"),
-        Decimal("99"),
-        Decimal("98"),
+        Decimal(ema_20),
+        Decimal(ema_50),
         Decimal("50"),
-        Decimal("2"),
+        Decimal(atr_14),
         Decimal(return_1),
         Decimal("0"),
         Decimal("1"),
@@ -85,6 +120,106 @@ def candidates(
             fee_rate=fee_rate, slippage_rate=slippage_rate
         ),
         maximum_candidates=maximum,
+    )
+
+
+def evaluation_evidence(
+    *, windows: int = 2
+) -> tuple[HistoricalDataset, HistoricalFeatureMatrix, tuple[WalkForwardWindow, ...]]:
+    rows: list[HistoricalFeatureRow] = []
+    configured_windows: list[WalkForwardWindow] = []
+    for ordinal in range(1, windows + 1):
+        start = START + timedelta(hours=4 * (ordinal - 1))
+        for index in range(36):
+            at = start + timedelta(minutes=5 * index)
+            rows.append(replace(row("-0.015"), candle_open_time=at))
+        configured_windows.append(
+            WalkForwardWindow(
+                ordinal,
+                start,
+                start + timedelta(minutes=60),
+                start + timedelta(minutes=60),
+                start + timedelta(minutes=120),
+                start + timedelta(minutes=120),
+                start + timedelta(minutes=180),
+                1,
+                f"dataset-{ordinal}",
+                f"selection-{ordinal}",
+            )
+        )
+    end = START + timedelta(hours=4 * windows)
+    dataset = HistoricalDataset(
+        HistoricalDatasetIdentity(INSTRUMENT, HistoricalDatasetRange(START, end)),
+        len(rows),
+        len(rows),
+        rows[0].candle_open_time,
+        rows[-1].candle_open_time,
+        0,
+        None,
+        None,
+        (),
+        "fingerprint",
+    )
+    return (
+        dataset,
+        HistoricalFeatureMatrix("fingerprint", tuple(rows)),
+        tuple(configured_windows),
+    )
+
+
+def segment_result(
+    segment: RefinementSegmentName, difference: Decimal
+) -> EdgeGuidedSegmentEvaluation:
+    return EdgeGuidedSegmentEvaluation(
+        segment,
+        Decimal("0.01") + difference,
+        Decimal("0.02"),
+        2,
+        Decimal("1.25"),
+        difference,
+        Decimal("0.005"),
+    )
+
+
+def evaluate_with_differences(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    validation: tuple[Decimal, ...],
+    test: tuple[Decimal, ...],
+) -> EdgeGuidedEvaluationResult:
+    dataset, matrix, windows = evaluation_evidence(windows=len(validation))
+    validation_index = 0
+    test_index = 0
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        nonlocal validation_index, test_index
+        segment = args[2]
+        assert isinstance(segment, RefinementSegmentName)
+        if segment is RefinementSegmentName.VALIDATION:
+            value = validation[validation_index]
+            validation_index += 1
+        elif segment is RefinementSegmentName.TEST:
+            value = test[test_index]
+            test_index += 1
+        else:
+            value = Decimal(0)
+        return segment_result(segment, value)
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    return evaluate_edge_guided_candidates(
+        dataset=dataset,
+        feature_matrix=matrix,
+        hypotheses=(hypothesis(),),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        windows=windows,
+        thresholds=EvidenceThresholds(
+            minimum_observations=1,
+            minimum_windows=len(windows),
+            minimum_stable_direction_ratio=Decimal("0.60"),
+        ),
     )
 
 
@@ -110,14 +245,15 @@ def test_diagnostic_or_unconfirmed_evidence_produces_no_candidate() -> None:
     assert candidates(()) == ()
 
 
-def test_long_entry_only_opens_inside_the_confirmed_bin() -> None:
+def test_long_entry_applies_only_inside_bin_and_preserves_baseline_outside() -> None:
     candidate = candidates((hypothesis(),))[0]
     assert (
         apply_edge_guided_action(
             candidate=candidate,
             row=row("-0.015"),
             position_is_open=False,
-            baseline_action=StrategyAction.OPEN_POSITION,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
         )
         is StrategyAction.OPEN_POSITION
     )
@@ -126,9 +262,20 @@ def test_long_entry_only_opens_inside_the_confirmed_bin() -> None:
             candidate=candidate,
             row=row("0.01"),
             position_is_open=False,
-            baseline_action=StrategyAction.OPEN_POSITION,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
         )
         is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=row("0.01"),
+            position_is_open=False,
+            baseline_action=StrategyAction.OPEN_POSITION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.OPEN_POSITION
     )
 
 
@@ -144,7 +291,8 @@ def test_exit_or_avoid_never_creates_a_short_position() -> None:
             candidate=candidate,
             row=row("0.015"),
             position_is_open=False,
-            baseline_action=StrategyAction.OPEN_POSITION,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
         )
         is StrategyAction.NO_ACTION
     )
@@ -154,6 +302,7 @@ def test_exit_or_avoid_never_creates_a_short_position() -> None:
             row=row("0.015"),
             position_is_open=True,
             baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
         )
         is StrategyAction.SELL_ALL
     )
@@ -162,9 +311,38 @@ def test_exit_or_avoid_never_creates_a_short_position() -> None:
             candidate=candidate,
             row=row("0.015"),
             position_is_open=False,
-            baseline_action=StrategyAction.OPEN_POSITION,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
         )
     }
+
+
+def test_condition_is_part_of_identity_and_required_for_application() -> None:
+    source = hypothesis(condition=Condition.HIGH_VOLATILITY)
+    candidate = candidates((source,))[0]
+    unconditional = candidates((hypothesis(),))[0]
+    assert candidate.condition is Condition.HIGH_VOLATILITY
+    assert candidate.candidate_fingerprint != unconditional.candidate_fingerprint
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=row("-0.015", atr_14="1"),
+            position_is_open=False,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=row("-0.015", atr_14="3"),
+            position_is_open=False,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.OPEN_POSITION
+    )
 
 
 def test_limit_order_and_fingerprints_are_deterministic_and_complete() -> None:
@@ -214,3 +392,114 @@ def test_cli_keeps_edge_guided_evaluation_explicitly_disabled_by_default() -> No
     enabled = build_parser().parse_args([*required, "--edge-guided-candidates"])
     assert enabled.edge_guided_candidates is True
     assert enabled.max_edge_guided_candidates == 12
+
+
+def test_walk_forward_candidate_rejected_in_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_differences(
+        monkeypatch,
+        validation=(Decimal("-0.01"), Decimal("-0.02")),
+        test=(),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert evaluation.valid_window_count == 2
+    assert evaluation.rejected_validation_window_count == 2
+    assert evaluation.confirmed_window_count == 0
+    assert all(item.test is None for item in evaluation.windows)
+
+
+def test_walk_forward_candidate_passes_validation_but_fails_isolated_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_differences(
+        monkeypatch,
+        validation=(Decimal("0.01"), Decimal("0.02")),
+        test=(Decimal("-0.01"), Decimal("-0.02")),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_TEST
+    assert evaluation.rejected_test_window_count == 2
+    assert evaluation.confirmed_window_count == 0
+
+
+def test_candidate_confirms_across_multiple_walk_forward_windows_without_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_differences(
+        monkeypatch,
+        validation=(Decimal("0.01"), Decimal("0.02"), Decimal("0.03")),
+        test=(Decimal("0.01"), Decimal("0.02"), Decimal("0.03")),
+    )
+    evaluation = result.evaluations[0]
+    assert result.windows_available == 3
+    assert evaluation.status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert evaluation.valid_window_count == 3
+    assert evaluation.confirmed_window_count == 3
+    assert [item.window_ordinal for item in evaluation.windows] == [1, 2, 3]
+    assert all(item.test_confirmed for item in evaluation.windows)
+    source = candidates((hypothesis(),))[0]
+    assert evaluation.candidate == source
+    assert evaluation.candidate.candidate_fingerprint == source.candidate_fingerprint
+    assert evaluation.candidate.condition is source.condition
+    assert evaluation.candidate.lower_bound == source.lower_bound
+    assert evaluation.candidate.upper_bound == source.upper_bound
+    assert evaluation.candidate.suggested_action is source.suggested_action
+    summary = edge_guided_summary(result)
+    summary_evaluations = summary["evaluations"]
+    assert isinstance(summary_evaluations, list)
+    assert summary_evaluations[0]["candidate"]["condition"] == "all"
+
+
+def test_evaluation_passes_effective_fees_and_slippage_to_real_simulator() -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    simulation = SimulationConfiguration(
+        fee_rate=Decimal("0.0023"), slippage_rate=Decimal("0.0007")
+    )
+    calls: list[tuple[Decimal, Decimal, bool]] = []
+
+    def simulate(**kwargs: object) -> SimpleNamespace:
+        fee = kwargs["fee_rate"]
+        slippage = kwargs["slippage_rate"]
+        filtered = kwargs.get("decision_action_filter") is not None
+        assert isinstance(fee, Decimal)
+        assert isinstance(slippage, Decimal)
+        calls.append((fee, slippage, filtered))
+        return SimpleNamespace(
+            total_return=Decimal("0.02") if filtered else Decimal("0.01"),
+            max_drawdown=Decimal("0.01"),
+            trade_count=1,
+            fees_paid=Decimal("1.00"),
+        )
+
+    benchmark = SimpleNamespace(total_return=Decimal(0))
+    with (
+        patch.object(
+            edge_guided_module, "simulate_historical_feature_matrix", simulate
+        ),
+        patch.object(
+            edge_guided_module, "simulate_buy_and_hold", return_value=benchmark
+        ),
+    ):
+        result = evaluate_edge_guided_candidates(
+            dataset=dataset,
+            feature_matrix=matrix,
+            hypotheses=(hypothesis(),),
+            initial_cash=Decimal("10000"),
+            simulation=simulation,
+            windows=windows,
+            thresholds=EvidenceThresholds(
+                minimum_observations=1,
+                minimum_windows=1,
+                minimum_stable_direction_ratio=Decimal(1),
+            ),
+        )
+    assert result.evaluations[0].status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert calls
+    assert all(
+        fee == simulation.fee_rate and slippage == simulation.slippage_rate
+        for fee, slippage, _ in calls
+    )
+    assert any(filtered for _, _, filtered in calls)
+    assert any(not filtered for _, _, filtered in calls)

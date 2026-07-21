@@ -249,12 +249,14 @@ def simulate_historical_feature_matrix(
             else decision.explanation
         )
         if action is StrategyAction.OPEN_POSITION:
+            target_percentage = decision.requested_target_portfolio_percentage
+            if target_percentage is None and action is not decision.action:
+                target_percentage = strategy_parameters.open_position_target_percentage
             calculation = calculate_open_position(
                 cash=cash,
                 total_equity=equity_before,
                 observed_price=observed_price,
-                target_percentage=decision.requested_target_portfolio_percentage
-                or Decimal(0),
+                target_percentage=target_percentage or Decimal(0),
                 configuration=configuration,
             )
             cash = calculation.resulting_cash

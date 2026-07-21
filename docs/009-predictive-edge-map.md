@@ -69,16 +69,23 @@ hypotheses when each has independently selected and confirmed evidence.
 ## Edge-guided strategy candidates
 
 The optional edge-guided stage converts each confirmed actionable hypothesis into at
-most one deterministic candidate. A `long_entry` candidate gates the existing
-production entry action to its frozen bin. An `exit_or_avoid` candidate suppresses an
-entry when flat or applies the existing full-exit action when a position is open inside
-the bin. Neither action opens a short position or changes production configuration.
+most one deterministic candidate. A `long_entry` candidate applies the existing
+production entry action only in its frozen bin and original condition. An `exit_or_avoid`
+candidate suppresses an entry when flat or applies the existing full-exit action when a
+position is open only while both its bin and condition match. Condition evaluation
+reuses the Predictive Edge Map semantics; each window freezes its volatility boundary
+from training before validation or test is observed. Outside the bin or condition, the
+candidate makes no edge-guided entry or exit and the baseline action remains unchanged.
+Neither action opens a short position or changes production configuration.
 
 Candidates reuse the existing historical simulator, fees, slippage, initial cash,
-30-minute cadence, score model, Strategy version, and chronological
-training/validation/test split. Parameters come only from the frozen hypothesis;
-validation selects and test only confirms. Results are `rejected_validation`,
-`rejected_test`, or `confirmed_candidate` and include comparisons with production and
+30-minute cadence, score model, Strategy version, and existing walk-forward windows.
+Every window keeps isolated training, validation, and test phases. Parameters come only
+from the frozen hypothesis and the training-frozen condition boundary; validation
+selects and test only confirms. Final status aggregates valid, confirmed, validation-
+rejected, and test-rejected windows using the existing minimum-window and stability
+criteria. Results are `rejected_validation`, `rejected_test`, or
+`confirmed_candidate` and retain informative comparisons with production and
 buy-and-hold. The stage is bounded, in-memory, and opt-in; it does not persist candidate
 evaluations, activate a Strategy, mutate Paper Trading, or guarantee future results.
 

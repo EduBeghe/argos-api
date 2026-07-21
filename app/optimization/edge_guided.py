@@ -11,22 +11,25 @@ from app.optimization.feature_matrix import (
 )
 from app.optimization.historical_data import HistoricalDataset
 from app.optimization.predictive_edges import (
+    Condition,
     DirectionMapping,
+    EvidenceThresholds,
     StrategyHypothesis,
     SuggestedAction,
+    predictive_edge_condition_matches,
     predictive_edge_value,
+    predictive_edge_volatility_threshold,
 )
 from app.optimization.refinement import (
     RefinementSegmentName,
     simulate_buy_and_hold,
-    split_feature_matrix,
 )
 from app.optimization.simulation import (
     DEFAULT_DECISION_INTERVAL,
     DecisionActionFilter,
-    HistoricalSimulationResult,
     simulate_historical_feature_matrix,
 )
+from app.optimization.walk_forward import WalkForwardWindow, build_window_matrices
 from app.paper.config import SimulationConfiguration
 from app.scores.calculation import MODEL_NAME, MODEL_VERSION
 from app.strategies.baseline_long_only import (
@@ -58,6 +61,7 @@ class EdgeGuidedCandidate:
     predictor_name: str
     predictor_version: int
     hypothesis_contract_version: int
+    condition: Condition
     lower_bound: Decimal | None
     upper_bound: Decimal | None
     suggested_action: SuggestedAction
@@ -91,6 +95,11 @@ class EdgeGuidedCandidateEvaluation:
     training: EdgeGuidedSegmentEvaluation
     validation: EdgeGuidedSegmentEvaluation
     test: EdgeGuidedSegmentEvaluation
+    windows: tuple["EdgeGuidedWindowEvaluation", ...]
+    valid_window_count: int
+    confirmed_window_count: int
+    rejected_validation_window_count: int
+    rejected_test_window_count: int
     unconditional_benchmark: str
     status: EdgeGuidedCandidateStatus
     explanation: str
@@ -102,7 +111,19 @@ class EdgeGuidedEvaluationResult:
     generated_count: int
     evaluated_count: int
     maximum_candidates: int
+    windows_available: int
     evaluations: tuple[EdgeGuidedCandidateEvaluation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EdgeGuidedWindowEvaluation:
+    window_ordinal: int
+    volatility_threshold: Decimal
+    training: EdgeGuidedSegmentEvaluation
+    validation: EdgeGuidedSegmentEvaluation
+    test: EdgeGuidedSegmentEvaluation | None
+    validation_passed: bool
+    test_confirmed: bool
 
 
 def generate_edge_guided_candidates(
@@ -138,6 +159,7 @@ def generate_edge_guided_candidates(
             "predictor_name": hypothesis.predictor_name,
             "predictor_version": hypothesis.predictor_version,
             "hypothesis_contract_version": hypothesis.hypothesis_contract_version,
+            "condition": hypothesis.condition.value,
             "lower_bound": hypothesis.lower_bound,
             "upper_bound": hypothesis.upper_bound,
             "suggested_action": hypothesis.suggested_action.value,
@@ -162,6 +184,7 @@ def generate_edge_guided_candidates(
                 hypothesis.predictor_name,
                 hypothesis.predictor_version,
                 hypothesis.hypothesis_contract_version,
+                hypothesis.condition,
                 hypothesis.lower_bound,
                 hypothesis.upper_bound,
                 hypothesis.suggested_action,
@@ -190,16 +213,23 @@ def apply_edge_guided_action(
     row: HistoricalFeatureRow,
     position_is_open: bool,
     baseline_action: StrategyAction,
+    volatility_threshold: Decimal,
 ) -> StrategyAction:
     """Apply one frozen bin rule without introducing short exposure."""
 
     value = predictive_edge_value(row, candidate.predictor_name)
-    inside = (candidate.lower_bound is None or value > candidate.lower_bound) and (
-        candidate.upper_bound is None or value <= candidate.upper_bound
+    inside = (
+        (candidate.lower_bound is None or value > candidate.lower_bound)
+        and (candidate.upper_bound is None or value <= candidate.upper_bound)
+        and predictive_edge_condition_matches(
+            row,
+            candidate.condition,
+            volatility_threshold=volatility_threshold,
+        )
     )
     if candidate.suggested_action is SuggestedAction.LONG_ENTRY:
-        if not inside and baseline_action is StrategyAction.OPEN_POSITION:
-            return StrategyAction.NO_ACTION
+        if inside and not position_is_open:
+            return StrategyAction.OPEN_POSITION
         return baseline_action
     if candidate.suggested_action is SuggestedAction.EXIT_OR_AVOID and inside:
         return StrategyAction.SELL_ALL if position_is_open else StrategyAction.NO_ACTION
@@ -208,6 +238,7 @@ def apply_edge_guided_action(
 
 def _candidate_action_filter(
     candidate: EdgeGuidedCandidate,
+    volatility_threshold: Decimal,
 ) -> DecisionActionFilter:
     def apply(
         row: HistoricalFeatureRow,
@@ -219,6 +250,7 @@ def _candidate_action_filter(
             row=row,
             position_is_open=position_is_open,
             baseline_action=baseline_action,
+            volatility_threshold=volatility_threshold,
         )
 
     return apply
@@ -233,8 +265,10 @@ def evaluate_edge_guided_candidates(
     simulation: SimulationConfiguration,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
     maximum_candidates: int = DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
+    windows: tuple[WalkForwardWindow, ...],
+    thresholds: EvidenceThresholds,
 ) -> EdgeGuidedEvaluationResult:
-    """Evaluate frozen edge-guided candidates on existing chronological segments."""
+    """Evaluate frozen candidates through the existing isolated walk-forward windows."""
 
     candidates = generate_edge_guided_candidates(
         hypotheses=hypotheses,
@@ -242,68 +276,58 @@ def evaluate_edge_guided_candidates(
         decision_interval=decision_interval,
         maximum_candidates=maximum_candidates,
     )
-    matrices, _ = split_feature_matrix(
-        feature_matrix, decision_interval=decision_interval
-    )
-    production: dict[RefinementSegmentName, HistoricalSimulationResult] = {}
-    buy_and_hold = {}
-    for segment, matrix in matrices.items():
-        production[segment] = simulate_historical_feature_matrix(
-            dataset=dataset,
-            feature_matrix=matrix,
-            initial_cash=initial_cash,
-            fee_rate=simulation.fee_rate,
-            slippage_rate=simulation.slippage_rate,
-            decision_interval=decision_interval,
-        )
-        buy_and_hold[segment] = simulate_buy_and_hold(
-            matrix,
-            segment,
-            dataset.identity.instrument,
-            initial_cash,
-            simulation,
-        )
     evaluations: list[EdgeGuidedCandidateEvaluation] = []
     for candidate in candidates:
-        segment_results: dict[RefinementSegmentName, EdgeGuidedSegmentEvaluation] = {}
-        for segment, matrix in matrices.items():
-            result = simulate_historical_feature_matrix(
-                dataset=dataset,
-                feature_matrix=matrix,
-                initial_cash=initial_cash,
-                fee_rate=candidate.fee_rate,
-                slippage_rate=candidate.slippage_rate,
-                decision_interval=candidate.decision_interval,
-                decision_action_filter=_candidate_action_filter(candidate),
-            )
-            segment_results[segment] = EdgeGuidedSegmentEvaluation(
-                segment,
-                result.total_return,
-                result.max_drawdown,
-                result.trade_count,
-                result.fees_paid,
-                result.total_return - production[segment].total_return,
-                result.total_return - buy_and_hold[segment].total_return,
-            )
-        validation = segment_results[RefinementSegmentName.VALIDATION]
-        test = segment_results[RefinementSegmentName.TEST]
-        if validation.return_difference_from_production <= 0:
-            status = EdgeGuidedCandidateStatus.REJECTED_VALIDATION
-            explanation = "Validation did not outperform the production baseline."
-        elif test.return_difference_from_production <= 0:
-            status = EdgeGuidedCandidateStatus.REJECTED_TEST
-            explanation = "Frozen validation candidate did not confirm on test."
-        else:
+        window_results = _evaluate_candidate_windows(
+            dataset=dataset,
+            feature_matrix=feature_matrix,
+            windows=windows,
+            candidate=candidate,
+            initial_cash=initial_cash,
+            simulation=simulation,
+            decision_interval=decision_interval,
+        )
+        valid = len(window_results)
+        confirmed = sum(item.test_confirmed for item in window_results)
+        rejected_validation = sum(not item.validation_passed for item in window_results)
+        rejected_test = sum(
+            item.validation_passed and not item.test_confirmed
+            for item in window_results
+        )
+        ratio = Decimal(confirmed) / Decimal(valid) if valid else Decimal(0)
+        if (
+            valid >= thresholds.minimum_windows
+            and confirmed >= thresholds.minimum_windows
+            and ratio >= thresholds.minimum_stable_direction_ratio
+        ):
             status = EdgeGuidedCandidateStatus.CONFIRMED
             explanation = (
-                "Frozen candidate outperformed production on validation and test."
+                "Frozen candidate confirmed against production across the required "
+                "isolated walk-forward test windows."
+            )
+        elif not any(item.validation_passed for item in window_results):
+            status = EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+            explanation = (
+                "Candidate did not pass validation in the required walk-forward "
+                "windows."
+            )
+        else:
+            status = EdgeGuidedCandidateStatus.REJECTED_TEST
+            explanation = (
+                "Frozen validation candidate did not satisfy the existing stability "
+                "criteria across isolated test windows."
             )
         evaluations.append(
             EdgeGuidedCandidateEvaluation(
                 candidate,
-                segment_results[RefinementSegmentName.TRAINING],
-                validation,
-                test,
+                _aggregate_segment(window_results, RefinementSegmentName.TRAINING),
+                _aggregate_segment(window_results, RefinementSegmentName.VALIDATION),
+                _aggregate_segment(window_results, RefinementSegmentName.TEST),
+                window_results,
+                valid,
+                confirmed,
+                rejected_validation,
+                rejected_test,
                 "always_up"
                 if candidate.suggested_action is SuggestedAction.LONG_ENTRY
                 else "always_down",
@@ -316,7 +340,156 @@ def evaluate_edge_guided_candidates(
         len(candidates),
         len(evaluations),
         maximum_candidates,
+        len(windows),
         tuple(evaluations),
+    )
+
+
+def _evaluate_candidate_windows(
+    *,
+    dataset: HistoricalDataset,
+    feature_matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    candidate: EdgeGuidedCandidate,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    decision_interval: timedelta,
+) -> tuple[EdgeGuidedWindowEvaluation, ...]:
+    results: list[EdgeGuidedWindowEvaluation] = []
+    for window in windows:
+        matrices = build_window_matrices(
+            feature_matrix, window, decision_interval=decision_interval
+        )
+        if not all(
+            matrix.rows
+            for matrix in (matrices.training, matrices.validation, matrices.test)
+        ):
+            continue
+        volatility_threshold = predictive_edge_volatility_threshold(
+            matrices.training.rows
+        )
+        action_filter = _candidate_action_filter(candidate, volatility_threshold)
+        training = _evaluate_segment(
+            dataset,
+            matrices.training,
+            RefinementSegmentName.TRAINING,
+            candidate,
+            initial_cash,
+            simulation,
+            action_filter,
+        )
+        validation = _evaluate_segment(
+            dataset,
+            matrices.validation,
+            RefinementSegmentName.VALIDATION,
+            candidate,
+            initial_cash,
+            simulation,
+            action_filter,
+        )
+        validation_passed = validation.return_difference_from_production > 0
+        test = (
+            _evaluate_segment(
+                dataset,
+                matrices.test,
+                RefinementSegmentName.TEST,
+                candidate,
+                initial_cash,
+                simulation,
+                action_filter,
+            )
+            if validation_passed
+            else None
+        )
+        results.append(
+            EdgeGuidedWindowEvaluation(
+                window.ordinal,
+                volatility_threshold,
+                training,
+                validation,
+                test,
+                validation_passed,
+                test is not None and test.return_difference_from_production > 0,
+            )
+        )
+    return tuple(results)
+
+
+def _evaluate_segment(
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    segment: RefinementSegmentName,
+    candidate: EdgeGuidedCandidate,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    action_filter: DecisionActionFilter,
+) -> EdgeGuidedSegmentEvaluation:
+    production = simulate_historical_feature_matrix(
+        dataset=dataset,
+        feature_matrix=matrix,
+        initial_cash=initial_cash,
+        fee_rate=simulation.fee_rate,
+        slippage_rate=simulation.slippage_rate,
+        decision_interval=candidate.decision_interval,
+    )
+    buy_and_hold = simulate_buy_and_hold(
+        matrix,
+        segment,
+        dataset.identity.instrument,
+        initial_cash,
+        simulation,
+    )
+    result = simulate_historical_feature_matrix(
+        dataset=dataset,
+        feature_matrix=matrix,
+        initial_cash=initial_cash,
+        fee_rate=candidate.fee_rate,
+        slippage_rate=candidate.slippage_rate,
+        decision_interval=candidate.decision_interval,
+        decision_action_filter=action_filter,
+    )
+    return EdgeGuidedSegmentEvaluation(
+        segment,
+        result.total_return,
+        result.max_drawdown,
+        result.trade_count,
+        result.fees_paid,
+        result.total_return - production.total_return,
+        result.total_return - buy_and_hold.total_return,
+    )
+
+
+def _aggregate_segment(
+    windows: tuple[EdgeGuidedWindowEvaluation, ...],
+    segment: RefinementSegmentName,
+) -> EdgeGuidedSegmentEvaluation:
+    values = tuple(
+        value
+        for item in windows
+        for value in (
+            item.training
+            if segment is RefinementSegmentName.TRAINING
+            else item.validation
+            if segment is RefinementSegmentName.VALIDATION
+            else item.test,
+        )
+        if value is not None
+    )
+    if not values:
+        return EdgeGuidedSegmentEvaluation(
+            segment, Decimal(0), Decimal(0), 0, Decimal(0), Decimal(0), Decimal(0)
+        )
+    count = Decimal(len(values))
+    return EdgeGuidedSegmentEvaluation(
+        segment,
+        sum((item.total_return for item in values), Decimal(0)) / count,
+        sum((item.max_drawdown for item in values), Decimal(0)) / count,
+        sum(item.trade_count for item in values),
+        sum((item.fees_paid for item in values), Decimal(0)),
+        sum((item.return_difference_from_production for item in values), Decimal(0))
+        / count,
+        sum((item.return_difference_from_buy_and_hold for item in values), Decimal(0))
+        / count,
     )
 
 

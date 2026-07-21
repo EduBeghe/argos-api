@@ -206,6 +206,8 @@ async def run(
                         "max_edge_guided_candidates",
                         DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
                     ),
+                    windows=windows,
+                    thresholds=configuration.thresholds,
                 )
     finally:
         await engine.dispose()
