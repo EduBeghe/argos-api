@@ -669,4 +669,3 @@ def _production_benchmark_record(
         return_over_drawdown=metrics.return_over_drawdown,
         failure_reason=None,
     )
-
