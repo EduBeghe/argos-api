@@ -218,10 +218,18 @@ async def find_reusable_edge_guided_run(
     )
     if run is None:
         return None
-    result = await _load_result(session, run)
+    result = await _load_valid_result(session, run)
+    if result is None:
+        return None
+    return _reused_execution(run, result)
+
+
+def _reused_execution(
+    run: EdgeGuidedRunRecord, result: EdgeGuidedEvaluationResult
+) -> EdgeGuidedExecution:
     return EdgeGuidedExecution(
         run.id,
-        experiment_key,
+        run.experiment_key,
         True,
         result,
         result.evaluated_count,
@@ -244,12 +252,27 @@ async def persist_edge_guided_result(
     started_at: datetime,
     result: EdgeGuidedEvaluationResult,
 ) -> EdgeGuidedExecution:
-    await session.execute(
-        delete(EdgeGuidedRunRecord).where(
-            EdgeGuidedRunRecord.experiment_key == experiment_key,
-            EdgeGuidedRunRecord.status != "completed",
-        )
+    existing = await session.scalar(
+        select(EdgeGuidedRunRecord)
+        .where(EdgeGuidedRunRecord.experiment_key == experiment_key)
+        .with_for_update()
     )
+    if existing is not None:
+        valid_result = (
+            await _load_valid_result(session, existing)
+            if existing.status == "completed"
+            else None
+        )
+        if valid_result is not None:
+            return _reused_execution(existing, valid_result)
+        await session.execute(
+            delete(EdgeGuidedRunRecord).where(EdgeGuidedRunRecord.id == existing.id)
+        )
+        try:
+            await session.flush()
+        except Exception:
+            await session.rollback()
+            raise
     run_id = uuid4()
     session.add(
         EdgeGuidedRunRecord(
@@ -280,7 +303,17 @@ async def persist_edge_guided_result(
     )
     # Explicit flushes preserve FK insertion order without introducing ORM
     # relationships solely for persistence orchestration.
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        reused = await find_reusable_edge_guided_run(session, experiment_key)
+        if reused is None:
+            raise
+        return reused
+    except Exception:
+        await session.rollback()
+        raise
     for evaluation in result.evaluations:
         candidate_id = uuid4()
         session.add(
@@ -317,7 +350,11 @@ async def persist_edge_guided_result(
                 unconditional_benchmark=evaluation.unconditional_benchmark,
             )
         )
-        await session.flush()
+        try:
+            await session.flush()
+        except Exception:
+            await session.rollback()
+            raise
         for window in evaluation.windows:
             session.add(
                 EdgeGuidedWindowRecord(
@@ -340,6 +377,9 @@ async def persist_edge_guided_result(
         if reused is None:
             raise
         return reused
+    except Exception:
+        await session.rollback()
+        raise
     return EdgeGuidedExecution(
         run_id, experiment_key, False, result, 0, result.evaluated_count, 0
     )
@@ -400,6 +440,37 @@ async def _load_result(
         run.windows_available,
         tuple(evaluations),
     )
+
+
+async def _load_valid_result(
+    session: AsyncSession, run: EdgeGuidedRunRecord
+) -> EdgeGuidedEvaluationResult | None:
+    if run.generated_count < run.evaluated_count:
+        return None
+    result = await _load_result(session, run)
+    if len(result.evaluations) != run.evaluated_count:
+        return None
+    if run.evaluated_count == 0:
+        return result if not result.evaluations else None
+    for evaluation in result.evaluations:
+        windows = evaluation.windows
+        if len(windows) != evaluation.valid_window_count:
+            return None
+        ordinals = tuple(item.window_ordinal for item in windows)
+        if len(set(ordinals)) != len(ordinals):
+            return None
+        confirmed = sum(item.test_confirmed for item in windows)
+        rejected_validation = sum(not item.validation_passed for item in windows)
+        rejected_test = sum(
+            item.validation_passed and not item.test_confirmed for item in windows
+        )
+        if (
+            confirmed != evaluation.confirmed_window_count
+            or rejected_validation != evaluation.rejected_validation_window_count
+            or rejected_test != evaluation.rejected_test_window_count
+        ):
+            return None
+    return result
 
 
 def _json(value: object) -> dict[str, object]:

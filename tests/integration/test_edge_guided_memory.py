@@ -1,10 +1,12 @@
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -19,6 +21,7 @@ from app.optimization.edge_guided import (
 )
 from app.optimization.edge_guided_memory import (
     EdgeGuidedCandidateRecord,
+    EdgeGuidedExecution,
     EdgeGuidedRunRecord,
     EdgeGuidedWindowRecord,
     find_reusable_edge_guided_run,
@@ -209,4 +212,137 @@ async def test_complete_round_trip_and_reuse_are_atomic(session: AsyncSession) -
     assert (
         await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
         == 1
+    )
+
+
+async def persist_complete(session: AsyncSession) -> EdgeGuidedExecution:
+    parent = await parent_run(session)
+    assert parent.run_id is not None
+    return await persist_edge_guided_result(
+        session=session,
+        experiment_key=EDGE_KEY,
+        predictive_edge_run_id=parent.run_id,
+        instrument=MARKET_INSTRUMENTS[0].instrument,
+        range_start=START,
+        range_end=START + timedelta(days=1),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        decision_interval=timedelta(minutes=30),
+        started_at=START,
+        result=result(),
+    )
+
+
+async def test_completed_run_missing_candidate_is_not_reused(
+    session: AsyncSession,
+) -> None:
+    execution = await persist_complete(session)
+    await session.execute(
+        delete(EdgeGuidedCandidateRecord).where(
+            EdgeGuidedCandidateRecord.run_id == execution.run_id
+        )
+    )
+    await session.commit()
+
+    assert await find_reusable_edge_guided_run(session, EDGE_KEY) is None
+
+
+async def test_completed_run_missing_window_is_not_reused(
+    session: AsyncSession,
+) -> None:
+    await persist_complete(session)
+    await session.execute(delete(EdgeGuidedWindowRecord))
+    await session.commit()
+
+    assert await find_reusable_edge_guided_run(session, EDGE_KEY) is None
+
+
+async def test_incomplete_run_is_atomically_replaced(session: AsyncSession) -> None:
+    incomplete = await persist_complete(session)
+    await session.execute(delete(EdgeGuidedWindowRecord))
+    await session.commit()
+
+    replacement = await persist_complete(session)
+
+    assert replacement.run_id != incomplete.run_id
+    assert replacement.reused_existing_experiment is False
+    assert await find_reusable_edge_guided_run(session, EDGE_KEY) is not None
+    assert (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedRunRecord)) == 1
+    )
+    assert (
+        await session.scalar(
+            select(func.count()).select_from(EdgeGuidedCandidateRecord)
+        )
+        == 1
+    )
+    assert (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
+        == 1
+    )
+
+
+async def test_persisting_identical_experiment_twice_does_not_duplicate_graph(
+    session: AsyncSession,
+) -> None:
+    first = await persist_complete(session)
+    second = await persist_complete(session)
+
+    assert second.run_id == first.run_id
+    assert second.reused_existing_experiment is True
+    assert (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedRunRecord)) == 1
+    )
+    assert (
+        await session.scalar(
+            select(func.count()).select_from(EdgeGuidedCandidateRecord)
+        )
+        == 1
+    )
+    assert (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
+        == 1
+    )
+
+
+async def test_insertion_failure_rolls_back_the_complete_graph(
+    session: AsyncSession,
+) -> None:
+    parent = await parent_run(session)
+    assert parent.run_id is not None
+    original = result()
+    duplicate = replace(
+        original,
+        generated_count=2,
+        evaluated_count=2,
+        evaluations=(original.evaluations[0], original.evaluations[0]),
+    )
+
+    with pytest.raises(IntegrityError):
+        await persist_edge_guided_result(
+            session=session,
+            experiment_key=EDGE_KEY,
+            predictive_edge_run_id=parent.run_id,
+            instrument=MARKET_INSTRUMENTS[0].instrument,
+            range_start=START,
+            range_end=START + timedelta(days=1),
+            initial_cash=Decimal("10000"),
+            simulation=SimulationConfiguration(),
+            decision_interval=timedelta(minutes=30),
+            started_at=START,
+            result=duplicate,
+        )
+
+    assert (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedRunRecord)) == 0
+    )
+    assert (
+        await session.scalar(
+            select(func.count()).select_from(EdgeGuidedCandidateRecord)
+        )
+        == 0
+    )
+    assert (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
+        == 0
     )
