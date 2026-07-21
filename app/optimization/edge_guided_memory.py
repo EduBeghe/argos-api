@@ -278,6 +278,9 @@ async def persist_edge_guided_result(
             completed_at=datetime.now(UTC),
         )
     )
+    # Explicit flushes preserve FK insertion order without introducing ORM
+    # relationships solely for persistence orchestration.
+    await session.flush()
     for evaluation in result.evaluations:
         candidate_id = uuid4()
         session.add(
@@ -314,6 +317,7 @@ async def persist_edge_guided_result(
                 unconditional_benchmark=evaluation.unconditional_benchmark,
             )
         )
+        await session.flush()
         for window in evaluation.windows:
             session.add(
                 EdgeGuidedWindowRecord(
