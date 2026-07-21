@@ -1,4 +1,3 @@
-
 # Argos API
 
 Argos is a private, asset-agnostic quantitative research and predictive decision-support platform. It estimates probabilities from measurable evidence; it does not claim to predict the future with certainty or guarantee profitability.
@@ -148,7 +147,6 @@ curl "http://localhost:8000/market/status"
 ```
 
 List the configured market instruments and their enabled capabilities:
-
 
 ```sh
 curl "http://localhost:8000/market/instruments"
@@ -300,7 +298,6 @@ entry fees, `market_value` is quantity times the latest compatible candle close,
 and `unrealized_pnl` is market value minus cost basis. Portfolio `equity` is
 current cash plus all Position market values; `total_pnl` is equity minus initial
 cash. Returns divide their corresponding P&L by a positive cost basis or initial
-
 cash and are otherwise null.
 
 `valued_at` is the UTC time when Argos assembled the response. Each Position also
@@ -450,7 +447,6 @@ credentialed origins are rejected. Development-only `POSTGRES_*` variables are
 not needed when `DATABASE_URL` is supplied.
 
 Run the API process with:
-
 
 ```sh
 scripts/start_api.sh
@@ -602,7 +598,6 @@ python -m app.jobs.refine_historical_strategy \
   --fee-rate 0.001 \
   --slippage-rate 0.0005 \
   --validation-top-k 10 \
-
   --score-screening-top-k 12 \
   --max-score-configurations 200 \
   --max-joint-candidates 1000
