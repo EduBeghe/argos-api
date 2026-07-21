@@ -712,4 +712,3 @@ def _recommendation_explanation(value: WalkForwardStability) -> str:
         "It is not promoted automatically. Historical evidence does not guarantee "
         "future results."
     )
-
