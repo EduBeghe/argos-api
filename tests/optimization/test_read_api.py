@@ -237,4 +237,3 @@ def test_walk_forward_window_evidence_is_bounded_and_unknown_is_404(
         params={"limit": 201},
     )
     assert too_large.status_code == 422
-
