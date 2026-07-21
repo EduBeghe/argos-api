@@ -18,7 +18,10 @@ Every generated signal must retain its component scores, supporting metrics, and
 
 ## Current phase
 
-The project is in its documentation-first phase. No application implementation, live-money trading, or profitability claim is part of this phase.
+Argos now includes a production-ready API foundation, persisted market-data and
+Paper Trading workflows, historical simulation and refinement tooling, and
+read-only decision-support APIs. It remains private and research-oriented: it
+does not trade real money or guarantee profitability.
 
 ## Development
 
@@ -363,6 +366,42 @@ in the formulas.
 The MVP reads the complete aggregate snapshot history because it produces only
 two points per hour. A database aggregation or daily summaries can be introduced
 if volume later justifies them.
+
+## Historical optimization memory API
+
+Persisted refinement evidence is exposed through read-only endpoints:
+
+- `GET /optimization/refinement-runs`
+- `GET /optimization/refinement-runs/{run_id}`
+- `GET /optimization/refinement-runs/{run_id}/evaluations`
+- `GET /optimization/candidates`
+- `GET /optimization/candidates/{stable_candidate_id}`
+
+Run-list filters include `asset`, `provider`, `market_type`, `interval`, `status`,
+`recommendation_status`, `started_from`, and `started_to`. Candidate-list filters
+include the complete instrument identity, `evidence_classification`, Score and
+Strategy model names and versions, and `minimum_validation_runs`.
+
+Run summaries use deterministic `limit`/`offset` pagination. Candidate pages, run
+evaluations, and candidate evaluation history use stable keyset cursors and return
+`has_more` plus `next_cursor`; every page has a maximum size of 200. Candidate filtering
+scans bounded batches until the requested public page is complete, without a hidden
+global candidate cap. Filters use the complete asset, provider, market type, and interval identity.
+Responses preserve Decimal values and UTC evidence timestamps, expose explicit public
+models rather than PostgreSQL JSONB payloads, and never execute a refinement or contact
+an external provider.
+
+Examples:
+
+```sh
+curl "http://localhost:8000/optimization/refinement-runs?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&status=completed&limit=25&offset=0"
+curl "http://localhost:8000/optimization/candidates?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&minimum_validation_runs=2&limit=25"
+curl "http://localhost:8000/optimization/refinement-runs/<run-id>/evaluations?limit=100"
+curl "http://localhost:8000/optimization/candidates/<stable-candidate-id>?limit=100"
+```
+
+See [Experiment memory and experience-guided search](docs/008-experiment-memory.md)
+for the evidence-compatibility and planning contracts behind these read models.
 
 ## Production deployment
 

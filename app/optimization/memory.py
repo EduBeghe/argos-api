@@ -29,6 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database.base import Base
 
 JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
+COMPATIBLE_PROFILE_PHASES = ("joint_training", "validation", "test")
 
 
 class ExperimentLeaseLostError(RuntimeError):
@@ -424,9 +425,7 @@ async def load_compatible_evidence(
             StrategyRefinementRunRecord.simulation_engine_version
             == simulation_engine_version,
             StrategyRefinementRunRecord.completed_at <= history_cutoff,
-            StrategyCandidateEvaluationRecord.phase.in_(
-                ("joint_training", "validation", "test")
-            ),
+            StrategyCandidateEvaluationRecord.phase.in_(COMPATIBLE_PROFILE_PHASES),
         )
     )
     return [
