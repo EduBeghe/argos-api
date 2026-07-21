@@ -367,6 +367,36 @@ The MVP reads the complete aggregate snapshot history because it produces only
 two points per hour. A database aggregation or daily summaries can be introduced
 if volume later justifies them.
 
+## Predictive Edge Map
+
+Run the bounded historical diagnostic and persist aggregate evidence only:
+
+```bash
+python -m app.jobs.analyze_predictive_edges \
+  --asset BTC/USDT --provider binance --market-type spot --interval 5m \
+  --from 2024-01-01T00:00:00Z --to 2026-01-01T00:00:00Z \
+  --horizon 30m --horizon 1h --horizon 2h --horizon 6h \
+  --horizon 12h --horizon 24h --horizon 48h \
+  --fee-rate 0.001 --slippage-rate 0.0005 --persist
+```
+
+Training defines centers, direction mappings, bins, and volatility thresholds.
+Validation selects individual training-defined bins and freezes their direction
+mapping, range, and suggested action. Isolated test evidence from that same bin can
+only confirm or reject its selection; a different bin cannot confirm it. Correlation
+sign remains statistical and never determines an action by itself. Suggested actions
+are `long_entry`, `exit_or_avoid`, or diagnostic-only, and never imply short selling.
+Global predictor metrics remain diagnostic: each bin independently must improve on the
+validation phase's unconditional directional benchmark and remain favorable after
+costs before isolated test confirmation.
+Directional
+accuracy must improve on always-up, always-down, deterministic-random, and observed
+majority baselines. Signed gross return, long-aligned net return, avoided downside, and
+net movement magnitude after friction remain distinct. Without `--persist`, the job is
+strictly read-only and does not record reuse. The command never creates executable
+Strategies or mutates Paper Trading. See
+[`docs/009-predictive-edge-map.md`](docs/009-predictive-edge-map.md).
+
 ## Historical optimization memory API
 
 Persisted refinement evidence is exposed through read-only endpoints:
