@@ -19,6 +19,7 @@ from app.optimization.historical_data import (
 from app.optimization.simulation import (
     HistoricalSimulationError,
     HistoricalSimulationResult,
+    simulate_historical_feature_matrix,
     simulate_historical_strategy,
 )
 from app.paper.calculation import calculate_open_position
@@ -113,6 +114,38 @@ def test_same_input_is_deterministic_and_boundaries_have_no_lookahead() -> None:
         for point in first.equity_curve
     )
     assert all(trade.source_candle_open_time < trade.boundary for trade in first.trades)
+
+
+def test_absent_action_filter_preserves_the_original_historical_flow() -> None:
+    outputs = [
+        SimpleNamespace(overall_score=Decimal(value))
+        for value in (
+            "0.7",
+            "0.7",
+            "0.1",
+            "0.1",
+        )
+    ]
+    with patch(
+        "app.optimization.simulation.calculate_baseline_score",
+        side_effect=[*outputs, *outputs],
+    ):
+        original = simulate_historical_feature_matrix(
+            dataset=source_dataset(),
+            feature_matrix=matrix(),
+            initial_cash=Decimal("10000"),
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+        )
+        identity_filtered = simulate_historical_feature_matrix(
+            dataset=source_dataset(),
+            feature_matrix=matrix(),
+            initial_cash=Decimal("10000"),
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            decision_action_filter=lambda _row, _open, action: action,
+        )
+    assert identity_filtered == original
 
 
 def test_result_preserves_effective_simulation_configuration() -> None:

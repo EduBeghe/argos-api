@@ -466,10 +466,7 @@ def analyze_predictive_edges(
         training_rows = _phase_rows(
             matrix.rows, window.training_from, window.training_to
         )
-        volatility = _quantile(
-            tuple(row.atr_14 / row.close_price for row in training_rows),
-            Decimal("0.80"),
-        )
+        volatility = predictive_edge_volatility_threshold(training_rows)
         for predictor in PREDICTORS:
             training_values = tuple(
                 _predictors(row)[predictor.name] for row in training_rows
@@ -751,6 +748,45 @@ def _predictors(row: HistoricalFeatureRow) -> dict[str, Decimal]:
     }
 
 
+def predictive_edge_value(row: HistoricalFeatureRow, predictor_name: str) -> Decimal:
+    """Return one versioned Predictive Edge Map predictor value for a Feature row."""
+
+    try:
+        return _predictors(row)[predictor_name]
+    except KeyError as error:
+        raise PredictiveEdgeError(
+            f"unsupported predictive-edge predictor: {predictor_name}"
+        ) from error
+
+
+def predictive_edge_volatility_threshold(
+    training_rows: tuple[HistoricalFeatureRow, ...],
+) -> Decimal:
+    """Freeze the versioned 80th-percentile ATR/close condition threshold."""
+
+    return _quantile(
+        tuple(row.atr_14 / row.close_price for row in training_rows),
+        Decimal("0.80"),
+    )
+
+
+def predictive_edge_condition_matches(
+    row: HistoricalFeatureRow,
+    condition: Condition,
+    *,
+    volatility_threshold: Decimal,
+) -> bool:
+    """Evaluate one Predictive Edge Map condition with its frozen threshold."""
+
+    ratio = row.atr_14 / row.close_price
+    return not (
+        (condition is Condition.EMA_ABOVE and row.ema_20 <= row.ema_50)
+        or (condition is Condition.EMA_BELOW and row.ema_20 >= row.ema_50)
+        or (condition is Condition.HIGH_VOLATILITY and ratio < volatility_threshold)
+        or (condition is Condition.NORMAL_VOLATILITY and ratio >= volatility_threshold)
+    )
+
+
 def _phase_rows(
     rows: tuple[HistoricalFeatureRow, ...], start: datetime, end: datetime
 ) -> tuple[HistoricalFeatureRow, ...]:
@@ -782,17 +818,9 @@ def _observations(
         if future_time >= phase_end or future_time not in rows:
             missing += 1
             continue
-        ratio = row.atr_14 / row.close_price
-        excluded = (
-            (condition is Condition.EMA_ABOVE and row.ema_20 <= row.ema_50)
-            or (condition is Condition.EMA_BELOW and row.ema_20 >= row.ema_50)
-            or (condition is Condition.HIGH_VOLATILITY and ratio < volatility_threshold)
-            or (
-                condition is Condition.NORMAL_VOLATILITY
-                and ratio >= volatility_threshold
-            )
-        )
-        if excluded:
+        if not predictive_edge_condition_matches(
+            row, condition, volatility_threshold=volatility_threshold
+        ):
             continue
         gross = rows[future_time].close_price / row.close_price - Decimal(1)
         absolute = abs(gross)

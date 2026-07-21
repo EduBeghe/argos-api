@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -38,6 +39,9 @@ from app.strategies.baseline_long_only import (
 DEFAULT_DECISION_INTERVAL = timedelta(minutes=30)
 SIMULATION_ENGINE_VERSION = 1
 _ZERO_UUID = UUID(int=0)
+DecisionActionFilter = Callable[
+    [HistoricalFeatureRow, bool, StrategyAction], StrategyAction
+]
 
 
 class HistoricalSimulationError(ValueError):
@@ -177,6 +181,7 @@ def simulate_historical_feature_matrix(
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
     strategy_parameters: BaselineLongOnlyParameters = BASELINE_LONG_ONLY_V1_PARAMETERS,
     score_parameters: BaselineTechnicalParameters = BASELINE_TECHNICAL_V1_PARAMETERS,
+    decision_action_filter: DecisionActionFilter | None = None,
 ) -> HistoricalSimulationResult:
     """Simulate a precomputed Feature matrix without rebuilding it."""
 
@@ -228,7 +233,22 @@ def simulate_historical_feature_matrix(
             position_is_open=quantity > 0,
             parameters=strategy_parameters,
         )
-        if decision.action is StrategyAction.OPEN_POSITION:
+        action = (
+            decision_action_filter(row, quantity > 0, decision.action)
+            if decision_action_filter is not None
+            else decision.action
+        )
+        applied_rule = (
+            "edge_guided_candidate"
+            if action is not decision.action
+            else decision.applied_rule
+        )
+        explanation = (
+            "The frozen edge-guided bin changed the baseline action."
+            if action is not decision.action
+            else decision.explanation
+        )
+        if action is StrategyAction.OPEN_POSITION:
             calculation = calculate_open_position(
                 cash=cash,
                 total_equity=equity_before,
@@ -247,7 +267,7 @@ def simulate_historical_feature_matrix(
                 _trade(
                     boundary=boundary,
                     row=row,
-                    action=decision.action,
+                    action=action,
                     side=calculation.side,
                     observed_price=observed_price,
                     execution_price=calculation.execution_price,
@@ -260,11 +280,11 @@ def simulate_historical_feature_matrix(
                     quantity_after=quantity,
                     equity_before=equity_before,
                     equity_after=_equity(cash, quantity, observed_price),
-                    applied_rule=decision.applied_rule,
-                    explanation=decision.explanation,
+                    applied_rule=applied_rule,
+                    explanation=explanation,
                 )
             )
-        elif decision.action is StrategyAction.SELL_ALL:
+        elif action is StrategyAction.SELL_ALL:
             if quantity <= 0:
                 raise HistoricalSimulationError(
                     "strategy attempted to sell without a position"
@@ -292,7 +312,7 @@ def simulate_historical_feature_matrix(
                 _trade(
                     boundary=boundary,
                     row=row,
-                    action=decision.action,
+                    action=action,
                     side=calculation.side,
                     observed_price=observed_price,
                     execution_price=calculation.execution_price,
@@ -305,8 +325,8 @@ def simulate_historical_feature_matrix(
                     quantity_after=quantity,
                     equity_before=equity_before,
                     equity_after=_equity(cash, quantity, observed_price),
-                    applied_rule=decision.applied_rule,
-                    explanation=decision.explanation,
+                    applied_rule=applied_rule,
+                    explanation=explanation,
                 )
             )
             average_entry_price = entry_notional = entry_fees = Decimal(0)

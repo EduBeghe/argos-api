@@ -14,6 +14,11 @@ from app.core.logging import configure_logging
 from app.jobs.validate_historical_dataset import parse_utc
 from app.market.catalog import InstrumentCapability, resolve_instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.optimization.edge_guided import (
+    DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
+    edge_guided_summary,
+    evaluate_edge_guided_candidates,
+)
 from app.optimization.feature_matrix import build_historical_feature_matrix
 from app.optimization.historical_data import (
     HistoricalDatasetIdentity,
@@ -34,7 +39,12 @@ from app.optimization.predictive_edges import (
     build_predictive_windows,
 )
 from app.optimization.walk_forward import WalkForwardConfiguration
-from app.paper.config import FEE_RATE, SLIPPAGE_RATE, SimulationConfiguration
+from app.paper.config import (
+    DEFAULT_INITIAL_CASH,
+    FEE_RATE,
+    SLIPPAGE_RATE,
+    SimulationConfiguration,
+)
 
 logger = logging.getLogger(__name__)
 _DURATION = re.compile(r"^(?P<value>[1-9][0-9]*)(?P<unit>m|h|d)$")
@@ -77,6 +87,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--maximum-windows", type=int, default=6)
     parser.add_argument("--bins", type=int, default=5)
     parser.add_argument("--persist", action="store_true")
+    parser.add_argument("--edge-guided-candidates", action="store_true")
+    parser.add_argument(
+        "--max-edge-guided-candidates",
+        type=int,
+        default=DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
+    )
+    parser.add_argument("--initial-cash", type=Decimal, default=DEFAULT_INITIAL_CASH)
     return parser
 
 
@@ -115,6 +132,7 @@ async def run(
     )
     engine = create_database_engine(settings)
     factory = create_session_factory(engine)
+    guided_result = None
     try:
         async with factory() as session:
             dataset = await read_historical_dataset(
@@ -167,6 +185,30 @@ async def run(
                     execution = PredictiveEdgeExecution(None, False, result, 0, 0)
             if execution is None:
                 raise RuntimeError("predictive-edge execution was not initialized")
+            analysis_result = execution.result
+            if getattr(args, "edge_guided_candidates", False):
+                if analysis_result is None:
+                    analysis_result = analyze_predictive_edges(
+                        matrix=matrix,
+                        windows=windows,
+                        simulation=simulation,
+                        configuration=configuration,
+                    )
+                guided_result = evaluate_edge_guided_candidates(
+                    dataset=dataset,
+                    feature_matrix=matrix,
+                    hypotheses=analysis_result.hypotheses,
+                    initial_cash=getattr(args, "initial_cash", DEFAULT_INITIAL_CASH),
+                    simulation=simulation,
+                    decision_interval=configuration.decision_interval,
+                    maximum_candidates=getattr(
+                        args,
+                        "max_edge_guided_candidates",
+                        DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
+                    ),
+                    windows=windows,
+                    thresholds=configuration.thresholds,
+                )
     finally:
         await engine.dispose()
     completed_result = execution.result
@@ -217,6 +259,11 @@ async def run(
                 if completed_result
                 else 0,
                 "elapsed_seconds": perf_counter() - clock,
+                "edge_guided_candidates": (
+                    edge_guided_summary(guided_result)
+                    if guided_result is not None
+                    else None
+                ),
             }
         },
     )
