@@ -929,4 +929,3 @@ async def test_walk_forward_insufficient_history_is_persisted_and_reused_exactly
         )
     )
     await session.commit()
-
