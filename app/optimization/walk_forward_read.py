@@ -1,3 +1,4 @@
+
 from uuid import UUID
 
 from sqlalchemy import and_, or_, select
@@ -8,12 +9,15 @@ from app.optimization.schemas import (
     CandidateDefinitionResponse,
     ScoreParametersResponse,
     SegmentBoundaryResponse,
+    SegmentMetricsResponse,
     StrategyParametersResponse,
     WalkForwardBenchmarkResponse,
     WalkForwardCandidatePageResponse,
     WalkForwardConfigurationResponse,
     WalkForwardRunDetailResponse,
     WalkForwardRunResponse,
+    WalkForwardSelectionPageResponse,
+    WalkForwardSelectionResponse,
     WalkForwardStabilityResponse,
     WalkForwardWindowEvaluationPageResponse,
     WalkForwardWindowEvaluationResponse,
@@ -23,6 +27,7 @@ from app.optimization.walk_forward import WalkForwardClassification
 from app.optimization.walk_forward_memory import (
     WalkForwardBenchmarkEvaluationRecord,
     WalkForwardCandidateEvaluationRecord,
+    WalkForwardCandidateSelectionRecord,
     WalkForwardCandidateStabilityRecord,
     WalkForwardRunRecord,
     WalkForwardWindowRecord,
@@ -144,6 +149,7 @@ async def read_walk_forward_candidates(
                 statement.order_by(
                     WalkForwardCandidateStabilityRecord.ranking.asc(),
                     WalkForwardCandidateStabilityRecord.stable_candidate_id.asc(),
+
                 ).limit(limit + 1)
             )
         )
@@ -173,9 +179,9 @@ async def read_walk_forward_candidate_windows(
     cursor: str | None,
 ) -> WalkForwardWindowEvaluationPageResponse:
     exists = await session.scalar(
-        select(WalkForwardCandidateStabilityRecord.id).where(
-            WalkForwardCandidateStabilityRecord.walk_forward_run_id == run_id,
-            WalkForwardCandidateStabilityRecord.stable_candidate_id == candidate_id,
+        select(WalkForwardCandidateSelectionRecord.id).where(
+            WalkForwardCandidateSelectionRecord.walk_forward_run_id == run_id,
+            WalkForwardCandidateSelectionRecord.stable_candidate_id == candidate_id,
         )
     )
     if exists is None:
@@ -183,15 +189,27 @@ async def read_walk_forward_candidate_windows(
             f"candidate {candidate_id} was not found in walk-forward run {run_id}"
         )
     statement = (
-        select(WalkForwardCandidateEvaluationRecord, WalkForwardWindowRecord)
+        select(
+            WalkForwardCandidateSelectionRecord,
+            WalkForwardCandidateEvaluationRecord,
+            WalkForwardWindowRecord,
+        )
         .join(
             WalkForwardWindowRecord,
-            WalkForwardWindowRecord.id
-            == WalkForwardCandidateEvaluationRecord.window_id,
+            WalkForwardWindowRecord.id == WalkForwardCandidateSelectionRecord.window_id,
+        )
+        .outerjoin(
+            WalkForwardCandidateEvaluationRecord,
+            and_(
+                WalkForwardCandidateEvaluationRecord.window_id
+                == WalkForwardCandidateSelectionRecord.window_id,
+                WalkForwardCandidateEvaluationRecord.stable_candidate_id
+                == WalkForwardCandidateSelectionRecord.stable_candidate_id,
+            ),
         )
         .where(
-            WalkForwardCandidateEvaluationRecord.walk_forward_run_id == run_id,
-            WalkForwardCandidateEvaluationRecord.stable_candidate_id == candidate_id,
+            WalkForwardCandidateSelectionRecord.walk_forward_run_id == run_id,
+            WalkForwardCandidateSelectionRecord.stable_candidate_id == candidate_id,
         )
     )
     if cursor is not None:
@@ -214,10 +232,89 @@ async def read_walk_forward_candidate_windows(
     page = rows[:limit]
     return WalkForwardWindowEvaluationPageResponse(
         items=tuple(
-            _evaluation_response(evaluation, window) for evaluation, window in page
+            _evaluation_response(selection, evaluation, window)
+            for selection, evaluation, window in page
         ),
         has_more=len(rows) > limit,
-        next_cursor=(str(page[-1][1].ordinal) if len(rows) > limit and page else None),
+        next_cursor=(str(page[-1][2].ordinal) if len(rows) > limit and page else None),
+    )
+
+
+async def read_walk_forward_selections(
+    session: AsyncSession,
+    run_id: UUID,
+    *,
+    selected_for_test: bool | None,
+    limit: int,
+    cursor: str | None,
+) -> WalkForwardSelectionPageResponse:
+    if await session.get(WalkForwardRunRecord, run_id) is None:
+        raise WalkForwardReadNotFoundError(f"walk-forward run {run_id} was not found")
+    statement = (
+        select(
+            WalkForwardCandidateSelectionRecord,
+            WalkForwardWindowRecord,
+            StrategyCandidateRecord,
+        )
+        .join(
+            WalkForwardWindowRecord,
+            WalkForwardWindowRecord.id == WalkForwardCandidateSelectionRecord.window_id,
+        )
+        .join(
+            StrategyCandidateRecord,
+            StrategyCandidateRecord.stable_candidate_id
+            == WalkForwardCandidateSelectionRecord.stable_candidate_id,
+        )
+        .where(WalkForwardCandidateSelectionRecord.walk_forward_run_id == run_id)
+    )
+    if selected_for_test is not None:
+        statement = statement.where(
+            WalkForwardCandidateSelectionRecord.selected_for_test == selected_for_test
+        )
+    if cursor is not None:
+        ordinal, rank, candidate_id = _decode_selection_cursor(cursor)
+        statement = statement.where(
+            or_(
+                WalkForwardWindowRecord.ordinal > ordinal,
+                and_(
+                    WalkForwardWindowRecord.ordinal == ordinal,
+                    WalkForwardCandidateSelectionRecord.validation_rank > rank,
+                ),
+                and_(
+                    WalkForwardWindowRecord.ordinal == ordinal,
+                    WalkForwardCandidateSelectionRecord.validation_rank == rank,
+                    WalkForwardCandidateSelectionRecord.stable_candidate_id
+                    > candidate_id,
+                ),
+            )
+        )
+    rows = (
+        (
+            await session.execute(
+                statement.order_by(
+                    WalkForwardWindowRecord.ordinal.asc(),
+                    WalkForwardCandidateSelectionRecord.validation_rank.asc(),
+                    WalkForwardCandidateSelectionRecord.stable_candidate_id.asc(),
+                ).limit(limit + 1)
+            )
+        )
+        .tuples()
+        .all()
+
+    )
+    page = rows[:limit]
+    return WalkForwardSelectionPageResponse(
+        items=tuple(
+            _selection_response(selection, window, candidate)
+            for selection, window, candidate in page
+        ),
+        has_more=len(rows) > limit,
+        next_cursor=(
+            f"{page[-1][1].ordinal}:{page[-1][0].validation_rank}:"
+            f"{page[-1][0].stable_candidate_id}"
+            if len(rows) > limit and page
+            else None
+        ),
     )
 
 
@@ -277,6 +374,7 @@ def _window_response(window: WalkForwardWindowRecord) -> WalkForwardWindowRespon
         test=SegmentBoundaryResponse(start=window.test_from, end=window.test_to),
         decision_count=window.decision_count,
         dataset_fingerprint=window.dataset_fingerprint,
+        selection_fingerprint=window.selection_fingerprint,
     )
 
 
@@ -329,25 +427,31 @@ def _stability_response(
 
 
 def _evaluation_response(
-    evaluation: WalkForwardCandidateEvaluationRecord,
+    selection: WalkForwardCandidateSelectionRecord,
+    evaluation: WalkForwardCandidateEvaluationRecord | None,
     window: WalkForwardWindowRecord,
 ) -> WalkForwardWindowEvaluationResponse:
     return WalkForwardWindowEvaluationResponse(
-        id=evaluation.id,
+        id=evaluation.id if evaluation else None,
         window=_window_response(window),
-        status=evaluation.status,
-        total_return=evaluation.total_return,
-        absolute_pnl=evaluation.absolute_pnl,
-        max_drawdown=evaluation.max_drawdown,
-        final_equity=evaluation.final_equity,
-        fees_paid=evaluation.fees_paid,
-        trade_count=evaluation.trade_count,
-        return_over_drawdown=evaluation.return_over_drawdown,
-        failure_reason=evaluation.failure_reason,
+        validation_rank=selection.validation_rank,
+        selected_for_test=selection.selected_for_test,
+        selection_reason=selection.selection_reason,
+        validation_metrics=_validation_metrics(selection),
+        status=evaluation.status if evaluation else "not_selected",
+        total_return=evaluation.total_return if evaluation else None,
+        absolute_pnl=evaluation.absolute_pnl if evaluation else None,
+        max_drawdown=evaluation.max_drawdown if evaluation else None,
+        final_equity=evaluation.final_equity if evaluation else None,
+        fees_paid=evaluation.fees_paid if evaluation else None,
+        trade_count=evaluation.trade_count if evaluation else None,
+        return_over_drawdown=(evaluation.return_over_drawdown if evaluation else None),
+        failure_reason=evaluation.failure_reason if evaluation else None,
     )
 
 
 def _benchmark_response(
+
     value: WalkForwardBenchmarkEvaluationRecord, ordinal: int
 ) -> WalkForwardBenchmarkResponse:
     return WalkForwardBenchmarkResponse(
@@ -374,3 +478,43 @@ def _decode_candidate_cursor(cursor: str) -> tuple[int, str]:
         return int(ranking), candidate_id
     except ValueError as error:
         raise ValueError("invalid walk-forward candidate cursor") from error
+
+
+def _validation_metrics(
+    value: WalkForwardCandidateSelectionRecord,
+) -> SegmentMetricsResponse:
+    return SegmentMetricsResponse(
+        segment="validation",
+        total_return=value.validation_total_return,
+        absolute_pnl=value.validation_absolute_pnl,
+        max_drawdown=value.validation_max_drawdown,
+        trade_count=value.validation_trade_count,
+        fees_paid=value.validation_fees_paid,
+        final_equity=value.validation_final_equity,
+        return_over_drawdown=value.validation_return_over_drawdown,
+    )
+
+
+def _selection_response(
+    selection: WalkForwardCandidateSelectionRecord,
+    window: WalkForwardWindowRecord,
+    candidate: StrategyCandidateRecord,
+) -> WalkForwardSelectionResponse:
+    return WalkForwardSelectionResponse(
+        definition=_definition(candidate),
+        window=_window_response(window),
+        validation_rank=selection.validation_rank,
+        selected_for_test=selection.selected_for_test,
+        selection_reason=selection.selection_reason,
+        validation_metrics=_validation_metrics(selection),
+    )
+
+
+def _decode_selection_cursor(cursor: str) -> tuple[int, int, str]:
+    try:
+        ordinal, rank, candidate_id = cursor.split(":", maxsplit=2)
+        if not candidate_id:
+            raise ValueError
+        return int(ordinal), int(rank), candidate_id
+    except ValueError as error:
+        raise ValueError("invalid walk-forward selection cursor") from error
