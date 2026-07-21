@@ -367,4 +367,3 @@ def _evaluation(
         _metrics(total_return),
         None,
     )
-
