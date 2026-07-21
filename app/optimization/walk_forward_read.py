@@ -1,4 +1,3 @@
-
 from uuid import UUID
 
 from sqlalchemy import and_, or_, select
@@ -149,7 +148,6 @@ async def read_walk_forward_candidates(
                 statement.order_by(
                     WalkForwardCandidateStabilityRecord.ranking.asc(),
                     WalkForwardCandidateStabilityRecord.stable_candidate_id.asc(),
-
                 ).limit(limit + 1)
             )
         )
@@ -300,7 +298,6 @@ async def read_walk_forward_selections(
         )
         .tuples()
         .all()
-
     )
     page = rows[:limit]
     return WalkForwardSelectionPageResponse(
@@ -451,7 +448,6 @@ def _evaluation_response(
 
 
 def _benchmark_response(
-
     value: WalkForwardBenchmarkEvaluationRecord, ordinal: int
 ) -> WalkForwardBenchmarkResponse:
     return WalkForwardBenchmarkResponse(
