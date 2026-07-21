@@ -143,6 +143,13 @@ def result() -> EdgeGuidedEvaluationResult:
 
 
 async def parent_run(session: AsyncSession) -> PredictiveEdgeExecution:
+    existing_id = await session.scalar(
+        select(PredictiveEdgeRunRecord.id).where(
+            PredictiveEdgeRunRecord.experiment_key == PREDICTIVE_KEY
+        )
+    )
+    if existing_id is not None:
+        return PredictiveEdgeExecution(existing_id, True, None, 0, 0)
     configuration = PredictiveEdgeConfiguration(
         thresholds=EvidenceThresholds(minimum_windows=1)
     )
