@@ -27,7 +27,6 @@ from app.paper.config import SimulationConfiguration, quantize_financial
 from app.scores.calculator import BaselineTechnicalParameters
 from app.strategies.baseline_long_only import (
     BaselineLongOnlyParameters,
-    StrategyAction,
     evaluate_baseline_long_only,
 )
 
@@ -147,25 +146,6 @@ def test_absent_action_filter_preserves_the_original_historical_flow() -> None:
             decision_action_filter=lambda _row, _open, action: action,
         )
     assert identity_filtered == original
-
-
-def test_action_filter_entry_uses_the_frozen_production_position_size() -> None:
-    outputs = [SimpleNamespace(overall_score=Decimal(0))] * 4
-    with patch(
-        "app.optimization.simulation.calculate_baseline_score", side_effect=outputs
-    ):
-        result = simulate_historical_feature_matrix(
-            dataset=source_dataset(),
-            feature_matrix=matrix(),
-            initial_cash=Decimal("10000"),
-            fee_rate=Decimal("0.001"),
-            slippage_rate=Decimal("0.0005"),
-            decision_action_filter=lambda _row, position_open, action: (
-                StrategyAction.OPEN_POSITION if not position_open else action
-            ),
-        )
-    assert result.trades[0].side == "buy"
-    assert result.trades[0].quantity > 0
 
 
 def test_result_preserves_effective_simulation_configuration() -> None:

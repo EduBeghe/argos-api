@@ -69,8 +69,8 @@ hypotheses when each has independently selected and confirmed evidence.
 ## Edge-guided strategy candidates
 
 The optional edge-guided stage converts each confirmed actionable hypothesis into at
-most one deterministic candidate. A `long_entry` candidate applies the existing
-production entry action only in its frozen bin and original condition. An `exit_or_avoid`
+most one deterministic candidate. A `long_entry` candidate gates an entry already
+requested by production to its frozen bin and original condition. An `exit_or_avoid`
 candidate suppresses an entry when flat or applies the existing full-exit action when a
 position is open only while both its bin and condition match. Condition evaluation
 reuses the Predictive Edge Map semantics; each window freezes its volatility boundary

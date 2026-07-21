@@ -228,8 +228,10 @@ def apply_edge_guided_action(
         )
     )
     if candidate.suggested_action is SuggestedAction.LONG_ENTRY:
-        if inside and not position_is_open:
-            return StrategyAction.OPEN_POSITION
+        if position_is_open:
+            return baseline_action
+        if baseline_action is StrategyAction.OPEN_POSITION:
+            return StrategyAction.OPEN_POSITION if inside else StrategyAction.NO_ACTION
         return baseline_action
     if candidate.suggested_action is SuggestedAction.EXIT_OR_AVOID and inside:
         return StrategyAction.SELL_ALL if position_is_open else StrategyAction.NO_ACTION

@@ -245,14 +245,16 @@ def test_diagnostic_or_unconfirmed_evidence_produces_no_candidate() -> None:
     assert candidates(()) == ()
 
 
-def test_long_entry_applies_only_inside_bin_and_preserves_baseline_outside() -> None:
+def test_long_entry_gates_only_a_baseline_entry() -> None:
     candidate = candidates((hypothesis(),))[0]
+    inside = row("-0.015")
+    outside = row("0.01")
     assert (
         apply_edge_guided_action(
             candidate=candidate,
-            row=row("-0.015"),
+            row=inside,
             position_is_open=False,
-            baseline_action=StrategyAction.NO_ACTION,
+            baseline_action=StrategyAction.OPEN_POSITION,
             volatility_threshold=Decimal("0.02"),
         )
         is StrategyAction.OPEN_POSITION
@@ -260,7 +262,7 @@ def test_long_entry_applies_only_inside_bin_and_preserves_baseline_outside() -> 
     assert (
         apply_edge_guided_action(
             candidate=candidate,
-            row=row("0.01"),
+            row=inside,
             position_is_open=False,
             baseline_action=StrategyAction.NO_ACTION,
             volatility_threshold=Decimal("0.02"),
@@ -270,12 +272,32 @@ def test_long_entry_applies_only_inside_bin_and_preserves_baseline_outside() -> 
     assert (
         apply_edge_guided_action(
             candidate=candidate,
-            row=row("0.01"),
+            row=outside,
+            position_is_open=False,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=outside,
             position_is_open=False,
             baseline_action=StrategyAction.OPEN_POSITION,
             volatility_threshold=Decimal("0.02"),
         )
-        is StrategyAction.OPEN_POSITION
+        is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=inside,
+            position_is_open=True,
+            baseline_action=StrategyAction.SELL_ALL,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.SELL_ALL
     )
 
 
@@ -328,7 +350,7 @@ def test_condition_is_part_of_identity_and_required_for_application() -> None:
             candidate=candidate,
             row=row("-0.015", atr_14="1"),
             position_is_open=False,
-            baseline_action=StrategyAction.NO_ACTION,
+            baseline_action=StrategyAction.OPEN_POSITION,
             volatility_threshold=Decimal("0.02"),
         )
         is StrategyAction.NO_ACTION
@@ -338,7 +360,7 @@ def test_condition_is_part_of_identity_and_required_for_application() -> None:
             candidate=candidate,
             row=row("-0.015", atr_14="3"),
             position_is_open=False,
-            baseline_action=StrategyAction.NO_ACTION,
+            baseline_action=StrategyAction.OPEN_POSITION,
             volatility_threshold=Decimal("0.02"),
         )
         is StrategyAction.OPEN_POSITION
