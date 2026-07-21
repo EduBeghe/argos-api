@@ -86,8 +86,13 @@ selects and test only confirms. Final status aggregates valid, confirmed, valida
 rejected, and test-rejected windows using the existing minimum-window and stability
 criteria. Results are `rejected_validation`, `rejected_test`, or
 `confirmed_candidate` and retain informative comparisons with production and
-buy-and-hold. The stage is bounded, in-memory, and opt-in; it does not persist candidate
-evaluations, activate a Strategy, mutate Paper Trading, or guarantee future results.
+buy-and-hold. The stage is bounded and opt-in. Without `--persist`, it remains strictly
+in memory. With both flags, one transaction stores the evaluation run, each candidate,
+and each valid walk-forward window. A deterministic experiment key includes the source
+analysis, dataset and range, window configuration, capital, costs, cadence, candidate
+limit, persistence-contract version, and input hypotheses. An identical completed run
+is reconstructed without reevaluation; partial data is never reusable. Persistence
+does not activate a Strategy, mutate Paper Trading, or guarantee future results.
 
 ```text
 Predictive Edge Map

@@ -410,9 +410,15 @@ python -m app.jobs.analyze_predictive_edges \
 This opt-in stage reuses the historical simulator and existing walk-forward windows,
 preserves each hypothesis's frozen bin and condition, compares isolated test evidence
 with production and buy-and-hold, and reports
-`rejected_validation`, `rejected_test`, or `confirmed_candidate`. It remains in memory:
-no candidate is persisted, activated, or sent to Paper Trading, and historical
-confirmation is not a guarantee of future performance.
+`rejected_validation`, `rejected_test`, or `confirmed_candidate`. Without `--persist`
+it remains strictly in memory. With both `--edge-guided-candidates` and `--persist`,
+Argos atomically records the evaluation run, individually queryable candidates, and
+their walk-forward window evidence. Repeating the exact experiment reconstructs the
+persisted result without rerunning the candidate evaluator; any change to the source
+analysis, dataset, range, window configuration, capital, costs, cadence, candidate
+limit, contract version, or input hypotheses creates a different experiment identity.
+No candidate is activated or sent to Paper Trading, and historical confirmation is
+not a guarantee of future performance.
 
 ## Historical optimization memory API
 

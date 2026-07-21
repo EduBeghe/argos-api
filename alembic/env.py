@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.database.base import Base
 from app.market import persistence  # noqa: F401
 from app.optimization import (
+    edge_guided_memory,  # noqa: F401
     memory,  # noqa: F401
     predictive_edge_memory,  # noqa: F401
     walk_forward_memory,  # noqa: F401
