@@ -153,3 +153,67 @@ timestamps remain exact. The contract maps stored budgets, allocations, plans, a
 parameters into explicit versionable schemas; it does not expose raw JSONB, candles,
 Features, matrices, or unsafe failure details. GET requests never write, start a
 refinement, or contact a provider. Unknown run and candidate identities return 404.
+
+## Walk-forward stability evaluation
+
+The original deterministic 60/20/20 split remains the primary refinement pass.
+Optional walk-forward evaluation complements it with several chronological, half-open
+training, validation, and test windows. Features are calculated once in memory from
+prior candles. Algorithm version 2 runs bounded candidate generation and training
+screening independently inside each window, ranks candidates only with that window's
+validation matrix, and evaluates only the selected candidates on its test matrix.
+Global refinement validation/test evidence, test outcomes, and later windows cannot
+influence an earlier selection.
+
+Version 2 defaults to 180 training days, 60 validation days, 60 test days, a
+60-day step, at most six windows, and at most ten candidates. CLI flags expose every
+duration and limit, plus minimum evidence, profitable-window ratio, drawdown, and
+return-dispersion thresholds. Insufficient history is persisted explicitly and never
+produces a recommendation.
+
+When more valid windows exist than the configured limit, only the most recent windows
+are built and retained, with ordinals normalized to `1..N`. Each window stores UTC
+bounds, decision count, a selection fingerprint over training/validation evidence and
+configuration, and a full fingerprint that additionally includes isolated test
+evidence. Candidate selections preserve validation rank, selection reason, validation
+metrics, and whether test evaluation was authorized. Nonselection is not an evaluation
+failure and contributes no stability evidence.
+Candidate evaluations preserve net return, P&L, drawdown, ending equity, fees, trades,
+and return over drawdown. Stability requires multiple profitable windows, bounded
+drawdown and dispersion, and trading activity; one exceptional window cannot establish
+stability. Production baseline and buy-and-hold reuse the exact refinement simulation,
+fees, slippage, and cash mathematics.
+
+The complete configuration and source refinement run form the experiment identity.
+Repeating an identical completed evaluation reuses persisted evidence and reports
+computed, reused, and avoided counts. Main metrics remain relational and indexed.
+
+Run manually with:
+
+```sh
+python -m app.jobs.refine_historical_strategy \
+  --asset BTC/USDT --provider binance --market-type spot --interval 5m \
+  --from 2024-01-01T00:00:00Z --to 2026-01-01T00:00:00Z \
+  --initial-cash 10000 --fee-rate 0.001 --slippage-rate 0.0005 \
+  --persist --walk-forward \
+  --walk-forward-training-days 180 \
+  --walk-forward-validation-days 60 \
+  --walk-forward-test-days 60 \
+  --walk-forward-step-days 60 \
+  --walk-forward-max-windows 6 \
+  --walk-forward-max-candidates 10
+```
+
+Read-only consumers use:
+
+- GET /optimization/refinement-runs/{run_id}/walk-forward
+- GET /optimization/walk-forward-runs/{walk_forward_run_id}
+- GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates
+- GET /optimization/walk-forward-runs/{walk_forward_run_id}/selections
+- GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates/{candidate_id}/windows
+
+Candidate and window evidence use stable keyset cursors and a maximum page size of 200.
+GET requests never run simulations or contact providers. Walk-forward is decision
+support, not proof of causality or profitability, and never promotes a candidate or
+changes active Paper Trading. Weekly execution, explicit manual promotion into an
+immutable Strategy version, and an isolated parallel wallet remain future work.

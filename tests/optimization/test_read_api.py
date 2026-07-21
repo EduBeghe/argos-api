@@ -8,7 +8,15 @@ from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.experience import EvidenceClassification
 from app.optimization.read_service import OptimizationReadNotFoundError
-from app.optimization.schemas import CandidatePageResponse, EvaluationPageResponse
+from app.optimization.schemas import (
+    CandidatePageResponse,
+    EvaluationPageResponse,
+    WalkForwardCandidatePageResponse,
+    WalkForwardSelectionPageResponse,
+    WalkForwardWindowEvaluationPageResponse,
+)
+from app.optimization.walk_forward import WalkForwardClassification
+from app.optimization.walk_forward_read import WalkForwardReadNotFoundError
 from main import app
 
 
@@ -157,3 +165,110 @@ def test_run_evaluations_use_bounded_cursor_pagination(client: TestClient) -> No
         params={"limit": 201},
     )
     assert too_large.status_code == 422
+
+
+def test_walk_forward_candidate_filters_and_cursor_are_forwarded(
+    client: TestClient,
+) -> None:
+    run_id = uuid4()
+    reader = AsyncMock(
+        return_value=WalkForwardCandidatePageResponse(
+            items=(), has_more=False, next_cursor=None
+        )
+    )
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch("app.optimization.router.read_walk_forward_candidates", reader):
+            response = client.get(
+                f"/optimization/walk-forward-runs/{run_id}/candidates",
+                params={
+                    "classification": "stable_candidate",
+                    "limit": 25,
+                    "cursor": "2:candidate",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "has_more": False, "next_cursor": None}
+    reader.assert_awaited_once_with(
+        ANY,
+        run_id,
+        classification=WalkForwardClassification.STABLE_CANDIDATE,
+        limit=25,
+        cursor="2:candidate",
+    )
+
+
+def test_walk_forward_window_evidence_is_bounded_and_unknown_is_404(
+    client: TestClient,
+) -> None:
+    run_id = uuid4()
+    page_reader = AsyncMock(
+        return_value=WalkForwardWindowEvaluationPageResponse(
+            items=(), has_more=False, next_cursor=None
+        )
+    )
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch(
+            "app.optimization.router.read_walk_forward_candidate_windows",
+            page_reader,
+        ):
+            response = client.get(
+                f"/optimization/walk-forward-runs/{run_id}/candidates/candidate/windows",
+                params={"limit": 2, "cursor": "3"},
+            )
+        with patch(
+            "app.optimization.router.read_walk_forward_run",
+            AsyncMock(side_effect=WalkForwardReadNotFoundError("not found")),
+        ):
+            missing = client.get(f"/optimization/walk-forward-runs/{uuid4()}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    page_reader.assert_awaited_once_with(ANY, run_id, "candidate", limit=2, cursor="3")
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "not found"}
+
+    too_large = client.get(
+        f"/optimization/walk-forward-runs/{run_id}/candidates/candidate/windows",
+        params={"limit": 201},
+    )
+    assert too_large.status_code == 422
+
+
+def test_walk_forward_selection_filter_and_cursor_are_forwarded(
+    client: TestClient,
+) -> None:
+    run_id = uuid4()
+    reader = AsyncMock(
+        return_value=WalkForwardSelectionPageResponse(
+            items=(), has_more=False, next_cursor=None
+        )
+    )
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch("app.optimization.router.read_walk_forward_selections", reader):
+            response = client.get(
+                f"/optimization/walk-forward-runs/{run_id}/selections",
+                params={
+                    "selected_for_test": "false",
+                    "limit": 20,
+                    "cursor": "1:2:candidate",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "has_more": False, "next_cursor": None}
+    reader.assert_awaited_once_with(
+        ANY,
+        run_id,
+        selected_for_test=False,
+        limit=20,
+        cursor="1:2:candidate",
+    )

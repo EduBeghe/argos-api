@@ -376,6 +376,11 @@ Persisted refinement evidence is exposed through read-only endpoints:
 - `GET /optimization/refinement-runs/{run_id}/evaluations`
 - `GET /optimization/candidates`
 - `GET /optimization/candidates/{stable_candidate_id}`
+- `GET /optimization/refinement-runs/{run_id}/walk-forward`
+- `GET /optimization/walk-forward-runs/{walk_forward_run_id}`
+- `GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates`
+- `GET /optimization/walk-forward-runs/{walk_forward_run_id}/selections`
+- `GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates/{candidate_id}/windows`
 
 Run-list filters include `asset`, `provider`, `market_type`, `interval`, `status`,
 `recommendation_status`, `started_from`, and `started_to`. Candidate-list filters
@@ -402,6 +407,35 @@ curl "http://localhost:8000/optimization/candidates/<stable-candidate-id>?limit=
 
 See [Experiment memory and experience-guided search](docs/008-experiment-memory.md)
 for the evidence-compatibility and planning contracts behind these read models.
+
+An optional persisted walk-forward pass evaluates the production baseline,
+buy-and-hold, and a bounded set of refined candidates over multiple chronological
+out-of-sample test windows:
+
+```sh
+python -m app.jobs.refine_historical_strategy \
+  --asset BTC/USDT --provider binance --market-type spot --interval 5m \
+  --from 2024-01-01T00:00:00Z --to 2026-01-01T00:00:00Z \
+  --initial-cash 10000 --fee-rate 0.001 --slippage-rate 0.0005 \
+  --persist --walk-forward \
+  --walk-forward-training-days 180 \
+  --walk-forward-validation-days 60 \
+  --walk-forward-test-days 60 \
+  --walk-forward-step-days 60 \
+  --walk-forward-max-windows 6 \
+  --walk-forward-max-candidates 10
+```
+
+The version-2 windows are UTC and half-open. Each window performs bounded candidate
+generation and training screening, ranks candidates only on that window's validation
+segment, and evaluates only its selected candidates on the isolated test segment.
+Global refinement validation/test evidence and later windows cannot influence an
+earlier selection. The most recent configured number of valid windows is retained,
+with ordinals normalized from one; per-window selection ranks, reasons, metrics, and
+fingerprints are persisted and available through the selections endpoint. Identical
+completed configurations are reused. Walk-forward
+classifications are decision support only: they do not modify production Strategy
+configuration or active Paper Trading.
 
 ## Production deployment
 

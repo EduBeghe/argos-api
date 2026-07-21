@@ -430,21 +430,21 @@ def refine_historical_strategy(
         and (configuration.fee_rate > 0 or configuration.slippage_rate > 0)
     )
     buy_and_hold = BenchmarkResults(
-        _buy_and_hold(
+        simulate_buy_and_hold(
             matrices[RefinementSegmentName.TRAINING],
             RefinementSegmentName.TRAINING,
             dataset.identity.instrument,
             cash,
             configuration,
         ),
-        _buy_and_hold(
+        simulate_buy_and_hold(
             matrices[RefinementSegmentName.VALIDATION],
             RefinementSegmentName.VALIDATION,
             dataset.identity.instrument,
             cash,
             configuration,
         ),
-        _buy_and_hold(
+        simulate_buy_and_hold(
             matrices[RefinementSegmentName.TEST],
             RefinementSegmentName.TEST,
             dataset.identity.instrument,
@@ -648,7 +648,7 @@ def _compact(
     )
 
 
-def _buy_and_hold(
+def simulate_buy_and_hold(
     matrix: HistoricalFeatureMatrix,
     segment: RefinementSegmentName,
     instrument: Instrument,
@@ -703,6 +703,10 @@ def _buy_and_hold(
         final_equity,
         _return_over_drawdown(total_return, drawdown),
     )
+
+
+# Backward-compatible private alias retained for existing callers and tests.
+_buy_and_hold = simulate_buy_and_hold
 
 
 def _calculate_buy_and_hold_entry(

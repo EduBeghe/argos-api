@@ -8,7 +8,10 @@ from alembic import context
 from app.core.config import get_settings
 from app.core.database.base import Base
 from app.market import persistence  # noqa: F401
-from app.optimization import memory  # noqa: F401
+from app.optimization import (
+    memory,  # noqa: F401
+    walk_forward_memory,  # noqa: F401
+)
 from app.paper import equity_snapshots  # noqa: F401
 
 config = context.config

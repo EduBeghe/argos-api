@@ -287,3 +287,140 @@ class CandidateDetailResponse(BaseModel):
     was_ever_recommended: bool
     related_run_ids: tuple[UUID, ...]
     evaluations: CandidateEvaluationPageResponse
+
+
+class WalkForwardConfigurationResponse(BaseModel):
+    training_days: int
+    validation_days: int
+    test_days: int
+    step_days: int
+    maximum_windows: int
+    maximum_candidates: int
+    minimum_valid_windows: int
+    minimum_profitable_window_ratio: Decimal
+    maximum_drawdown: Decimal
+    maximum_return_standard_deviation: Decimal
+
+
+class WalkForwardRunResponse(BaseModel):
+    id: UUID
+    experiment_key: str
+    refinement_run_id: UUID
+    status: str
+    algorithm_version: int
+    dataset_fingerprint: str
+    configuration: WalkForwardConfigurationResponse
+    initial_cash: Decimal
+    fee_rate: Decimal
+    slippage_rate: Decimal
+    decision_interval_seconds: int
+    windows_generated: int
+    windows_completed: int
+    candidates_evaluated: int
+    evaluations_computed: int
+    evaluations_reused: int
+    compute_avoided_estimate: int
+    recommended_candidate_id: str | None
+    recommendation_explanation: str
+    started_at: datetime
+    completed_at: datetime
+    elapsed_seconds: Decimal
+
+
+class WalkForwardWindowResponse(BaseModel):
+    id: UUID
+    ordinal: int
+    training: SegmentBoundaryResponse
+    validation: SegmentBoundaryResponse
+    test: SegmentBoundaryResponse
+    decision_count: int
+    dataset_fingerprint: str
+    selection_fingerprint: str
+
+
+class WalkForwardRunDetailResponse(BaseModel):
+    run: WalkForwardRunResponse
+    windows: tuple[WalkForwardWindowResponse, ...]
+    benchmarks: tuple["WalkForwardBenchmarkResponse", ...]
+
+
+class WalkForwardBenchmarkResponse(BaseModel):
+    id: UUID
+    window_ordinal: int
+    benchmark: str
+    status: str
+    total_return: Decimal | None
+    absolute_pnl: Decimal | None
+    max_drawdown: Decimal | None
+    final_equity: Decimal | None
+    fees_paid: Decimal | None
+    trade_count: int | None
+    return_over_drawdown: Decimal | None
+    failure_reason: str | None
+
+
+class WalkForwardStabilityResponse(BaseModel):
+    definition: CandidateDefinitionResponse
+    ranking: int
+    classification: str
+    windows_evaluated: int
+    profitable_windows: int
+    losing_windows: int
+    profitable_window_ratio: Decimal
+    mean_return: Decimal
+    median_return: Decimal
+    worst_window_return: Decimal
+    best_window_return: Decimal
+    return_standard_deviation: Decimal
+    mean_max_drawdown: Decimal
+    worst_max_drawdown: Decimal
+    aggregate_fees_paid: Decimal
+    aggregate_trade_count: int
+    positive_excess_return_vs_production_ratio: Decimal
+    positive_excess_return_vs_buy_and_hold_ratio: Decimal
+    explanation: str
+
+
+class WalkForwardCandidatePageResponse(BaseModel):
+    items: tuple[WalkForwardStabilityResponse, ...]
+    has_more: bool
+    next_cursor: str | None
+
+
+class WalkForwardWindowEvaluationResponse(BaseModel):
+    id: UUID | None
+    window: WalkForwardWindowResponse
+    validation_rank: int
+    selected_for_test: bool
+    selection_reason: str
+    validation_metrics: SegmentMetricsResponse
+    status: str
+    total_return: Decimal | None
+    absolute_pnl: Decimal | None
+    max_drawdown: Decimal | None
+    final_equity: Decimal | None
+    fees_paid: Decimal | None
+    trade_count: int | None
+    return_over_drawdown: Decimal | None
+    failure_reason: str | None
+
+
+class WalkForwardWindowEvaluationPageResponse(BaseModel):
+    items: tuple[WalkForwardWindowEvaluationResponse, ...]
+    has_more: bool
+    next_cursor: str | None
+
+
+class WalkForwardSelectionResponse(BaseModel):
+    definition: CandidateDefinitionResponse
+    window: WalkForwardWindowResponse
+    validation_rank: int
+    selected_for_test: bool
+    selection_reason: str
+    validation_metrics: SegmentMetricsResponse
+
+
+class WalkForwardSelectionPageResponse(BaseModel):
+    items: tuple[WalkForwardSelectionResponse, ...]
+    has_more: bool
+    next_cursor: str | None
