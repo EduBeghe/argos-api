@@ -397,6 +397,22 @@ strictly read-only and does not record reuse. The command never creates executab
 Strategies or mutates Paper Trading. See
 [`docs/009-predictive-edge-map.md`](docs/009-predictive-edge-map.md).
 
+To evaluate at most one historical candidate per confirmed bin hypothesis, add:
+
+```bash
+python -m app.jobs.analyze_predictive_edges \
+  --asset BTC/USDT --provider binance --market-type spot --interval 5m \
+  --from 2024-01-01T00:00:00Z --to 2026-01-01T00:00:00Z \
+  --fee-rate 0.001 --slippage-rate 0.0005 --initial-cash 10000 \
+  --edge-guided-candidates --max-edge-guided-candidates 12
+```
+
+This opt-in stage reuses the historical simulator and chronological split, compares
+each frozen candidate with production and buy-and-hold, and reports
+`rejected_validation`, `rejected_test`, or `confirmed_candidate`. It remains in memory:
+no candidate is persisted, activated, or sent to Paper Trading, and historical
+confirmation is not a guarantee of future performance.
+
 ## Historical optimization memory API
 
 Persisted refinement evidence is exposed through read-only endpoints:

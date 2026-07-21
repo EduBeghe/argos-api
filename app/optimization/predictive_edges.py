@@ -751,6 +751,17 @@ def _predictors(row: HistoricalFeatureRow) -> dict[str, Decimal]:
     }
 
 
+def predictive_edge_value(row: HistoricalFeatureRow, predictor_name: str) -> Decimal:
+    """Return one versioned Predictive Edge Map predictor value for a Feature row."""
+
+    try:
+        return _predictors(row)[predictor_name]
+    except KeyError as error:
+        raise PredictiveEdgeError(
+            f"unsupported predictive-edge predictor: {predictor_name}"
+        ) from error
+
+
 def _phase_rows(
     rows: tuple[HistoricalFeatureRow, ...], start: datetime, end: datetime
 ) -> tuple[HistoricalFeatureRow, ...]:

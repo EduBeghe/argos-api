@@ -66,6 +66,22 @@ suggestions. It has no entry/exit threshold or position size and is not executab
 Different bins of one predictor may create independent long-entry and exit/avoid
 hypotheses when each has independently selected and confirmed evidence.
 
+## Edge-guided strategy candidates
+
+The optional edge-guided stage converts each confirmed actionable hypothesis into at
+most one deterministic candidate. A `long_entry` candidate gates the existing
+production entry action to its frozen bin. An `exit_or_avoid` candidate suppresses an
+entry when flat or applies the existing full-exit action when a position is open inside
+the bin. Neither action opens a short position or changes production configuration.
+
+Candidates reuse the existing historical simulator, fees, slippage, initial cash,
+30-minute cadence, score model, Strategy version, and chronological
+training/validation/test split. Parameters come only from the frozen hypothesis;
+validation selects and test only confirms. Results are `rejected_validation`,
+`rejected_test`, or `confirmed_candidate` and include comparisons with production and
+buy-and-hold. The stage is bounded, in-memory, and opt-in; it does not persist candidate
+evaluations, activate a Strategy, mutate Paper Trading, or guarantee future results.
+
 ```text
 Predictive Edge Map
 -> Evidence-Guided Candidate Generator
@@ -92,3 +108,13 @@ The GET endpoints are strictly read-only, do not contact providers, and never st
 analysis. Without `--persist`, analysis performs no insert, update, reuse-count change,
 or commit. Insufficient history is persisted only as the explicit
 `insufficient_history` conclusion, never as an empty completed run.
+
+Run the optional bounded evaluation with:
+
+```bash
+python -m app.jobs.analyze_predictive_edges \
+  --asset BTC/USDT --provider binance --market-type spot --interval 5m \
+  --from 2024-01-01T00:00:00Z --to 2026-01-01T00:00:00Z \
+  --fee-rate 0.001 --slippage-rate 0.0005 --initial-cash 10000 \
+  --edge-guided-candidates --max-edge-guided-candidates 12
+```
