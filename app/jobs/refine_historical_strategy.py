@@ -21,10 +21,29 @@ from app.optimization.historical_data import (
     HistoricalDatasetRange,
     read_historical_dataset,
 )
+from app.optimization.memory import find_experiment
 from app.optimization.refinement import (
     BenchmarkSegmentResult,
     CandidateSegmentResult,
     RefinementBudget,
+)
+from app.optimization.walk_forward import (
+    DEFAULT_MAXIMUM_CANDIDATES,
+    DEFAULT_MAXIMUM_DRAWDOWN,
+    DEFAULT_MAXIMUM_RETURN_STANDARD_DEVIATION,
+    DEFAULT_MAXIMUM_WINDOWS,
+    DEFAULT_MINIMUM_PROFITABLE_RATIO,
+    DEFAULT_MINIMUM_VALID_WINDOWS,
+    DEFAULT_STEP_DAYS,
+    DEFAULT_TEST_DAYS,
+    DEFAULT_TRAINING_DAYS,
+    DEFAULT_VALIDATION_DAYS,
+    WalkForwardConfiguration,
+    completed_window_count,
+)
+from app.optimization.walk_forward_memory import (
+    WalkForwardExecution,
+    execute_walk_forward,
 )
 from app.scores.calculator import BaselineTechnicalParameters
 
@@ -63,6 +82,57 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-joint-candidates", type=positive_integer, default=1000)
     parser.add_argument("--persist", action="store_true")
     parser.add_argument("--force-recompute", action="store_true")
+    parser.add_argument("--walk-forward", action="store_true")
+    parser.add_argument(
+        "--walk-forward-training-days",
+        type=positive_integer,
+        default=DEFAULT_TRAINING_DAYS,
+    )
+    parser.add_argument(
+        "--walk-forward-validation-days",
+        type=positive_integer,
+        default=DEFAULT_VALIDATION_DAYS,
+    )
+    parser.add_argument(
+        "--walk-forward-test-days",
+        type=positive_integer,
+        default=DEFAULT_TEST_DAYS,
+    )
+    parser.add_argument(
+        "--walk-forward-step-days",
+        type=positive_integer,
+        default=DEFAULT_STEP_DAYS,
+    )
+    parser.add_argument(
+        "--walk-forward-max-windows",
+        type=positive_integer,
+        default=DEFAULT_MAXIMUM_WINDOWS,
+    )
+    parser.add_argument(
+        "--walk-forward-max-candidates",
+        type=positive_integer,
+        default=DEFAULT_MAXIMUM_CANDIDATES,
+    )
+    parser.add_argument(
+        "--walk-forward-min-valid-windows",
+        type=positive_integer,
+        default=DEFAULT_MINIMUM_VALID_WINDOWS,
+    )
+    parser.add_argument(
+        "--walk-forward-min-profitable-ratio",
+        type=parse_decimal,
+        default=DEFAULT_MINIMUM_PROFITABLE_RATIO,
+    )
+    parser.add_argument(
+        "--walk-forward-max-drawdown",
+        type=parse_decimal,
+        default=DEFAULT_MAXIMUM_DRAWDOWN,
+    )
+    parser.add_argument(
+        "--walk-forward-max-return-standard-deviation",
+        type=parse_decimal,
+        default=DEFAULT_MAXIMUM_RETURN_STANDARD_DEVIATION,
+    )
     return parser
 
 
@@ -71,6 +141,8 @@ async def run(
 ) -> ExperimentExecution:
     if args.force_recompute and not args.persist:
         raise ValueError("--force-recompute requires --persist")
+    if args.walk_forward and not args.persist:
+        raise ValueError("--walk-forward requires --persist")
     started = perf_counter()
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -107,12 +179,99 @@ async def run(
                 force_recompute=args.force_recompute,
                 started_at=now or datetime.now(UTC),
             )
+            walk_forward: WalkForwardExecution | None = None
+            if args.walk_forward:
+                refinement_run_id = (
+                    execution.reused.run_id if execution.reused is not None else None
+                )
+                if refinement_run_id is None:
+                    result = execution.result
+                    if result is None:
+                        raise RuntimeError("refinement execution returned no result")
+                    persisted_run = await find_experiment(
+                        session, result.experiment_key
+                    )
+                    if persisted_run is None:
+                        raise RuntimeError(
+                            "persisted refinement run is unavailable for walk-forward"
+                        )
+                    refinement_run_id = persisted_run.id
+                walk_forward = await execute_walk_forward(
+                    session=session,
+                    dataset=dataset,
+                    refinement_run_id=refinement_run_id,
+                    initial_cash=args.initial_cash,
+                    fee_rate=args.fee_rate,
+                    slippage_rate=args.slippage_rate,
+                    configuration=WalkForwardConfiguration(
+                        training_days=args.walk_forward_training_days,
+                        validation_days=args.walk_forward_validation_days,
+                        test_days=args.walk_forward_test_days,
+                        step_days=args.walk_forward_step_days,
+                        maximum_windows=args.walk_forward_max_windows,
+                        maximum_candidates=args.walk_forward_max_candidates,
+                        minimum_valid_windows=args.walk_forward_min_valid_windows,
+                        minimum_profitable_window_ratio=(
+                            args.walk_forward_min_profitable_ratio
+                        ),
+                        maximum_drawdown=args.walk_forward_max_drawdown,
+                        maximum_return_standard_deviation=(
+                            args.walk_forward_max_return_standard_deviation
+                        ),
+                    ),
+                    started_at=now or datetime.now(UTC),
+                )
             if not args.persist and (session.new or session.dirty or session.deleted):
                 raise RuntimeError(
                     "historical refinement attempted to mutate the session"
                 )
     finally:
         await engine.dispose()
+    if walk_forward is not None:
+        walk_forward_result = walk_forward.result
+        classifications = (
+            tuple(item.classification.value for item in walk_forward_result.stability)
+            if walk_forward_result is not None
+            else ()
+        )
+        logger.info(
+            "Historical walk-forward evaluation completed",
+            extra={
+                "structured_fields": {
+                    "refinement_run_id": str(refinement_run_id),
+                    "walk_forward_run_id": str(walk_forward.run_id),
+                    "windows_generated": (
+                        len(walk_forward_result.windows)
+                        if walk_forward_result
+                        else None
+                    ),
+                    "windows_completed": (
+                        completed_window_count(walk_forward_result)
+                        if walk_forward_result
+                        else None
+                    ),
+                    "candidates_evaluated": (
+                        len(walk_forward_result.stability)
+                        if walk_forward_result
+                        else None
+                    ),
+                    "evaluations_computed": walk_forward.evaluations_computed,
+                    "evaluations_reused": walk_forward.evaluations_reused,
+                    "compute_avoided_estimate": (walk_forward.compute_avoided_estimate),
+                    "stable_candidates": classifications.count("stable_candidate"),
+                    "unstable_candidates": classifications.count("unstable_candidate"),
+                    "insufficient_evidence_candidates": classifications.count(
+                        "insufficient_evidence"
+                    ),
+                    "recommended_candidate_id": (
+                        walk_forward_result.recommended_candidate_id
+                        if walk_forward_result
+                        else None
+                    ),
+                    "elapsed_seconds": perf_counter() - started,
+                }
+            },
+        )
     if execution.reused is not None:
         logger.info(
             "Historical strategy refinement reused",
@@ -307,3 +466,4 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
