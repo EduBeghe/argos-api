@@ -290,4 +290,3 @@ def downgrade() -> None:
         table_name="walk_forward_runs",
     )
     op.drop_table("walk_forward_runs")
-
