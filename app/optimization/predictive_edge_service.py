@@ -222,6 +222,7 @@ async def persist_predictive_edge_result(
                 classification=stability_edge.classification.value,
             )
         )
+    await session.flush()
     for edge in result.window_edges:
         validation = edge.validation_metrics
         test = edge.test_metrics
