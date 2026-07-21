@@ -19,6 +19,12 @@ from app.optimization.edge_guided import (
     edge_guided_summary,
     evaluate_edge_guided_candidates,
 )
+from app.optimization.edge_guided_memory import (
+    EdgeGuidedExecution,
+    edge_guided_experiment_key,
+    find_reusable_edge_guided_run,
+    persist_edge_guided_result,
+)
 from app.optimization.feature_matrix import build_historical_feature_matrix
 from app.optimization.historical_data import (
     HistoricalDatasetIdentity,
@@ -133,6 +139,7 @@ async def run(
     engine = create_database_engine(settings)
     factory = create_session_factory(engine)
     guided_result = None
+    guided_execution: EdgeGuidedExecution | None = None
     try:
         async with factory() as session:
             dataset = await read_historical_dataset(
@@ -194,21 +201,80 @@ async def run(
                         simulation=simulation,
                         configuration=configuration,
                     )
-                guided_result = evaluate_edge_guided_candidates(
-                    dataset=dataset,
-                    feature_matrix=matrix,
-                    hypotheses=analysis_result.hypotheses,
-                    initial_cash=getattr(args, "initial_cash", DEFAULT_INITIAL_CASH),
-                    simulation=simulation,
-                    decision_interval=configuration.decision_interval,
-                    maximum_candidates=getattr(
-                        args,
-                        "max_edge_guided_candidates",
-                        DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
-                    ),
-                    windows=windows,
-                    thresholds=configuration.thresholds,
+                initial_cash = getattr(args, "initial_cash", DEFAULT_INITIAL_CASH)
+                maximum_candidates = getattr(
+                    args,
+                    "max_edge_guided_candidates",
+                    DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
                 )
+                guided_key = None
+                if args.persist:
+                    if execution.run_id is None:
+                        raise RuntimeError("persisted predictive-edge run is required")
+                    guided_key = edge_guided_experiment_key(
+                        predictive_edge_run_id=execution.run_id,
+                        dataset_fingerprint=dataset.fingerprint,
+                        instrument=definition.instrument,
+                        range_start=args.start,
+                        range_end=args.end,
+                        windows=configuration.windows,
+                        initial_cash=initial_cash,
+                        simulation=simulation,
+                        decision_interval=configuration.decision_interval,
+                        maximum_candidates=maximum_candidates,
+                        hypothesis_fingerprints=tuple(
+                            item.hypothesis_id for item in analysis_result.hypotheses
+                        ),
+                    )
+                    guided_execution = await find_reusable_edge_guided_run(
+                        session, guided_key
+                    )
+                if guided_execution is None:
+                    guided_result = evaluate_edge_guided_candidates(
+                        dataset=dataset,
+                        feature_matrix=matrix,
+                        hypotheses=analysis_result.hypotheses,
+                        initial_cash=initial_cash,
+                        simulation=simulation,
+                        decision_interval=configuration.decision_interval,
+                        maximum_candidates=maximum_candidates,
+                        windows=windows,
+                        thresholds=configuration.thresholds,
+                    )
+                    if args.persist:
+                        if execution.run_id is None or guided_key is None:
+                            raise RuntimeError(
+                                "edge-guided persistence identity missing"
+                            )
+                        guided_execution = await persist_edge_guided_result(
+                            session=session,
+                            experiment_key=guided_key,
+                            predictive_edge_run_id=execution.run_id,
+                            instrument=definition.instrument,
+                            range_start=args.start,
+                            range_end=args.end,
+                            initial_cash=initial_cash,
+                            simulation=simulation,
+                            decision_interval=configuration.decision_interval,
+                            started_at=started_at,
+                            result=guided_result,
+                        )
+                    else:
+                        if session.new or session.dirty or session.deleted:
+                            raise RuntimeError(
+                                "non-persisted edge-guided evaluation "
+                                "mutated the session"
+                            )
+                        guided_execution = EdgeGuidedExecution(
+                            None,
+                            "",
+                            False,
+                            guided_result,
+                            0,
+                            guided_result.evaluated_count,
+                            0,
+                        )
+                guided_result = guided_execution.result
     finally:
         await engine.dispose()
     completed_result = execution.result
@@ -260,8 +326,22 @@ async def run(
                 else 0,
                 "elapsed_seconds": perf_counter() - clock,
                 "edge_guided_candidates": (
-                    edge_guided_summary(guided_result)
-                    if guided_result is not None
+                    {
+                        **edge_guided_summary(guided_result),
+                        "edge_guided_run_id": str(guided_execution.run_id)
+                        if guided_execution.run_id
+                        else None,
+                        "experiment_key": guided_execution.experiment_key,
+                        "reused_existing_experiment": (
+                            guided_execution.reused_existing_experiment
+                        ),
+                        "evaluations_reused": guided_execution.evaluations_reused,
+                        "evaluations_computed": guided_execution.evaluations_computed,
+                        "compute_avoided_estimate": (
+                            guided_execution.compute_avoided_estimate
+                        ),
+                    }
+                    if guided_result is not None and guided_execution is not None
                     else None
                 ),
             }
