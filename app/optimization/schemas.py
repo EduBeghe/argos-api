@@ -1,3 +1,4 @@
+
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -148,6 +149,7 @@ class RefinementRunSummaryResponse(BaseModel):
 
 class SearchPlanResponse(BaseModel):
     planner_version: int
+
     known_rechecks: tuple[str, ...]
     promising_neighborhoods: tuple[str, ...]
     uncertain_rechecks: tuple[str, ...]
@@ -298,6 +300,7 @@ class WalkForwardConfigurationResponse(BaseModel):
     maximum_candidates: int
     minimum_valid_windows: int
     minimum_profitable_window_ratio: Decimal
+
     maximum_drawdown: Decimal
     maximum_return_standard_deviation: Decimal
 
@@ -335,6 +338,7 @@ class WalkForwardWindowResponse(BaseModel):
     test: SegmentBoundaryResponse
     decision_count: int
     dataset_fingerprint: str
+    selection_fingerprint: str
 
 
 class WalkForwardRunDetailResponse(BaseModel):
@@ -387,8 +391,12 @@ class WalkForwardCandidatePageResponse(BaseModel):
 
 
 class WalkForwardWindowEvaluationResponse(BaseModel):
-    id: UUID
+    id: UUID | None
     window: WalkForwardWindowResponse
+    validation_rank: int
+    selected_for_test: bool
+    selection_reason: str
+    validation_metrics: SegmentMetricsResponse
     status: str
     total_return: Decimal | None
     absolute_pnl: Decimal | None
@@ -402,5 +410,20 @@ class WalkForwardWindowEvaluationResponse(BaseModel):
 
 class WalkForwardWindowEvaluationPageResponse(BaseModel):
     items: tuple[WalkForwardWindowEvaluationResponse, ...]
+    has_more: bool
+    next_cursor: str | None
+
+
+class WalkForwardSelectionResponse(BaseModel):
+    definition: CandidateDefinitionResponse
+    window: WalkForwardWindowResponse
+    validation_rank: int
+    selected_for_test: bool
+    selection_reason: str
+    validation_metrics: SegmentMetricsResponse
+
+
+class WalkForwardSelectionPageResponse(BaseModel):
+    items: tuple[WalkForwardSelectionResponse, ...]
     has_more: bool
     next_cursor: str | None
