@@ -762,7 +762,7 @@ async def test_optimization_memory_reads_are_typed_filtered_and_read_only(
         strategy_name=STRATEGY_NAME,
         strategy_version=STRATEGY_VERSION,
         simulation_engine_version=SIMULATION_ENGINE_VERSION,
-        history_cutoff=END + timedelta(days=20),
+        history_cutoff=datetime.now(UTC) + timedelta(seconds=1),
     )
     comparable_planner_rows = [
         row
