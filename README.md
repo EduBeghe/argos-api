@@ -18,7 +18,10 @@ Every generated signal must retain its component scores, supporting metrics, and
 
 ## Current phase
 
-The project is in its documentation-first phase. No application implementation, live-money trading, or profitability claim is part of this phase.
+Argos now includes a production-ready API foundation, persisted market-data and
+Paper Trading workflows, historical simulation and refinement tooling, and
+read-only decision-support APIs. It remains private and research-oriented: it
+does not trade real money or guarantee profitability.
 
 ## Development
 
@@ -343,8 +346,339 @@ curl "http://localhost:8000/paper/evaluation?run_id=<uuid>"
 ```
 
 The response separates run metadata, Strategy results, the
-`equal_weight_buy_and_hold_ëÛh‘éì¶»§q«^t™X\ÛÛœÎÈ[šÛ›İÛˆ[œÈ™]Z[ˆH^\İ[™È™Z]š[Ü‹ˆÙYB–ØØÜËÌË\\\‹\İ˜]YŞKY]˜[X][Û‹›YJØÜËÌË\\\‹\İ˜]YŞKY]˜[X][Û‹›Y
-B™›ÜˆHÛÛ\]HY]šXÈ[™™[˜ÚX\šÈÛÛ˜Xİ‚‚”\™›Ü›X[˜ÙH\È\š]™YÛ›Hœ›ÛH[[]]X›H\]Z]HÛ˜\ÚİËˆ]È[\XÚ]š\œİœÚ[\ÈH[‰ÜÈ[š]X[Ø\Ú]İ\YØ]ˆ\]Z]H\ÈØ\Ú\ÈÜÚ][Û‚›X\šÙ]˜[YK[™İ[™]\›ˆÛÛ\\™\ÈH]\İ\]Z]HÚ]][š]X[˜Ø\][ˆİ\œ™[˜]ÙİÛˆ\ÈH›Û‹[™YØ]]™HXÛ[™Hœ›ÛHH™XÙY[™È[›š[™ÂœXZÈ]H]\İÛ˜\ÚİÈX^[][H˜]ÙİÛˆ\ÈHÛÜœİİXÚXÛ[™HØœÙ\™Yš[ˆH[‹ˆ\ÙHY]šXÜÈ\™H›İ[›X[^™Y™YXİ]™KÜˆHİX\˜[YHÙ‚œ›Ùš]Xš[]KˆH[ˆÚ]İ]Û˜\ÚİÈ™]\›œÈH™]]˜[˜\Ù[[™Kˆ\ÜÙ]Ëš[˜ÛY[™ÈHİ\œ™[HÛÛ™šYİ\™Y•È[™U[œİ[Y[ËÈ›İ\XÚ\]Bš[ˆH›Ü›][\Ë‚‚•HU”™XYÈHÛÛ\]HYÙÜ™YØ]HÛ˜\Úİ\İÜH™XØ]\ÙH]›ÙXÙ\ÈÛ›BÛÈÚ[È\ˆİ\‹ˆH]X˜\ÙHYÙÜ™YØ][ÛˆÜˆZ[Hİ[[X\šY\ÈØ[ˆ™H[›ÙXÙYšYˆ›Û[YH]\ˆ\İYšY\È[K‚‚ˆÈÈ\İÜšXØ[Ü[Z^˜][ÛˆY[[ÜHTB‚”\œÚ\İY™Yš[™[Y[]šY[˜ÙH\È^ÜÙY›İYÚ™XY[Û›H[™Ú[Î‚‚‹HÑUÛÜ[Z^˜][Û‹Ü™Yš[™[Y[\[œØ‹HÑUÛÜ[Z^˜][Û‹Ü™Yš[™[Y[\[œËŞÜ[—ÚYX‹HÑUÛÜ[Z^˜][Û‹Ü™Yš[™[Y[\[œËŞÜ[—ÚYKÙ]˜[X][ÛœØ‹HÑUÛÜ[Z^˜][Û‹ØØ[™Y]\Ø‹HÑUÛÜ[Z^˜][Û‹ØØ[™Y]\ËŞÜİX›WØØ[™Y]WÚYX‚”[ˆİ[[X\šY\È\ÙH]\›Z[š\İXÈ[Z]ØÙ™œÙ]YÚ[˜][Û‹ˆØ[™Y]HYÙ\Ë[‚™]˜[X][ÛœË[™Ø[™Y]H]˜[X][Ûˆ\İÜH\ÙHİX›HÙ^\Ù]İ\œÛÜœÈ[™™]\›‚˜\×Û[Ü™X\È™^Øİ\œÛÜ˜È]™\HYÙH\ÈHX^[][HÚ^™HÙˆŒˆØ[™Y]Hš[\š[™ÂœØØ[œÈ›İ[™Y˜]Ú\È[[H™\]Y\İYX›XÈYÙH\ÈÛÛ\]KÚ]İ]HY[‚™ÛØ˜[Ø[™Y]HØ\ˆš[\œÈ\ÙHHÛÛ\]H\ÜÙ]›İšY\‹X\šÙ]\K[™[\˜[Y[]K‚”™\ÜÛœÙ\È™\Ù\™HXÚ[X[˜[Y\È[™UÈ]šY[˜ÙH[Y\İ[\Ë^ÜÙH^XÚ]X›XÂ›[Ù[È˜]\ˆ[ˆÜİÜ™TÔS”ÓÓˆ^[ØYË[™™]™\ˆ^Xİ]HH™Yš[™[Y[ÜˆÛÛXİ˜[ˆ^\›˜[›İšY\‹‚‚ˆÈÈ›ÙXİ[Ûˆ\Ş[Y[‚”›İšYHUPTÑWÕT“[™™]šY]ÈH›ÙXİ[Ûˆ˜[Y\È›Üˆ’SSÑWĞTÑWÕT“˜’SSÑWĞÓÓ“‘PÕÕSQSÕUÔÑPÓÓ‘Ø’SSÑWÔ‘PQÕSQSÕUÔÑPÓÓ‘Ø˜’SSÑWÒS‘ÑTÕSÓ—ÓSRUÑ×ÓU‘S[™ÓÔ”×ĞSÕÑQÓÔ’QÒS”ØˆHÓÔ”ÂœÙ][™È\ÈHÛÛ[XK\Ù\\˜]Y\İÙˆ^XİÜšYÚ[œÎÈÚ[Ø\™È[™˜Ü™Y[X[YÜšYÚ[œÈ\™H™Z™XİYˆ]™[ÜY[[Û›HÔÕÔ‘T×Ê˜˜\šXX›\È\™B››İ™YYYÚ[ˆUPTÑWÕT“\Èİ\YY‚‚”[ˆHTH›ØÙ\ÜÈÚ]‚‚˜ÚœØÜš\ËÜİ\Ø\KœÚ˜‚•HØÜš\\Y\È[[XšXÈ\Ü˜YHXY™Y›Ü™Hİ\[™ÈÛ™H]šXÛÜ›ˆÛÜšÙ\ˆÛ‚˜ŒŒŒ‰ÔÔ•‹NXˆHZYÜ˜][Ûˆ˜Z[\™H™]™[ÈHÙ\™\ˆœ›ÛHİ\[™Ë‚‘\Ş[Y[ÛÛ™šYİ\˜][Ûˆ]\İ]›ÚY[›š[™ÈHØ[YHZYÜ˜][ÛˆÛÛ˜İ\œ™[H[‚›][\HTH[œİ[˜Ù\Ë‚‚”[ˆ[™Ù\İ[Ûˆ\ÈHÙ\\˜]HÛ™K\Úİ›ØÙ\ÜÎ‚‚˜Úœ]Ûˆ[H\š›ØœËš[™Ù\İØÛÜÙYØØ[™\Â˜‚•H^\›˜[]›Ü›HÚİ[[›ÚÙH]Û˜ÙH]™\Hš]™HZ[]\ËÚÜHY\ˆB™š]™K[Z[]HUÈ›İ[™\KˆHİ™\›\Ú[™İÈ[™ÜİÜ™TÔS˜]\˜[[š\]Y[™\ÜÂ›XZÙH™\X]YÜˆİ™\›\[™È[›ØØ][ÛœÈY[\İ[È\È\È›İ[ˆ^XİK[Û˜ÙBœØÚY[[™ÈİX\˜[YKˆ\™ÛÜÈÛÛZ[œÈ›È[\›˜[ØÚY[\ˆÜˆ[™š[š]HÛÜ‚‚ˆÈÈÈ\İÜšXØ[X\šÙ]XØ[™H˜XÚÙš[‚’[\ÜÛ›H\œÚ\İYX\šÙ]Ø[™\È›Üˆ[ˆ[YÛ™YUÈ˜[™ÙKˆ›İ[™È\™B˜Ùœ›ÛKÊXˆœ›ÛX\È[˜Û\Ú]™H[™Ø\È^Û\Ú]™Kˆ\ÈÛÛ[X[™™]™\‚˜Ø[İ[]\È™X]\™\ÈÜˆØÛÜ™\È[™™]™\ˆÜ™X]\ÈXÚ\Ú[ÛœË˜Y\ËÜÚ][ÛœË”Û˜\ÚİËÜˆ\\ˆ[œË‚‚˜Úœ]Ûˆ[H\š›ØœË˜˜XÚÙš[ÛX\šÙ]ØØ[™\ÈˆKYœ›ÛHŒLKLUŒŒˆˆK]ÈŒLLUŒŒ‚˜‚•Ú]İ]Y[]Hš[\œËH›Øˆ\Ù\È]™\H[™Ù\İ[Û‹Y[˜X›YØ][ÙÂš[œİ[Y[ÛÛ\]X›HÚ]H^\İ[™Èš[˜[˜ÙHÜİY\\‹ˆÜ[Û˜[˜KX\ÜÙ]K\›İšY\˜K[X\šÙ]]\X[™KZ[\˜[š[\œÈ˜\œ›İÈBœÙ[Xİ[Û‹ˆK\YÙK\Ú^™XY˜][ÈÈš[˜[˜ÙIÜÈKXØ[™HX^[][K˜K[X^\YÙ\Øİ\ÜÈÛÛ›ÛYØ[˜\šY\Ë[™KYK\[˜˜[Y]\È[™™XYÂœ›İšY\ˆYÙ\ÈÚ]İ]\œÚ\İ[˜ÙK‚‚”[ˆHØ[˜\Hš\œİ[ˆ[\Ü]X\\ˆH]X\\‚‚˜Úœ]Ûˆ[H\š›ØœË˜˜XÚÙš[ÛX\šÙ]ØØ[™\ÈˆKYœ›ÛHŒLKLUŒŒˆˆK]ÈŒLKLŒŒˆˆK[X^\YÙ\ÈB˜‚‘XXÚYÙHÛÛ[Z]È[™\[™[H[™˜]\˜[Ø[™HY[]HXZÙ\È™\[œÂšY[\İ[ˆY\ˆ[ˆ[\œ\[Û‹™\[ˆHØ[YH˜[™ÙNˆÛÛ\]YYÙ\È™[XZ[‚œİÜ™Y[™\XØ]\È\™HYÛ›Ü™Yˆ[œİ[Y[İ[[X\šY\È™\Ü^XİYÛİËœ™XÙZ]™YÚ[œÙ\YÙ\XØ]HØ[™\ËØ\È[™Z\ˆš\œİÛ\İ[Y\İ[\ËœYÙ\Ë™]šY\Ë[™›ØÙ\ÜÙY›İ[™ËˆÜİÜ™TÔSİ[[X\šY\È™\Ü›İÈ[™]B™Ü›İİ\È[ˆ\›Ş[X]HYYX]HÛÜİ\ˆ™]ÈØ[™NÈİ\ˆ]X˜\ÙB™X[XİÈ^XÚ]HÛZ]İÜ˜YÙH[[Y]K‚‚”™]šY]È]˜Z[X›HÜİÜ™TÔSİÜ˜YÙH™Y›Ü™HXXÚ]X\\ˆ[™[œÜXİZ\ÜÚ[™ÂœÛİÈ™Y›Ü™HÛÛ[Z[™ËˆHØ\Ø[ˆ™Y›Xİ[˜]˜Z[X›H›İšY\ˆ]šY[˜ÙH[™›]\İ›İ™HÚ[[Hš[YÜˆ[™™\œ™Y‚‚ˆÈÈÈ\İÜšXØ[Ü[Z^˜][Ûˆ]\Ù]‚Z[[™˜[Y]HÛ™H]\›Z[š\İXË™XY[Û›H]\Ù]›Üˆ]\™H]]ÛX]XÂ›Ü[Z^˜][Û‚‚˜Úœ]Ûˆ[H\š›ØœË˜[Y]WÚ\İÜšXØ[Ù]\Ù]ˆKYœ›ÛHŒLKLUŒŒˆˆK]ÈŒKLKLUŒŒˆˆKX\ÜÙ]•ËÕTÑˆK\›İšY\ˆš[˜[˜ÙHˆK[X\šÙ]]\HÜİˆKZ[\˜[[B˜‚•H™XY\ˆ\Ù\È›İ[™YÙ^\Ù]YÙ\ÈÜ™\™YHØ[™HÜ[—İ[YXÈ]™]™\‚\Ù\ÈÑ‘”ÑUÜˆÜš]\ÈÈÜİÜ™TÔSˆ›İ[™È\™H[YÛ™YUÈÙœ›ÛKÊX‚‘]™\H^XİY[\˜[Ûİ]\İ]™H^XİHÛ™HØ[™Nˆ[H[š]X[š[\›˜[Üˆš[˜[Ø\[˜[Y]\ÈH]\Ù]˜]\ˆ[ˆ™Z[™Èš[Yš[\œÛ]YÜˆY[‹‚‚•HÛÛ[X[™Ø[İ[]\ÈHİ\œ™[Ù]™[‹Y™X]\™HX]š^Û˜ÙH[ˆY[[ÜH\Ú[™ÂHØ[YH\™H[™XØ]Üˆ[˜İ[ÛœÈ\ÈÜ\˜][Û˜[[™Ù\İ[Û‹ˆØ\›K]\Ø[™\ÂÚ]İ]HÛÛ\]H™X]\™HÙ]\™HÛZ]Yˆ]Ù\È›İ\œÚ\İ\š]™Y™X]\™Bœ›İÜËØ[İ[]HØÛÜ™\Ë]˜[X]Hİ˜]YÚY\ÈÜˆ›Ùš]Xš[]KÜˆÚ[][]B•˜Y\Ëˆ›ØÙ\ÜÈÛ™H[œİ[Y[]H[YHÛÈ]È]\Ù]Ø[ˆ™H™[X\ÙY™Y›Ü™BH™^[œİ[Y[\ÈØYY‚‚•H™\ÜYÒKLMˆš[™Ù\œš[Ûİ™\œÈHÛÛ\]H[œİ[Y[Y[]Kœ˜[™ÙK™X]\™H[Ù[İ™\œÚ[Û‹[™Ø[›ÛšXØ[Ü™\™YÒÕˆ]šY[˜ÙKˆY[XØ[™]šY[˜ÙH›ÙXÙ\ÈHØ[YHš[™Ù\œš[È[HØ[™HÚ[™ÙH›ÙXÙ\ÈHY™™\™[›Û™KˆHİ\œ™[›İYÚHš]™K[Z[]HØ[™\È\ˆ\ÜÙ]\™H™XY[‚K\›İÈYÙ\Ëˆ[‹[Y[[ÜH\ØYÙH™[XZ[œÈ[™X\ˆ[ˆ]Û™H[œİ[Y[	ÜÈ˜[™ÙNÂ™^XİY[[ÜH\[™ÈÛˆ]Ûˆ[™XÚ[X[Øš™Xİİ™\šXYÛÈ›ÙXİ[Ûˆ[œÂœÚİ[ØœÙ\™HÛÛZ[™\ˆY[[ÜH™Y›Ü™H[˜Ü™X\Ú[™ÈHÙ[XİY˜[™ÙK‚‚ˆÈÈÈ]\›Z[š\İXÈ\İÜšXØ[İ˜]YŞHÚ[][][Û‚‚”Ú[][]H˜\Ù[[™WİXÚšXØ[™\œÚ[ÛˆH[™˜\Ù[[™WÛÛ™×ÛÛ›X™\œÚ[ÛˆH›Ü‚›Û™H˜[Y]Y\İÜšXØ[[œİ[Y[Ú]İ][ÙYZ[™ÈÜ\˜][Û˜[Üˆ\\‚•˜Y[™Èİ]N‚‚˜Úœ]Ûˆ[H\š›ØœËœÚ[][]WÚ\İÜšXØ[Üİ˜]YŞHˆKYœ›ÛHŒLKLUŒŒˆˆK]ÈŒLLUŒŒˆˆKX\ÜÙ]•ËÕTÑˆK\›İšY\ˆš[˜[˜ÙHˆK[X\šÙ]]\HÜİˆKZ[\˜[[HˆKZ[š]X[XØ\ÚLˆKY™YK\˜]HŒHˆK\Û\YÙK\˜]HŒB˜‚•H[™Ú[™HZ[ÈH™X]\™HX]š^Û˜ÙH[™]˜[X]\ÈÛ›HUÈÌ[Z[]B˜›İ[™\šY\Ëˆ]XXÚ›İ[™\H]\Ù\ÈHš]™K[Z[]HØ[™H]\È\İ˜ÛÜÙYˆHÛİ\˜ÙHØ[™IÜÈÛÜÙWÜšXÙX\È›İHØœÙ\™YXÚ\Ú[Ûˆ]šY[˜ÙB˜[™H[œ]ÈH^\İ[™È\\ˆ^Xİ][ÛˆØ[İ[][Û‹ˆ›È]\ˆØ[™HÜ‚‘™X]\™H›İÈ\Èš\ÚX›K™]™[[™ÈÛÚËXZXYˆ•VH[™ÑS^Xİ][ÛˆšXÙ\Ë™™Y\ËÛ\YÙKÚ^š[™Ë[™	“™]\ÙHHØ[YH\™H›ÙXİ[Ûˆ[˜İ[ÛœË‚‚Ø\ÚHÛ™Ë[Û›HÜÚ][Û‹˜Y\Ë™X[^™Yİ[œ™X[^™Y	“[™H›İ[™\B™\]Z]Hİ\™H™[XZ[ˆ[[]]X›H[‹[Y[[ÜH™\İ[ËˆHÛÛ[X[™ÙÜÈÛ›H[‚˜YÙÜ™YØ]Hİ[[X\H[™]\Ù]š[™Ù\œš[ˆ]\™›Ü›\È›ÈÜš]\Ë^\›˜[œ™\]Y\İËÜˆÛØÚËY\[™[Ø[İ[][ÛœÈ[œÚYHHÚ[][][Û‹‚‚•™\œÚ[ÛˆHİ\ÜÈÛ™H[œİ[Y[Û™HÌ[Z[]HØY[˜ÙK[™H^\İ[™Â”İ˜]YŞHXİ[ÛœÈ
-ÔS—ÔÔÒUSÓ˜ÑSĞS[™“×ĞPÕSÓ˜
-Kˆ[İYÚB™ÛXZ[ˆ›ØØX[\H™\Ù\™\È\X[Ù[[™Ë˜\Ù[[™WÛÛ™×ÛÛ›X™\œÚ[ÛˆHÙ\Â››İ[Z]]ˆ\È\ÈH]\›Z[š\İXÈÚ[][]Ü‹›İ˜XÚİ\İ[™È[™œ˜\İXİ\™B™›Üˆ][\Hİ˜]YÚY\È[™›İ[ˆÜ[Z^™\ˆÜˆ›Ùš]Xš[]HİX\˜[YK‚‚ˆÈÈÈ]\›Z[š\İXÈİ˜]YŞH™Yš[™[Y[‚”[ˆHš\œİ›İ[™Y™XY[Û›H™Yš[™\ˆ›Üˆ˜\Ù[[™WÛÛ™×ÛÛ›X‚‚˜Úœ]Ûˆ[H\š›ØœËœ™Yš[™WÚ\İÜšXØ[Üİ˜]YŞHˆKYœ›ÛHŒLKLUŒŒˆˆK]ÈŒLLUŒŒˆˆKX\ÜÙ]•ËÕTÑˆK\›İšY\ˆš[˜[˜ÙHˆK[X\šÙ]]\HÜİˆKZ[\˜[[HˆKZ[š]X[XØ\ÚLˆKY™YK\˜]HŒHˆK\Û\YÙK\˜]HŒHˆK]˜[Y][Û‹]ÜZÈLˆK\ØÛÜ™K\ØÜ™Y[š[™Ë]ÜZÈLˆˆK[X^\ØÛÜ™KXÛÛ™šYİ\˜][ÛœÈŒˆK[X^Z›Ú[XØ[™Y]\ÈL˜‚•H™Yš[™\ˆÛÛœİXİÈH\İÜšXØ[™X]\™HX]š^Û˜ÙKˆØÛÜ™HØÜ™Y[š[™Èš\œİ\İÈHÍH\™Xİ[Û˜[ÛÛXš[˜][ÛœÈÛˆHŒXÚ[\^›Üˆ™[™”ÒKœ™]\›‹LK[™™]\›‹LL‹ˆXXÚ\ÈÛÛXš[™YÚ]›Û[YKXÛÛ™š\›X][ÛˆÙZYÚÈŒLXŒXŒÍÍX[™L[™H^Xİ›ÙXİ[ÛˆØÛÜ™HÙZYÚÈ\™H[˜ÛYYÛ˜ÙKˆØÜ™Y[š[™È\Ù\ÈÛ›HB™š\œİÚ›Û›ÛÙÚXØ[[ˆÙˆ˜Z[š[™È[™™]Z[œÈLˆØÛÜ™HÛÛ™šYİ\˜][ÛœÈB™Y˜][‚‚’›Ú[™Yš[™[Y[ÛÛXš[™\È™]Z[™YØÛÜ™HÛÛ™šYİ\˜][ÛœÈÚ][H™\ÚÛÂ˜MXŒX[™ÌÈ^]™\ÚÛÈŒL›İYÚŒÌ[‚˜ŒXİ\ÎÈ[™\™Ù][ØØ][ÛœÈLMX[™Œ\˜Ù[ˆH›ÙXİ[Û‚œØÛÜ™HÙZYÚÈMKÌŒMMÍKÌŒKÌŒŒXÚ]›Û[YHŒX[™İ˜]YŞBœ\˜[Y]\œÈŒÌŒŒÌMIX™[XZ[ˆ[˜Ú[™ÙY[™^XÚ]HY[YšYY‚‚‘XÚ\Ú[Ûˆ›İ[™\šY\È\™HÜ]Ú›Û›ÛÙÚXØ[H[ÈŒ	H˜Z[š[™ËŒ	B˜[Y][Û‹[™Œ	H[İXÚY\İ]šY[˜ÙKˆXXÚÙYÛY[İ\ÈÚ]HØ[YB˜Ø\Ú[™›ÈÜ[ˆÜÚ][Û‹ˆ™X]\™\ÈX^H\ÙHX\›Y\ˆØ[™\È›ÜˆØ\›K]\Ú[B™XXÚÙYÛY[ÛÛZ[œÈÛ›H]ÈİÛˆ[YÛ™YXÚ\Ú[Ûˆ›İ[™\šY\Ë™]™[[™Â™]\™H]šY[˜ÙH[™\İ™\İ[Èœ›ÛH[™›Y[˜Ú[™ÈÙ[Xİ[Û‹‚‚•˜Z[š[™È˜[šÜÈ]™\H›Ú[Ø[™Y]HH™]™]\›‹˜]ÙİÛ‹˜YHÛİ[[™BœİX›HQ\š]™Yœ›ÛH[ØÛÜ™H[™İ˜]YŞH\˜[Y]\œËˆÛ›HHÛÛ™šYİ\™YÜ’È™XXÚ\È˜[Y][Û‹ˆH™XÛÛ[Y[™][Ûˆ]\İ[ÛÈ™X]H›ÙXİ[Ûˆ˜\Ù[[™B˜[Y][Ûˆ™]\›ˆY\ˆHİ\YY™Y\È[™Û\YÙKÙY\˜]ÙİÛˆ›ÈÜ™X]\‚[ˆL	K[™^Xİ]H]X\İÛ™H˜YKˆ\İ]˜[X]\ÈÛ›HHÙ[XİY˜Ø[™Y]K›ÙXİ[Ûˆ˜\Ù[[™K[™HÙ\\˜][HØ[İ[]Y^KX[™ZÛ˜™[˜ÚX\šÎÈ]ÛÛ™š\›\ÈÜˆ™Z™XİÈHš^Y™XÛÛ[Y[™][Ûˆ[™™]™\ˆÚ[™Ù\È]‚^H[™Û[\œÈ[™^]È]ÙYÛY[›İ[™\šY\ÈÚ]Y[XØ[™Y\È[™œÛ\YÙKˆ]È™X\‹]İ[[H™\Ù\™\ÈHŒXØ\Ú\˜]HY™™\ˆÛÛ[HÂ˜XœÛÜ˜ˆXÚ[X[]X[^˜][ÛˆY™™XİËX]š[™ÈHZ[š[X[Ø\Ú™\ÚYYNÈHY™™\‚š\È›İ[ˆY][Û˜[™YKˆ™]\›ˆİ™\ˆ˜]ÙİÛˆ\È™\ÜY\È™\›ÈÚ[ˆX^[][H˜]ÙİÛˆ\È™\›Ë˜]›ÚY[™È[ˆ[™Yš[™Y˜][Ëˆš]™HY][Û˜[ÛÛ›ÛYÛ™KX]XK][YHX›][ÛœÂ\ÙHH›ÙXİ[Ûˆİ˜]YŞHÛˆHØ[YHØÜ™Y[š[™ÈÙYÛY[ˆH\™Xİ[Û˜[ÚYÛ˜[š\ÈÙ]È™\›È[™]È›ÙXİ[ÛˆÙZYÚ\È™Y\İšX]Y›ÜÜ[Û˜[HXÜ›ÜÜÂHİ\ˆ™YH\™Xİ[Û˜[ÚYÛ˜[È\Ú[™ÈXÚ[X[N\XÙH“ÕS‘ÒS—ÑU‘S‚œ]X[^˜][Û‹[™H]\›Z[š\İXÈ™\ÚYX[ÛˆH\İ[˜X›YÙZYÚÛÈZ\‚œİ[H™[XZ[œÈ^XİHÛ™KˆH›Û[YHX›][ÛˆÚ[™Ù\ÈÛ›H]ÈİÛˆÙZYÚˆ\ÙB˜ÛÛ\\š\ÛÛœÈ™\Ü\İÜšXØ[Y]šXÈY™™\™[˜Ù\È[™È›İ[[Ûœİ˜]B˜Ø]\Ø[]K‚‚•HY˜][ÛÛ\]][Û˜[YÙ]™]Z[œÈLˆÙˆ][ÜİŒÙ[™\˜]YØÛÜ™B˜ÛÛ™šYİ\˜][ÛœË]˜[X]\È][ÜİK›Ú[Ø[™Y]\Ë[™Ù[™ÈLÂ˜[Y][Û‹ˆÙ[™\˜][Ûˆ˜Z[ÈÛX\›H[œİXYÙˆÚ[[H[˜Ø][™ÈÚ[ˆH[Z]Ûİ[™H^ÙYYYˆİ™\œšYH\ÙH›İ[™ÈÚ]K\ØÛÜ™K\ØÜ™Y[š[™Ë]ÜZØ˜K[X^\ØÛÜ™KXÛÛ™šYİ\˜][ÛœØK[X^Z›Ú[XØ[™Y]\Ø[™˜K]˜[Y][Û‹]ÜZØ‚‚[™Yš[™[Y[\È[ˆY[[ÜHY\ˆÛ™H\İÜšXØ[™XYˆHÛÛ[X[™[Z]ÈÛÛ\XİœİXİ\™YY]šXÜÈ[™H]\›Z[š\İXÈ^[˜][Û‹]\œÚ\İÈ›È^\š[Y[‘™X]\™KØÛÜ™KXÚ\Ú[Û‹˜YKÜÚ][Û‹Üˆ\\ˆ[ˆ[™™]™\ˆ›Û[İ\ÈB˜ÛÛ™šYİ\˜][Û‹ˆ™\œÚ[ÛˆH\ÈÚ[™ÛKZ[œİ[Y[Û™Ë[Û›KÙ\]Y[X[\Ù\ÈÛ™B™š^YØÛÜ™H[Ù[[™Hš[š]HÜšY[™XZÙ\È›ÈÛZ[HÙˆ]\™H›Ùš]Xš[]K‚”ØÛÜ™K[[Ù[[™İ˜]YŞH\˜[Y]\œÈ™[XZ[ˆÙ\\˜]HÛÈ]\™HØ[™Y]\ÈØ[ˆYXÚšXØ[Ù[[Y[™]ÜËÜˆSÛÛ\Û™[ÙZYÚÈÚ]İ]Ûİ\[™ÈÜÙB™]\™HÛÛ\Û™[ÈÈİ˜]YŞH™\ÚÛÎÈ›Û™HÙˆÜÙHÛÛ\Û™[È\È[›ÙXÙYš\™K‚‚•HÛÛ[X[™™[XZ[œÈ™XY[Û›HHY˜][]X^H\ÙHÛÛ\]X›HÛÛ\]Y^\š[Y[š\İÜHÈZ[H]\›Z[š\İXÈÙX\˜Ú[‹ˆYK\\œÚ\İÈ]ÛZXØ[H™]Z[ˆBœ[‹Ø[›ÛšXØ[Ø[™Y]\ËÛÛ\Xİ]˜[X][ÛœË˜\Ù[[™K[™^KX[™ZÛ]šY[˜ÙK‚[ˆ^XİÛÛ\]Y^\š[Y[\È™]\ÙYÚ]İ]Ú[][][Û‹ˆYKY›Ü˜ÙK\™XÛÛ\]XÚ]K\\œÚ\İÈÛÛ\\™HHœ™\Ú]\›Z[š\İXÈ™\İ[YØZ[œİİÜ™Y]šY[˜ÙHÚ]İ]˜Ü™X][™ÈH\XØ]Kˆ[ˆ]Ûˆ[H\š›ØœËœ™Yš[™[Y[ÜİÜ˜YÙXÈ[œÜXİ^\š[Y[˜Ø[™Y]K]˜[X][Û‹[™İÜ˜YÙHİ[ËˆÙYB–Ñ^\š[Y[Y[[ÜH[™^\šY[˜ÙKQİZYYÙX\˜ÚJØÜËÌY^\š[Y[[Y[[ÜK›Y
-H›Ü‚˜ÛÛ\]Xš[]KÛ\ÜÚYšXØ][ÛœË[›™\ˆ[ØØ][Û‹™ZYÚ›ÜšÛÙ[\Ë™Z™XİY˜Ø[™Y]H™XÛÛœÚY\˜][Û‹˜[œØXİ[Ûˆ™Z]š[Ü‹[™[Z]][ÛœË‚‚”[ˆXÚ\Ú[ÛˆÙ[™\˜][Ûˆ[™\\ˆ^Xİ][Ûˆ\ÈHÙ\\˜]HÛ™K\Úİ›ØÙ\ÜÎ‚‚˜Úœ]Ûˆ[H\š›ØœË™Ù[™\˜]WÛX\šÙ]ÙXÚ\Ú[ÛœÂ˜‚‘XXÚ[œİ[Y[\È[ˆ[™\[™[HÛÛ[Z]YŞXÛKˆÜİÜ™TÔS[š\]Y[™\ÜÂ›XZÙ\ÈÛÛ\]Y™]šY\È[™İ™\›\[™È[›ØØ][ÛœÈ›Ë[ÜÎÈ\È\È›İ[‚™^XİK[Û˜ÙHØÚY[[™ÈÛZ[Kˆ“×ĞPÕSÓ˜\ÈHÛÛ\]Y]Y]X›HŞXÛHÚ]İ]˜H˜YKˆH›ØˆÛÛXİÈ›È›İšY\ˆÜˆ^Ú[™ÙK‚‚•\ÙHÚX[›ÜˆTH]™[™\ÜÈ[™ÚX[Ù]X˜\ÙX›ÜˆÜİÜ™TÔS™XY[™\ÜË‚“™Z]\ˆ[™Ú[ÛÛXİÈš[˜[˜ÙHÜˆ^ÜÙ\ÈÛÛ›™Xİ[Ûˆ]Z[Ë‚‚ˆÈÈÈ›ÙXİ[ÛˆÛ[ÚÙH\İ‚•Ú]HTH[›š[™È[™^[\HÜİY\İY›ÜˆH\Ş[Y[‚‚˜Ú˜İ\›‹ËÛØØ[ÜİÚX[˜İ\›‹ËÛØØ[ÜİÚX[Ù]X˜\ÙBœ]Ûˆ[H\š›ØœËš[™Ù\İØÛÜÙYØØ[™\Â˜İ\›‹ËÛØØ[ÜİÛX\šÙ]Üİ]\Â˜İ\›š‹ËÛØØ[ÜİÛX\šÙ]ØØ[™\ÏØ\ÜÙ]P•ÉL‘•TÑ	š[\˜[M[H‚˜‚ˆÈÈÈØÚÙ\‚‚Y\ˆÛÛ™šYİ\š[™È™[˜Z[[™İ\HTH[™ÜİÜ™TÔS‚‚˜Ú›XZÙHØÚÙ\‚˜‚•HTHİ\È[™\[™[HÙˆÜİÜ™TÔS™XY[™\ÜËˆ]È]X˜\ÙHX[[™Ú[™]\›œÈLÈÚ[HÜİÜ™TÔS\È[˜]˜Z[X›K‚‚ˆÈÈÈ\\ˆ˜Y[™ÈYZ[š\İ˜][Û‚‚”İ\Üˆ™\Ù]HXİ]™HÚ[][]YXØÛİ[Ú]İ][][™Èš[Üˆ^\š[Y[Î‚‚˜Úœ]Ûˆ[H\š›ØœËœ™\Ù]Ü\\—ØXØÛİ[KZ[š]X[XØ\ÚLK\™X\ÛÛˆ˜˜\Ù[[™H™Y›Ü™H™X]\™H‚˜‚•HÛÛ[X[™\œÙ\È[Û™^H\ÈXÚ[X[İÜÈHXİ]™H^\š[Y[[™Ü™X]\ÈHœ™\Ú[šÙY[ˆ[ˆÛ™H˜[œØXİ[Û‹ˆİÜ[™ÈH[ˆÙ\È›İ\]ZY]H]ˆÜ[ˆÜÚ][ÛœÈ™]Z[ˆZ\ˆ]X[]H[™[Hİ]K[™›ÈŞ[]XÈ˜YH\ÈÜ™X]Yˆ\İÜšXØ[[œÈ\™H]Y\XX›H›İYÚÑUÜ\\‹Ü[œØ[™ÑUÜ\\‹Ü[œËŞÜ[—ÚYXÈÜÚ][ÛœÈ[™˜Y\ÈXØÙ\[ˆÜ[Û˜[[—ÚYˆ™\Ù]™[XZ[œÈÓK[Û›H[[]][XØ]Y]]][Ûˆ[™Ú[È^\İ[™H]\™H]][XØ]Yœ›Û[™Xİ[Ûˆ]\İ™]\ÙH\È\ÙHØ\ÙK‚
+`equal_weight_buy_and_hold_v1` benchmark, their comparison, and deterministic
+per-instrument results keyed by asset, provider, market type, and interval.
+Missing snapshots or benchmark candles return HTTP 200 with typed unavailable
+reasons; unknown Runs retain the existing HTTP 404 behavior. See
+[`docs/007-paper-strategy-evaluation.md`](docs/007-paper-strategy-evaluation.md)
+for the complete metric and benchmark contract.
+
+Performance is derived only from immutable equity snapshots. Its implicit first
+point is the run's initial cash at `started_at`. Equity is cash plus Position
+market value, and total return compares the latest equity with that initial
+capital. Current drawdown is the non-negative decline from the preceding running
+peak at the latest snapshot; maximum drawdown is the worst such decline observed
+in the run. These metrics are not annualized, predictive, or a guarantee of
+profitability. A run without snapshots returns a neutral baseline. Assets,
+including the currently configured BTC and ETH instruments, do not participate
+in the formulas.
+
+The MVP reads the complete aggregate snapshot history because it produces only
+two points per hour. A database aggregation or daily summaries can be introduced
+if volume later justifies them.
+
+## Historical optimization memory API
+
+Persisted refinement evidence is exposed through read-only endpoints:
+
+- `GET /optimization/refinement-runs`
+- `GET /optimization/refinement-runs/{run_id}`
+- `GET /optimization/refinement-runs/{run_id}/evaluations`
+- `GET /optimization/candidates`
+- `GET /optimization/candidates/{stable_candidate_id}`
+
+Run-list filters include `asset`, `provider`, `market_type`, `interval`, `status`,
+`recommendation_status`, `started_from`, and `started_to`. Candidate-list filters
+include the complete instrument identity, `evidence_classification`, Score and
+Strategy model names and versions, and `minimum_validation_runs`.
+
+Run summaries use deterministic `limit`/`offset` pagination. Candidate pages, run
+evaluations, and candidate evaluation history use stable keyset cursors and return
+`has_more` plus `next_cursor`; every page has a maximum size of 200. Candidate filtering
+scans bounded batches until the requested public page is complete, without a hidden
+global candidate cap. Filters use the complete asset, provider, market type, and interval identity.
+Responses preserve Decimal values and UTC evidence timestamps, expose explicit public
+models rather than PostgreSQL JSONB payloads, and never execute a refinement or contact
+an external provider.
+
+Examples:
+
+```sh
+curl "http://localhost:8000/optimization/refinement-runs?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&status=completed&limit=25&offset=0"
+curl "http://localhost:8000/optimization/candidates?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&minimum_validation_runs=2&limit=25"
+curl "http://localhost:8000/optimization/refinement-runs/<run-id>/evaluations?limit=100"
+curl "http://localhost:8000/optimization/candidates/<stable-candidate-id>?limit=100"
+```
+
+See [Experiment memory and experience-guided search](docs/008-experiment-memory.md)
+for the evidence-compatibility and planning contracts behind these read models.
+
+## Production deployment
+
+Provide `DATABASE_URL` and review the production values for `BINANCE_BASE_URL`,
+`BINANCE_CONNECT_TIMEOUT_SECONDS`, `BINANCE_READ_TIMEOUT_SECONDS`,
+`BINANCE_INGESTION_LIMIT`, `LOG_LEVEL`, and `CORS_ALLOWED_ORIGINS`. The CORS
+setting is a comma-separated list of exact HTTP origins; wildcards and
+credentialed origins are rejected. Development-only `POSTGRES_*` variables are
+not needed when `DATABASE_URL` is supplied.
+
+Run the API process with:
+
+```sh
+scripts/start_api.sh
+```
+
+The script applies `alembic upgrade head` before starting one Uvicorn worker on
+`0.0.0.0:${PORT:-8000}`. A migration failure prevents the server from starting.
+Deployment configuration must avoid running the same migration concurrently in
+multiple API instances.
+
+Run ingestion as a separate one-shot process:
+
+```sh
+python -m app.jobs.ingest_closed_candles
+```
+
+The external platform should invoke it once every five minutes, shortly after a
+five-minute UTC boundary. The overlap window and PostgreSQL natural uniqueness
+make repeated or overlapping invocations idempotent; this is not an exactly-once
+scheduling guarantee. Argos contains no internal scheduler or infinite loop.
+
+### Historical market-candle backfill
+
+Import only persisted market candles for an aligned UTC range. Bounds are
+`[from, to)`: `from` is inclusive and `to` is exclusive. This command never
+calculates Features or Scores and never creates Decisions, Trades, Positions,
+Snapshots, or Paper Runs.
+
+```sh
+python -m app.jobs.backfill_market_candles \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-04-01T00:00:00Z
+```
+
+Without identity filters, the job uses every ingestion-enabled catalog
+instrument compatible with the existing Binance Spot adapter. Optional
+`--asset`, `--provider`, `--market-type`, and `--interval` filters narrow the
+selection. `--page-size` defaults to Binance's 1,000-candle maximum,
+`--max-pages` supports controlled canaries, and `--dry-run` validates and reads
+provider pages without persistence.
+
+Run a canary first, then import quarter by quarter:
+
+```sh
+python -m app.jobs.backfill_market_candles \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-01-08T00:00:00Z \
+  --max-pages 5
+```
+
+Each page commits independently and natural candle identity makes reruns
+idempotent. After an interruption, rerun the same range: completed pages remain
+stored and duplicates are ignored. Instrument summaries report expected slots,
+received/inserted/duplicate candles, gaps and their first/last timestamps,
+pages, retries, and processed bounds. PostgreSQL summaries report row and byte
+growth plus an approximate added-byte cost per new candle; other database
+dialects explicitly omit storage telemetry.
+
+Review available PostgreSQL storage before each quarter and inspect missing
+slots before continuing. A gap can reflect unavailable provider evidence and
+must not be silently filled or inferred.
+
+### Historical optimization dataset
+
+Build and validate one deterministic, read-only dataset for future automatic
+optimization:
+
+```sh
+python -m app.jobs.validate_historical_dataset \
+  --from 2024-01-01T00:00:00Z \
+  --to 2025-01-01T00:00:00Z \
+  --asset BTC/USDT \
+  --provider binance \
+  --market-type spot \
+  --interval 5m
+```
+
+The reader uses bounded keyset pages ordered by candle `open_time`; it never
+uses `OFFSET` or writes to PostgreSQL. Bounds are aligned UTC `[from, to)`.
+Every expected interval slot must have exactly one candle: any initial,
+internal, or final gap invalidates the dataset rather than being filled,
+interpolated, or hidden.
+
+The command calculates the current seven-feature matrix once in memory using
+the same pure indicator functions as operational ingestion. Warm-up candles
+without a complete Feature set are omitted. It does not persist derived Feature
+rows, calculate Scores, evaluate Strategies or profitability, or simulate
+Trades. Process one instrument at a time so its dataset can be released before
+the next instrument is loaded.
+
+The reported SHA-256 fingerprint covers the complete instrument identity,
+range, Feature model/version, and canonical ordered OHLCV evidence. Identical
+evidence produces the same fingerprint; any candle change produces a different
+one. The current roughly 268,000 five-minute candles per asset are read in
+5,000-row pages. In-memory usage remains linear in that one instrument's range;
+exact memory depends on Python and Decimal object overhead, so production runs
+should observe container memory before increasing the selected range.
+
+### Deterministic historical strategy simulation
+
+Simulate `baseline_technical` version 1 and `baseline_long_only` version 1 for
+one validated historical instrument without modifying operational or Paper
+Trading state:
+
+```sh
+python -m app.jobs.simulate_historical_strategy \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-04-01T00:00:00Z \
+  --asset BTC/USDT \
+  --provider binance \
+  --market-type spot \
+  --interval 5m \
+  --initial-cash 10000 \
+  --fee-rate 0.001 \
+  --slippage-rate 0.0005
+```
+
+The engine builds the Feature matrix once and evaluates only UTC 30-minute
+boundaries. At each boundary it uses the five-minute candle that has just
+closed: the source candle's `close_price` is both the observed Decision evidence
+and the input to the existing Paper execution calculation. No later candle or
+Feature row is visible, preventing look-ahead. BUY and SELL execution prices,
+fees, slippage, sizing, and P&L reuse the same pure production functions.
+
+Cash, the long-only Position, Trades, realized/unrealized P&L, and the boundary
+equity curve remain immutable in-memory results. The command logs only an
+aggregate summary and dataset fingerprint. It performs no writes, external
+requests, or clock-dependent calculations inside the simulation.
+
+Version 1 supports one instrument, one 30-minute cadence, and the existing
+Strategy actions (`OPEN_POSITION`, `SELL_ALL`, and `NO_ACTION`). Although the
+domain vocabulary reserves partial selling, `baseline_long_only` version 1 does
+not emit it. This is a deterministic simulator, not backtesting infrastructure
+for multiple Strategies and not an optimizer or profitability guarantee.
+
+### Deterministic strategy refinement
+
+Run the first bounded, read-only refiner for `baseline_long_only`:
+
+```sh
+python -m app.jobs.refine_historical_strategy \
+  --from 2024-01-01T00:00:00Z \
+  --to 2024-04-01T00:00:00Z \
+  --asset BTC/USDT \
+  --provider binance \
+  --market-type spot \
+  --interval 5m \
+  --initial-cash 10000 \
+  --fee-rate 0.001 \
+  --slippage-rate 0.0005 \
+  --validation-top-k 10 \
+  --score-screening-top-k 12 \
+  --max-score-configurations 200 \
+  --max-joint-candidates 1000
+```
+
+The refiner constructs the historical Feature matrix once. Score screening first
+tests the 35 directional combinations on a `0.25` simplex for trend, RSI,
+return-1, and return-12. Each is combined
+with volume-confirmation weights `0`, `0.125`, `0.25`, `0.375`, and `0.50`, and
+the exact production score weights are included once. Screening uses only the
+first chronological half of training and retains 12 score configurations by
+default.
+
+Joint refinement combines retained score configurations with entry thresholds
+`0.55`, `0.60`, `0.65`, and `0.70`; exit thresholds `0.10` through `0.30` in
+`0.05` steps; and target allocations `10`, `15`, and `20` percent. The production
+score weights `0.55/0.1575/0.09/0.2025` with volume `0.25` and Strategy
+parameters `0.60/0.20/15%` remain unchanged and explicitly identified.
+
+Decision boundaries are split chronologically into 60% training, 20%
+validation, and 20% untouched test evidence. Each segment starts with the same
+cash and no open Position. Features may use earlier candles for warm-up, while
+each segment contains only its own aligned Decision boundaries, preventing
+future evidence and test results from influencing selection.
+
+Training ranks every joint candidate by net return, drawdown, trade count, and a
+stable ID derived from all score and Strategy parameters. Only the configured top
+K reaches validation. A recommendation must also beat the production baseline
+validation return after the supplied fees and slippage, keep drawdown no greater
+than 10%, and execute at least one Trade. Test evaluates only the selected
+candidate, production baseline, and a separately calculated buy-and-hold
+benchmark; it confirms or rejects the fixed recommendation and never changes it.
+Buy and hold enters and exits at segment boundaries with identical fees and
+slippage. Its near-total entry reserves a `0.000001` cash-rate buffer solely to
+absorb Decimal quantization effects, leaving a minimal cash residue; the buffer
+is not an additional fee. Return over drawdown is reported as zero when maximum drawdown is zero,
+avoiding an undefined ratio. Five additional controlled one-at-a-time ablations
+use the production Strategy on the same screening segment. A directional signal
+is set to zero and its production weight is redistributed proportionally across
+the other three directional signals using Decimal, 18-place ROUND_HALF_EVEN
+quantization, and a deterministic residual on the last enabled weight so their
+sum remains exactly one. The volume ablation changes only its own weight. These
+comparisons report historical metric differences and do not demonstrate
+causality.
+
+The default computational budget retains 12 of at most 200 generated score
+configurations, evaluates at most 1,000 joint candidates, and sends 10 to
+validation. Generation fails clearly instead of silently truncating when a limit
+would be exceeded. Override these bounds with `--score-screening-top-k`,
+`--max-score-configurations`, `--max-joint-candidates`, and
+`--validation-top-k`.
+
+All refinement is in memory after one historical read. The command emits compact
+structured metrics and a deterministic explanation, but persists no experiment,
+Feature, Score, Decision, Trade, Position, or Paper Run and never promotes a
+configuration. Version 1 is single-instrument, long-only, sequential, uses one
+fixed score model and a finite grid, and makes no claim of future profitability.
+Score-model and Strategy parameters remain separate so future candidates can add
+technical, sentiment, news, or ML component weights without coupling those
+future components to Strategy thresholds; none of those components is introduced
+here.
+
+The command remains read-only by default but may use compatible completed experiment
+history to build a deterministic search plan. Add `--persist` to atomically retain the
+run, canonical candidates, compact evaluations, baseline, and buy-and-hold evidence.
+An exact completed experiment is reused without simulation. Add `--force-recompute`
+with `--persist` to compare a fresh deterministic result against stored evidence without
+creating a duplicate. Run `python -m app.jobs.refinement_storage` to inspect experiment,
+candidate, evaluation, and storage totals. See
+[Experiment Memory and Experience-Guided Search](docs/008-experiment-memory.md) for
+compatibility, classifications, planner allocation, neighborhood rules, rejected
+candidate reconsideration, transaction behavior, and limitations.
+
+Run Decision generation and Paper execution as a separate one-shot process:
+
+```sh
+python -m app.jobs.generate_market_decisions
+```
+
+Each instrument has an independently committed cycle. PostgreSQL uniqueness
+makes completed retries and overlapping invocations no-ops; this is not an
+exactly-once scheduling claim. `NO_ACTION` is a completed auditable cycle without
+a Trade. The job contacts no provider or exchange.
+
+Use `/health` for API liveness and `/health/database` for PostgreSQL readiness.
+Neither endpoint contacts Binance or exposes connection details.
+
+### Production smoke test
+
+With the API running and example host adjusted for the deployment:
+
+```sh
+curl http://localhost:8000/health
+curl http://localhost:8000/health/database
+python -m app.jobs.ingest_closed_candles
+curl http://localhost:8000/market/status
+curl "http://localhost:8000/market/candles?asset=BTC%2FUSDT&interval=5m"
+```
+
+### Docker
+
+After configuring `.env`, build and start the API and PostgreSQL:
+
+```sh
+make docker
+```
+
+The API starts independently of PostgreSQL readiness. Its database health endpoint returns HTTP 503 while PostgreSQL is unavailable.
+
+### Paper Trading administration
+
+Start or reset the active simulated account without deleting prior experiments:
+
+```sh
+python -m app.jobs.reset_paper_account --initial-cash 10000 --reason "baseline before feature X"
+```
+
+The command parses money as `Decimal`, stops the active experiment, and creates a fresh linked run in one transaction. Stopping a run does not liquidate it: open Positions retain their quantity and entry state, and no synthetic Trade is created. Historical runs are queryable through `GET /paper/runs` and `GET /paper/runs/{run_id}`; positions and trades accept an optional `run_id`. Reset remains CLI-only until authenticated mutation endpoints exist, and a future authenticated frontend action must reuse this use case.
