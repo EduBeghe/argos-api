@@ -886,4 +886,3 @@ def _explain(
 
 def _decimal(value: Decimal) -> str:
     return format(value.normalize(), "f")
-
