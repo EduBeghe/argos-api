@@ -1,3 +1,4 @@
+
 # Experiment Memory and Experience-Guided Search
 
 Argos can persist compact historical refinement evidence and use compatible completed
@@ -148,6 +149,7 @@ maximum limit of 200. Classification filters are composed over bounded candidate
 until a complete public page or the real end of the dataset is reached, so there is no
 silent global scan cap. Profile evidence uses the same centrally defined compatible
 phases and versions as optimization planning. Queries are data-driven by full instrument
+
 identity and avoid one query per candidate. Decimal values and UTC
 timestamps remain exact. The contract maps stored budgets, allocations, plans, and
 parameters into explicit versionable schemas; it does not expose raw JSONB, candles,
@@ -159,16 +161,25 @@ refinement, or contact a provider. Unknown run and candidate identities return 4
 The original deterministic 60/20/20 split remains the primary refinement pass.
 Optional walk-forward evaluation complements it with several chronological, half-open
 training, validation, and test windows. Features are calculated once in memory from
-prior candles, and each window's reported metrics come only from its test range. No
-future candle, validation result, or later window can influence an earlier test.
+prior candles. Algorithm version 2 runs bounded candidate generation and training
+screening independently inside each window, ranks candidates only with that window's
+validation matrix, and evaluates only the selected candidates on its test matrix.
+Global refinement validation/test evidence, test outcomes, and later windows cannot
+influence an earlier selection.
 
-Version 1 defaults to 180 training days, 60 validation days, 60 test days, a
+Version 2 defaults to 180 training days, 60 validation days, 60 test days, a
 60-day step, at most six windows, and at most ten candidates. CLI flags expose every
 duration and limit, plus minimum evidence, profitable-window ratio, drawdown, and
 return-dispersion thresholds. Insufficient history is persisted explicitly and never
 produces a recommendation.
 
-Each window stores UTC bounds, decision count, and a reproducible fingerprint.
+When more valid windows exist than the configured limit, only the most recent windows
+are built and retained, with ordinals normalized to `1..N`. Each window stores UTC
+bounds, decision count, a selection fingerprint over training/validation evidence and
+configuration, and a full fingerprint that additionally includes isolated test
+evidence. Candidate selections preserve validation rank, selection reason, validation
+metrics, and whether test evaluation was authorized. Nonselection is not an evaluation
+failure and contributes no stability evidence.
 Candidate evaluations preserve net return, P&L, drawdown, ending equity, fees, trades,
 and return over drawdown. Stability requires multiple profitable windows, bounded
 drawdown and dispersion, and trading activity; one exceptional window cannot establish
@@ -200,6 +211,7 @@ Read-only consumers use:
 - GET /optimization/refinement-runs/{run_id}/walk-forward
 - GET /optimization/walk-forward-runs/{walk_forward_run_id}
 - GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates
+- GET /optimization/walk-forward-runs/{walk_forward_run_id}/selections
 - GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates/{candidate_id}/windows
 
 Candidate and window evidence use stable keyset cursors and a maximum page size of 200.
@@ -207,4 +219,3 @@ GET requests never run simulations or contact providers. Walk-forward is decisio
 support, not proof of causality or profitability, and never promotes a candidate or
 changes active Paper Trading. Weekly execution, explicit manual promotion into an
 immutable Strategy version, and an isolated parallel wallet remain future work.
-
