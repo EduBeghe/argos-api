@@ -1,3 +1,4 @@
+
 # Argos API
 
 Argos is a private, asset-agnostic quantitative research and predictive decision-support platform. It estimates probabilities from measurable evidence; it does not claim to predict the future with certainty or guarantee profitability.
@@ -147,6 +148,7 @@ curl "http://localhost:8000/market/status"
 ```
 
 List the configured market instruments and their enabled capabilities:
+
 
 ```sh
 curl "http://localhost:8000/market/instruments"
@@ -298,6 +300,7 @@ entry fees, `market_value` is quantity times the latest compatible candle close,
 and `unrealized_pnl` is market value minus cost basis. Portfolio `equity` is
 current cash plus all Position market values; `total_pnl` is equity minus initial
 cash. Returns divide their corresponding P&L by a positive cost basis or initial
+
 cash and are otherwise null.
 
 `valued_at` is the UTC time when Argos assembled the response. Each Position also
@@ -379,6 +382,7 @@ Persisted refinement evidence is exposed through read-only endpoints:
 - `GET /optimization/refinement-runs/{run_id}/walk-forward`
 - `GET /optimization/walk-forward-runs/{walk_forward_run_id}`
 - `GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates`
+- `GET /optimization/walk-forward-runs/{walk_forward_run_id}/selections`
 - `GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates/{candidate_id}/windows`
 
 Run-list filters include `asset`, `provider`, `market_type`, `interval`, `status`,
@@ -425,8 +429,14 @@ python -m app.jobs.refine_historical_strategy \
   --walk-forward-max-candidates 10
 ```
 
-The windows are UTC and half-open, test metrics never include validation or future
-evidence, and identical completed configurations are reused. Walk-forward
+The version-2 windows are UTC and half-open. Each window performs bounded candidate
+generation and training screening, ranks candidates only on that window's validation
+segment, and evaluates only its selected candidates on the isolated test segment.
+Global refinement validation/test evidence and later windows cannot influence an
+earlier selection. The most recent configured number of valid windows is retained,
+with ordinals normalized from one; per-window selection ranks, reasons, metrics, and
+fingerprints are persisted and available through the selections endpoint. Identical
+completed configurations are reused. Walk-forward
 classifications are decision support only: they do not modify production Strategy
 configuration or active Paper Trading.
 
@@ -440,6 +450,7 @@ credentialed origins are rejected. Development-only `POSTGRES_*` variables are
 not needed when `DATABASE_URL` is supplied.
 
 Run the API process with:
+
 
 ```sh
 scripts/start_api.sh
@@ -591,6 +602,7 @@ python -m app.jobs.refine_historical_strategy \
   --fee-rate 0.001 \
   --slippage-rate 0.0005 \
   --validation-top-k 10 \
+
   --score-screening-top-k 12 \
   --max-score-configurations 200 \
   --max-joint-candidates 1000
@@ -709,4 +721,3 @@ python -m app.jobs.reset_paper_account --initial-cash 10000 --reason "baseline b
 ```
 
 The command parses money as `Decimal`, stops the active experiment, and creates a fresh linked run in one transaction. Stopping a run does not liquidate it: open Positions retain their quantity and entry state, and no synthetic Trade is created. Historical runs are queryable through `GET /paper/runs` and `GET /paper/runs/{run_id}`; positions and trades accept an optional `run_id`. Reset remains CLI-only until authenticated mutation endpoints exist, and a future authenticated frontend action must reuse this use case.
-
