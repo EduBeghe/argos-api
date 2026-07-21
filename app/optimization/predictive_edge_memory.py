@@ -45,7 +45,7 @@ class PredictiveEdgeRunRecord(Base):
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
     experiment_key: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
     asset: Mapped[str] = mapped_column(String(32), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     market_type: Mapped[str] = mapped_column(String(32), nullable=False)

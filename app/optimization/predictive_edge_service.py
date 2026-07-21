@@ -157,6 +157,8 @@ async def persist_predictive_edge_result(
         failure_reason=None,
     )
     session.add(run)
+    # Establish the parent row before SQLAlchemy batches the relational evidence.
+    await session.flush()
     window_ids: dict[int, UUID] = {}
     for window in windows:
         identifier = uuid4()
