@@ -1,4 +1,3 @@
-
 from typing import Annotated
 from uuid import UUID
 
@@ -148,7 +147,6 @@ async def walk_forward_candidates(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-
 
 
 @router.get(
