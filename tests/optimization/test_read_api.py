@@ -1,4 +1,3 @@
-
 from collections.abc import AsyncIterator
 from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
@@ -149,7 +148,6 @@ def test_run_evaluations_use_bounded_cursor_pagination(client: TestClient) -> No
     )
     app.dependency_overrides[get_db_session] = fake_session
     try:
-
         with patch("app.optimization.router.read_run_evaluations", reader):
             response = client.get(
                 f"/optimization/refinement-runs/{run_id}/evaluations",
