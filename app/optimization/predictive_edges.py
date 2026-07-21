@@ -556,7 +556,249 @@ def analyze_predictive_edges(
                             _fingerprint(payload),
                         )
                     )
-                    if predictor.name == "overall_score" and condition is Conditio…1962 tokens truncated…torSemanticKind.MAGNITUDE_OR_ACTIVITY,
+                    if predictor.name == "overall_score" and condition is Condition.ALL:
+                        benchmark_observations.setdefault(horizon, []).extend(test)
+    stability = _stability(tuple(window_edges), configuration.thresholds)
+    hypotheses = tuple(
+        _hypothesis(
+            edge,
+            tuple(
+                item.window_ordinal
+                for item in window_edges
+                if item.predictor == edge.predictor
+                and item.horizon == edge.horizon
+                and item.condition == edge.condition
+                and item.test_confirmation_status is TestConfirmationStatus.CONFIRMED
+            ),
+            configuration.decision_interval,
+        )
+        for edge in stability
+        if edge.classification
+        in (EvidenceStatus.PROMISING_POSITIVE, EvidenceStatus.PROMISING_NEGATIVE)
+    )
+    return PredictiveEdgeResult(
+        PredictiveEdgeConclusion.COMPLETED,
+        len(windows),
+        required,
+        None,
+        configuration,
+        tuple(window_edges),
+        stability,
+        hypotheses,
+        _benchmarks(benchmark_observations),
+    )
+
+
+def build_predictive_windows(
+    *,
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    configuration: PredictiveEdgeConfiguration,
+) -> tuple[WalkForwardWindow, ...]:
+    """Build recent half-open windows without coupling evidence to a Strategy."""
+
+    if dataset.fingerprint != matrix.dataset_fingerprint:
+        raise PredictiveEdgeError("dataset and feature matrix fingerprints differ")
+    window = configuration.windows
+    training = timedelta(days=window.training_days)
+    validation = timedelta(days=window.validation_days)
+    test = timedelta(days=window.test_days)
+    step = timedelta(days=window.step_days)
+    start = dataset.identity.range.start
+    end = dataset.identity.range.end
+    available = end - start - training - validation - test
+    if available < timedelta(0):
+        return ()
+    count = int(available // step) + 1
+    first = max(0, count - window.maximum_windows)
+    output: list[WalkForwardWindow] = []
+    for ordinal, index in enumerate(range(first, count), start=1):
+        training_from = start + index * step
+        training_to = training_from + training
+        validation_to = training_to + validation
+        test_to = validation_to + test
+        identity = (
+            dataset.fingerprint,
+            training_from,
+            training_to,
+            validation_to,
+            test_to,
+        )
+        output.append(
+            WalkForwardWindow(
+                ordinal,
+                training_from,
+                training_to,
+                training_to,
+                validation_to,
+                validation_to,
+                test_to,
+                sum(
+                    validation_to <= row.candle_open_time < test_to
+                    for row in matrix.rows
+                ),
+                _fingerprint(identity),
+                _fingerprint((*identity, "training-only-selection")),
+            )
+        )
+    return tuple(output)
+
+
+def _predictors(row: HistoricalFeatureRow) -> dict[str, Decimal]:
+    score = calculate_baseline_score(
+        BaselineScoreInput(
+            row.close_price,
+            row.ema_20,
+            row.ema_50,
+            row.rsi_14,
+            row.atr_14,
+            row.return_1,
+            row.return_12,
+            row.relative_volume_20,
+        )
+    )
+    return {
+        "ema_20_relative": row.ema_20 / row.close_price - Decimal(1),
+        "ema_50_relative": row.ema_50 / row.close_price - Decimal(1),
+        "rsi_14": row.rsi_14,
+        "atr_14_relative": row.atr_14 / row.close_price,
+        "return_1": row.return_1,
+        "return_12": row.return_12,
+        "relative_volume_20": row.relative_volume_20,
+        "trend_component": score.trend_score,
+        "rsi_contribution": score.rsi_contribution,
+        "return_1_contribution": score.return_1_contribution,
+        "return_12_contribution": score.return_12_contribution,
+        "volume_confirmation": score.volume_confirmation_factor,
+        "directional_score": score.directional_score,
+        "overall_score": score.overall_score,
+    }
+
+
+def _phase_rows(
+    rows: tuple[HistoricalFeatureRow, ...], start: datetime, end: datetime
+) -> tuple[HistoricalFeatureRow, ...]:
+    return tuple(row for row in rows if start <= row.candle_open_time < end)
+
+
+def _observations(
+    rows: dict[datetime, HistoricalFeatureRow],
+    *,
+    phase_start: datetime,
+    phase_end: datetime,
+    predictor: PredictorDefinition,
+    horizon: timedelta,
+    condition: Condition,
+    volatility_threshold: Decimal,
+    friction: Decimal,
+    neutral: Decimal,
+    cadence: timedelta,
+) -> tuple[tuple[Observation, ...], int]:
+    result: list[Observation] = []
+    missing = 0
+    for boundary, row in sorted(rows.items()):
+        if (
+            not phase_start <= boundary < phase_end
+            or (boundary - phase_start) % cadence
+        ):
+            continue
+        future_time = boundary + horizon
+        if future_time >= phase_end or future_time not in rows:
+            missing += 1
+            continue
+        ratio = row.atr_14 / row.close_price
+        excluded = (
+            (condition is Condition.EMA_ABOVE and row.ema_20 <= row.ema_50)
+            or (condition is Condition.EMA_BELOW and row.ema_20 >= row.ema_50)
+            or (condition is Condition.HIGH_VOLATILITY and ratio < volatility_threshold)
+            or (
+                condition is Condition.NORMAL_VOLATILITY
+                and ratio >= volatility_threshold
+            )
+        )
+        if excluded:
+            continue
+        gross = rows[future_time].close_price / row.close_price - Decimal(1)
+        absolute = abs(gross)
+        direction = (
+            Direction.UP
+            if gross > neutral
+            else Direction.DOWN
+            if gross < -neutral
+            else Direction.NEUTRAL
+        )
+        result.append(
+            Observation(
+                boundary,
+                _predictors(row)[predictor.name],
+                gross,
+                absolute,
+                max(absolute - friction, Decimal(0)),
+                direction,
+            )
+        )
+    return tuple(result), missing
+
+
+def _learn_direction_mapping(
+    predictor: PredictorDefinition, values: tuple[Observation, ...]
+) -> DirectionMapping:
+    if predictor.semantic_kind in (
+        PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY,
+        PredictorSemanticKind.CONFIRMATION_ONLY,
+    ):
+        return DirectionMapping.NOT_APPLICABLE
+    correlation = _correlation(
+        tuple(item.predictor_value for item in values),
+        tuple(item.forward_gross_return for item in values),
+    )
+    if correlation is None or correlation >= 0:
+        return DirectionMapping.POSITIVE
+    return DirectionMapping.NEGATIVE
+
+
+def _metrics(
+    values: tuple[Observation, ...],
+    missing: int,
+    *,
+    predictor: PredictorDefinition,
+    center: Decimal,
+    mapping: DirectionMapping,
+    friction: Decimal,
+    thresholds: EvidenceThresholds,
+) -> EdgeMetrics:
+    count = len(values)
+    if not count:
+        return EdgeMetrics(
+            0,
+            missing,
+            None,
+            None,
+            None,
+            None,
+            Decimal(0),
+            Decimal(0),
+            Decimal(0),
+            Decimal(0),
+            Decimal(0),
+            Decimal(0),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            EvidenceStatus.INSUFFICIENT,
+            "no usable observations",
+        )
+    x = tuple(item.predictor_value for item in values)
+    signed = tuple(item.forward_gross_return for item in values)
+    magnitude = tuple(item.absolute_movement for item in values)
+    correlation_target = (
+        magnitude
+        if predictor.semantic_kind
+        in (
+            PredictorSemanticKind.MAGNITUDE_OR_ACTIVITY,
             PredictorSemanticKind.CONFIRMATION_ONLY,
         )
         else signed
