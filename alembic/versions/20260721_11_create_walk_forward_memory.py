@@ -1,3 +1,4 @@
+
 """Create walk-forward evaluation memory.
 
 Revision ID: 20260721_11
@@ -93,6 +94,7 @@ def upgrade() -> None:
         sa.Column("test_to", sa.DateTime(timezone=True), nullable=False),
         sa.Column("decision_count", sa.Integer(), nullable=False),
         sa.Column("dataset_fingerprint", sa.String(64), nullable=False),
+        sa.Column("selection_fingerprint", sa.String(64), nullable=False),
         sa.CheckConstraint("ordinal > 0", name="ck_walk_forward_windows_ordinal"),
         sa.CheckConstraint(
             "training_from < training_to AND training_to = validation_from "
@@ -105,6 +107,66 @@ def upgrade() -> None:
             "ordinal",
             name="uq_walk_forward_windows_ordinal",
         ),
+    )
+    op.create_table(
+        "walk_forward_candidate_selections",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "walk_forward_run_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("walk_forward_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "window_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("walk_forward_windows.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "stable_candidate_id",
+            sa.String(64),
+            sa.ForeignKey("strategy_candidates.stable_candidate_id"),
+            nullable=False,
+        ),
+        sa.Column("validation_rank", sa.Integer(), nullable=False),
+        sa.Column("selected_for_test", sa.Boolean(), nullable=False),
+        sa.Column("selection_reason", sa.String(64), nullable=False),
+        sa.Column("validation_total_return", MONEY, nullable=False),
+        sa.Column("validation_absolute_pnl", MONEY, nullable=False),
+        sa.Column("validation_max_drawdown", MONEY, nullable=False),
+        sa.Column("validation_final_equity", MONEY, nullable=False),
+        sa.Column("validation_fees_paid", MONEY, nullable=False),
+        sa.Column("validation_trade_count", sa.Integer(), nullable=False),
+        sa.Column("validation_return_over_drawdown", MONEY, nullable=False),
+        sa.CheckConstraint(
+            "validation_rank > 0",
+            name="ck_walk_forward_candidate_selections_rank",
+        ),
+        sa.CheckConstraint(
+            "selection_reason IN ('selected_by_window_validation_rank', "
+            "'outside_window_test_candidate_limit')",
+            name="ck_walk_forward_candidate_selections_reason",
+        ),
+        sa.CheckConstraint(
+
+            "(selected_for_test AND selection_reason = "
+            "'selected_by_window_validation_rank') OR "
+            "(NOT selected_for_test AND selection_reason = "
+            "'outside_window_test_candidate_limit')",
+            name="ck_walk_forward_candidate_selections_outcome",
+        ),
+        sa.UniqueConstraint(
+            "walk_forward_run_id",
+            "window_id",
+            "stable_candidate_id",
+            name="uq_walk_forward_candidate_selections_identity",
+        ),
+    )
+    op.create_index(
+        "ix_walk_forward_candidate_selections_page",
+        "walk_forward_candidate_selections",
+        ["walk_forward_run_id", "stable_candidate_id", "window_id"],
     )
     op.create_table(
         "walk_forward_candidate_evaluations",
@@ -238,6 +300,7 @@ def upgrade() -> None:
         sa.Column("windows_evaluated", sa.Integer(), nullable=False),
         sa.Column("profitable_windows", sa.Integer(), nullable=False),
         sa.Column("losing_windows", sa.Integer(), nullable=False),
+
         sa.Column("profitable_window_ratio", MONEY, nullable=False),
         sa.Column("mean_return", MONEY, nullable=False),
         sa.Column("median_return", MONEY, nullable=False),
@@ -284,6 +347,11 @@ def downgrade() -> None:
         table_name="walk_forward_candidate_evaluations",
     )
     op.drop_table("walk_forward_candidate_evaluations")
+    op.drop_index(
+        "ix_walk_forward_candidate_selections_page",
+        table_name="walk_forward_candidate_selections",
+    )
+    op.drop_table("walk_forward_candidate_selections")
     op.drop_table("walk_forward_windows")
     op.drop_index(
         "ix_walk_forward_runs_refinement_started",
