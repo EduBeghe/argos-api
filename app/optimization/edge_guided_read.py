@@ -80,9 +80,12 @@ async def list_edge_guided_runs(
     offset: int = 0,
 ) -> EdgeGuidedRunPageResponse:
     counts = _status_counts_subquery()
-    statement = select(EdgeGuidedRunRecord, counts).outerjoin(
-        counts, counts.c.run_id == EdgeGuidedRunRecord.id
-    )
+    statement = select(
+        EdgeGuidedRunRecord,
+        counts.c.confirmed_candidate,
+        counts.c.rejected_validation,
+        counts.c.rejected_test,
+    ).outerjoin(counts, counts.c.run_id == EdgeGuidedRunRecord.id)
     conditions = _run_conditions(asset, provider, market_type, interval, status)
     statement = statement.where(*conditions)
     total = await session.scalar(
@@ -115,7 +118,12 @@ async def get_edge_guided_run(
     counts = _status_counts_subquery()
     row = (
         await session.execute(
-            select(EdgeGuidedRunRecord, counts)
+            select(
+                EdgeGuidedRunRecord,
+                counts.c.confirmed_candidate,
+                counts.c.rejected_validation,
+                counts.c.rejected_test,
+            )
             .outerjoin(counts, counts.c.run_id == EdgeGuidedRunRecord.id)
             .where(EdgeGuidedRunRecord.id == run_id)
         )
