@@ -1,4 +1,3 @@
-
 """Create walk-forward evaluation memory.
 
 Revision ID: 20260721_11
@@ -149,7 +148,6 @@ def upgrade() -> None:
             name="ck_walk_forward_candidate_selections_reason",
         ),
         sa.CheckConstraint(
-
             "(selected_for_test AND selection_reason = "
             "'selected_by_window_validation_rank') OR "
             "(NOT selected_for_test AND selection_reason = "
@@ -300,7 +298,6 @@ def upgrade() -> None:
         sa.Column("windows_evaluated", sa.Integer(), nullable=False),
         sa.Column("profitable_windows", sa.Integer(), nullable=False),
         sa.Column("losing_windows", sa.Integer(), nullable=False),
-
         sa.Column("profitable_window_ratio", MONEY, nullable=False),
         sa.Column("mean_return", MONEY, nullable=False),
         sa.Column("median_return", MONEY, nullable=False),
