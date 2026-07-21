@@ -1,4 +1,3 @@
-
 import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -149,7 +148,6 @@ class WalkForwardWindowRecord(Base):
     training_to: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-
     validation_from: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -300,7 +298,6 @@ class WalkForwardBenchmarkEvaluationRecord(Base):
     __table_args__ = (
         CheckConstraint(
             "benchmark IN ('production_baseline', 'buy_and_hold')",
-
             name="ck_walk_forward_benchmark_evaluations_name",
         ),
         CheckConstraint(
@@ -451,7 +448,6 @@ async def execute_walk_forward(
     key = _experiment_key(
         dataset,
         refinement_run_id,
-
         initial_cash,
         fee_rate,
         slippage_rate,
@@ -602,7 +598,6 @@ def _refinement_budget(value: dict[str, object]) -> RefinementBudget:
         return RefinementBudget(
             score_screening_top_k=int(str(value["score_screening_top_k"])),
             validation_top_k=int(str(value["validation_top_k"])),
-
             max_score_configurations=int(str(value["max_score_configurations"])),
             max_joint_candidates=int(str(value["max_joint_candidates"])),
         )
