@@ -1,5 +1,6 @@
+
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
@@ -13,9 +14,12 @@ from app.optimization.feature_matrix import (
 from app.optimization.historical_data import HistoricalDataset
 from app.optimization.refinement import (
     BenchmarkSegmentResult,
+    RefinementBudget,
     RefinementCandidate,
     RefinementSegmentName,
     candidate_for,
+    generate_score_configurations,
+    generate_strategy_configurations,
     simulate_buy_and_hold,
 )
 from app.optimization.simulation import (
@@ -32,9 +36,11 @@ from app.paper.config import (
     validate_initial_cash,
 )
 from app.scores.calculator import BASELINE_TECHNICAL_V1_PARAMETERS
-from app.strategies.baseline_long_only import BASELINE_LONG_ONLY_V1_PARAMETERS
+from app.strategies.baseline_long_only import (
+    BASELINE_LONG_ONLY_V1_PARAMETERS,
+)
 
-WALK_FORWARD_ALGORITHM_VERSION = 1
+WALK_FORWARD_ALGORITHM_VERSION = 2
 DEFAULT_TRAINING_DAYS = 180
 DEFAULT_VALIDATION_DAYS = 60
 DEFAULT_TEST_DAYS = 60
@@ -109,15 +115,7 @@ class WalkForwardConfiguration:
             raise WalkForwardError(
                 "minimum valid windows cannot exceed maximum windows"
             )
-        if (
-            max(
-                self.training_days,
-                self.validation_days,
-                self.test_days,
-                self.step_days,
-            )
-            > MAXIMUM_DURATION_DAYS
-        ):
+        if max(integers[:4]) > MAXIMUM_DURATION_DAYS:
             raise WalkForwardError(
                 f"walk-forward durations cannot exceed {MAXIMUM_DURATION_DAYS} days"
             )
@@ -151,8 +149,17 @@ class WalkForwardWindow:
     validation_to: datetime
     test_from: datetime
     test_to: datetime
+
     decision_count: int
     dataset_fingerprint: str
+    selection_fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class WalkForwardMatrices:
+    training: HistoricalFeatureMatrix
+    validation: HistoricalFeatureMatrix
+    test: HistoricalFeatureMatrix
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +171,16 @@ class WalkForwardMetrics:
     fees_paid: Decimal
     trade_count: int
     return_over_drawdown: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class WalkForwardCandidateSelection:
+    window: WalkForwardWindow
+    candidate: RefinementCandidate
+    validation_rank: int
+    selected_for_test: bool
+    selection_reason: str
+    validation_metrics: WalkForwardMetrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +228,7 @@ class WalkForwardResult:
     conclusion: WalkForwardConclusion
     configuration: WalkForwardConfiguration
     windows: tuple[WalkForwardWindow, ...]
+    selections: tuple[WalkForwardCandidateSelection, ...]
     candidate_evaluations: tuple[WalkForwardCandidateEvaluation, ...]
     benchmark_evaluations: tuple[WalkForwardBenchmarkEvaluation, ...]
     stability: tuple[WalkForwardStability, ...]
@@ -222,9 +240,13 @@ class WalkForwardResult:
 
 
 def completed_window_count(result: WalkForwardResult) -> int:
-    """Count windows whose candidate and benchmark evaluations all completed."""
     completed = 0
     for window in result.windows:
+        selected = tuple(
+            item
+            for item in result.selections
+            if item.window.ordinal == window.ordinal and item.selected_for_test
+        )
         candidate_items = tuple(
             item
             for item in result.candidate_evaluations
@@ -236,8 +258,9 @@ def completed_window_count(result: WalkForwardResult) -> int:
             if item.window.ordinal == window.ordinal
         )
         if (
-            candidate_items
-            and benchmark_items
+            selected
+            and len(candidate_items) == len(selected)
+            and len(benchmark_items) == 2
             and all(
                 item.status is WalkForwardEvaluationStatus.COMPLETED
                 for item in candidate_items
@@ -256,9 +279,10 @@ def build_walk_forward_windows(
     dataset: HistoricalDataset,
     feature_matrix: HistoricalFeatureMatrix,
     configuration: WalkForwardConfiguration,
+    refinement_budget: RefinementBudget,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
 ) -> tuple[WalkForwardWindow, ...]:
-    """Build deterministic half-open chronological windows without future overlap."""
+    """Build only the most recent valid half-open chronological windows."""
     if feature_matrix.dataset_fingerprint != dataset.fingerprint:
         raise WalkForwardError("Feature matrix fingerprint does not match dataset")
     start = dataset.identity.range.start
@@ -269,69 +293,91 @@ def build_walk_forward_windows(
     validation = timedelta(days=configuration.validation_days)
     test = timedelta(days=configuration.test_days)
     step = timedelta(days=configuration.step_days)
+    complete_span = training + validation + test
+    available = end - start - complete_span
+    if available < timedelta(0):
+        return ()
+    valid_count = int(available // step) + 1
+    first_index = max(0, valid_count - configuration.maximum_windows)
+    selected_count = valid_count - first_index
+
     windows: list[WalkForwardWindow] = []
-    training_from = start
-    while len(windows) < configuration.maximum_windows:
+    for ordinal, index in enumerate(range(first_index, valid_count), start=1):
+        training_from = start + index * step
         training_to = training_from + training
         validation_to = training_to + validation
         test_to = validation_to + test
-        if test_to > end:
-            break
-        test_rows = _test_rows(
-            feature_matrix, validation_to, test_to, decision_interval
+        ranges = (
+            (training_from, training_to),
+            (training_to, validation_to),
+            (validation_to, test_to),
         )
-        decision_count = len(test_rows)
+        matrices = _matrices_for_ranges(feature_matrix, ranges, decision_interval)
+        selection_fingerprint = _selection_fingerprint(
+            matrices.training,
+            matrices.validation,
+            configuration,
+            refinement_budget,
+            decision_interval,
+        )
+        dataset_fingerprint = _window_fingerprint(
+            selection_fingerprint,
+            matrices.test,
+            ranges,
+        )
         windows.append(
             WalkForwardWindow(
-                ordinal=len(windows) + 1,
+                ordinal=ordinal,
                 training_from=training_from,
                 training_to=training_to,
                 validation_from=training_to,
                 validation_to=validation_to,
                 test_from=validation_to,
                 test_to=test_to,
-                decision_count=decision_count,
-                dataset_fingerprint=_window_fingerprint(
-                    dataset.fingerprint,
-                    training_from,
-                    training_to,
-                    validation_to,
-                    test_to,
-                ),
+                decision_count=len(matrices.test.rows),
+                dataset_fingerprint=dataset_fingerprint,
+                selection_fingerprint=selection_fingerprint,
             )
         )
-        training_from += step
+    if len(windows) != selected_count:
+        raise WalkForwardError("walk-forward recent-window selection is inconsistent")
     return tuple(windows)
+
+
+def build_window_matrices(
+    feature_matrix: HistoricalFeatureMatrix,
+    window: WalkForwardWindow,
+    *,
+    decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
+) -> WalkForwardMatrices:
+    return _matrices_for_ranges(
+        feature_matrix,
+        (
+            (window.training_from, window.training_to),
+            (window.validation_from, window.validation_to),
+            (window.test_from, window.test_to),
+        ),
+        decision_interval,
+    )
 
 
 def evaluate_walk_forward(
     *,
     dataset: HistoricalDataset,
     feature_matrix: HistoricalFeatureMatrix,
-    candidates: tuple[RefinementCandidate, ...],
     initial_cash: Decimal,
     fee_rate: Decimal,
     slippage_rate: Decimal,
+    refinement_budget: RefinementBudget,
     configuration: WalkForwardConfiguration = DEFAULT_WALK_FORWARD_CONFIGURATION,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
 ) -> WalkForwardResult:
-    """Evaluate fixed candidates on each window's isolated out-of-sample test range."""
-    if len(candidates) > configuration.maximum_candidates:
-        raise WalkForwardError("candidate count exceeds walk-forward maximum")
-    unique = {candidate.stable_candidate_id: candidate for candidate in candidates}
-    if len(unique) != len(candidates):
-        raise WalkForwardError("walk-forward candidates must be unique")
-    baseline = candidate_for(
-        BASELINE_TECHNICAL_V1_PARAMETERS, BASELINE_LONG_ONLY_V1_PARAMETERS
-    )
-    ordered = (
-        baseline,
-        *(candidate for candidate in candidates if candidate != baseline),
-    )[: configuration.maximum_candidates]
+    """Select within each window, then evaluate only its isolated test range."""
     windows = build_walk_forward_windows(
         dataset=dataset,
         feature_matrix=feature_matrix,
         configuration=configuration,
+        refinement_budget=refinement_budget,
         decision_interval=decision_interval,
     )
     if len(windows) < configuration.minimum_valid_windows:
@@ -339,6 +385,7 @@ def evaluate_walk_forward(
             WalkForwardConclusion.INSUFFICIENT_HISTORY,
             configuration,
             windows,
+            (),
             (),
             (),
             (),
@@ -358,92 +405,92 @@ def evaluate_walk_forward(
         fee_rate=fee_rate,
         slippage_rate=slippage_rate,
     )
-    candidate_evaluations: list[WalkForwardCandidateEvaluation] = []
+    selections: list[WalkForwardCandidateSelection] = []
+    evaluations: list[WalkForwardCandidateEvaluation] = []
     benchmarks: list[WalkForwardBenchmarkEvaluation] = []
+    computations = 0
+    baseline = candidate_for(
+        BASELINE_TECHNICAL_V1_PARAMETERS, BASELINE_LONG_ONLY_V1_PARAMETERS
+    )
     for window in windows:
-        matrix = HistoricalFeatureMatrix(
-            dataset.fingerprint,
-            _test_rows(
-                feature_matrix,
-                window.test_from,
-                window.test_to,
-                decision_interval,
-            ),
+        matrices = build_window_matrices(
+            feature_matrix, window, decision_interval=decision_interval
         )
-        for candidate in ordered:
-            try:
-                simulation = simulate_historical_feature_matrix(
-                    dataset=dataset,
-                    feature_matrix=matrix,
-                    initial_cash=cash,
-                    fee_rate=paper_configuration.fee_rate,
-                    slippage_rate=paper_configuration.slippage_rate,
-                    decision_interval=decision_interval,
-                    strategy_parameters=candidate.strategy_parameters,
-                    score_parameters=candidate.score_parameters,
-                )
-                candidate_evaluations.append(
-                    WalkForwardCandidateEvaluation(
-                        window,
-                        candidate,
-                        WalkForwardEvaluationStatus.COMPLETED,
-                        _simulation_metrics(simulation),
-                        None,
-                    )
-                )
-            except (HistoricalSimulationError, PaperExecutionError) as error:
-                candidate_evaluations.append(
-                    WalkForwardCandidateEvaluation(
-                        window,
-                        candidate,
-                        WalkForwardEvaluationStatus.FAILED,
-                        None,
-                        _sanitize_failure(error),
-                    )
-                )
-        try:
-            buy_and_hold = simulate_buy_and_hold(
-                matrix,
-                RefinementSegmentName.TEST,
-                dataset.identity.instrument,
+        window_selections, selection_computations = _select_candidates(
+            dataset=dataset,
+            window=window,
+            matrices=matrices,
+            initial_cash=cash,
+            fee_rate=paper_configuration.fee_rate,
+            slippage_rate=paper_configuration.slippage_rate,
+            decision_interval=decision_interval,
+            refinement_budget=refinement_budget,
+            maximum_candidates=configuration.maximum_candidates,
+        )
+        selections.extend(window_selections)
+        computations += selection_computations
+        for selection in window_selections:
+            if not selection.selected_for_test:
+                continue
+            evaluation = _evaluate_candidate(
+                dataset,
+                matrices.test,
+                window,
+                selection.candidate,
                 cash,
                 paper_configuration,
+                decision_interval,
             )
-            benchmarks.append(
-                WalkForwardBenchmarkEvaluation(
-                    window,
-                    "buy_and_hold",
-                    WalkForwardEvaluationStatus.COMPLETED,
-                    _benchmark_metrics(buy_and_hold),
-                    None,
-                )
+            evaluations.append(evaluation)
+            computations += 1
+        baseline_evaluation = _evaluate_candidate(
+            dataset,
+            matrices.test,
+            window,
+            baseline,
+            cash,
+            paper_configuration,
+            decision_interval,
+
+        )
+        benchmarks.append(
+            WalkForwardBenchmarkEvaluation(
+                window,
+                "production_baseline",
+                baseline_evaluation.status,
+                baseline_evaluation.metrics,
+                baseline_evaluation.failure_reason,
             )
-        except (HistoricalSimulationError, ValueError) as error:
-            benchmarks.append(
-                WalkForwardBenchmarkEvaluation(
-                    window,
-                    "buy_and_hold",
-                    WalkForwardEvaluationStatus.FAILED,
-                    None,
-                    _sanitize_failure(error),
-                )
+        )
+        computations += 1
+        benchmarks.append(
+            _evaluate_buy_and_hold(
+                dataset, matrices.test, window, cash, paper_configuration
             )
+        )
+        computations += 1
+    candidates = tuple(
+        {
+            item.candidate.stable_candidate_id: item.candidate
+            for item in selections
+            if item.selected_for_test
+        }.values()
+    )
     stability = tuple(
         _aggregate(
             candidate,
             windows,
-            tuple(candidate_evaluations),
+            tuple(selections),
+            tuple(evaluations),
             tuple(benchmarks),
-            baseline.stable_candidate_id,
             configuration,
         )
-        for candidate in ordered
+        for candidate in candidates
     )
     stable = tuple(
         item
         for item in stability
         if item.classification is WalkForwardClassification.STABLE_CANDIDATE
-        and not item.candidate.is_production_baseline
     )
     recommended = (
         sorted(
@@ -462,74 +509,269 @@ def evaluate_walk_forward(
         _recommendation_explanation(recommended)
         if recommended is not None
         else (
-            "No candidate satisfied every version-1 stability criterion across "
-            "multiple test windows. No production change is recommended. Historical "
-            "evidence does not guarantee future results."
+            "No candidate satisfied every version-2 stability criterion across "
+            "multiple independently selected test windows. No production change is "
+            "recommended. Historical evidence does not guarantee future results."
         )
     )
-    computed = len(candidate_evaluations) + len(benchmarks)
     return WalkForwardResult(
         WalkForwardConclusion.COMPLETED,
         configuration,
         windows,
-        tuple(candidate_evaluations),
+        tuple(selections),
+        tuple(evaluations),
         tuple(benchmarks),
         stability,
         recommended.candidate.stable_candidate_id if recommended else None,
         explanation,
-        computed,
+        computations,
         0,
         0,
     )
+
+
+def _select_candidates(
+    *,
+    dataset: HistoricalDataset,
+    window: WalkForwardWindow,
+    matrices: WalkForwardMatrices,
+    initial_cash: Decimal,
+    fee_rate: Decimal,
+    slippage_rate: Decimal,
+    decision_interval: timedelta,
+    refinement_budget: RefinementBudget,
+    maximum_candidates: int,
+) -> tuple[tuple[WalkForwardCandidateSelection, ...], int]:
+    if not matrices.training.rows or not matrices.validation.rows:
+        return (), 0
+    scores = generate_score_configurations()
+    if len(scores) > refinement_budget.max_score_configurations:
+        raise WalkForwardError(
+            "score configurations exceed the source refinement budget"
+        )
+    score_results = tuple(
+        (
+            candidate_for(score, BASELINE_LONG_ONLY_V1_PARAMETERS),
+            _simulate_metrics(
+                dataset,
+                matrices.training,
+                initial_cash,
+                fee_rate,
+                slippage_rate,
+                decision_interval,
+                candidate_for(score, BASELINE_LONG_ONLY_V1_PARAMETERS),
+            ),
+        )
+        for score in scores
+    )
+    retained_scores = tuple(
+        item[0].score_parameters
+        for item in sorted(score_results, key=_candidate_metric_ranking)
+    )[: refinement_budget.score_screening_top_k]
+    joint = tuple(
+        {
+            candidate.stable_candidate_id: candidate
+            for score in retained_scores
+            for strategy in generate_strategy_configurations()
+            for candidate in (candidate_for(score, strategy),)
+        }.values()
+    )
+    if len(joint) > refinement_budget.max_joint_candidates:
+        raise WalkForwardError("joint candidates exceed the source refinement budget")
+    training_results = tuple(
+        (
+            candidate,
+            _simulate_metrics(
+                dataset,
+                matrices.training,
+                initial_cash,
+                fee_rate,
+                slippage_rate,
+                decision_interval,
+                candidate,
+            ),
+        )
+        for candidate in joint
+    )
+    validation_candidates = tuple(
+        item[0] for item in sorted(training_results, key=_candidate_metric_ranking)
+    )[: refinement_budget.validation_top_k]
+    validation_results = tuple(
+        (
+            candidate,
+            _simulate_metrics(
+                dataset,
+                matrices.validation,
+
+                initial_cash,
+                fee_rate,
+                slippage_rate,
+                decision_interval,
+                candidate,
+            ),
+        )
+        for candidate in validation_candidates
+    )
+    ranked = tuple(sorted(validation_results, key=_candidate_metric_ranking))
+    selections = tuple(
+        WalkForwardCandidateSelection(
+            window=window,
+            candidate=candidate,
+            validation_rank=rank,
+            selected_for_test=rank <= maximum_candidates,
+            selection_reason=(
+                "selected_by_window_validation_rank"
+                if rank <= maximum_candidates
+                else "outside_window_test_candidate_limit"
+            ),
+            validation_metrics=metrics,
+        )
+        for rank, (candidate, metrics) in enumerate(ranked, start=1)
+    )
+    computations = len(score_results) + len(training_results) + len(ranked)
+    return selections, computations
+
+
+def _simulate_metrics(
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    initial_cash: Decimal,
+    fee_rate: Decimal,
+    slippage_rate: Decimal,
+    decision_interval: timedelta,
+    candidate: RefinementCandidate,
+) -> WalkForwardMetrics:
+    result = simulate_historical_feature_matrix(
+        dataset=dataset,
+        feature_matrix=matrix,
+        initial_cash=initial_cash,
+        fee_rate=fee_rate,
+        slippage_rate=slippage_rate,
+        decision_interval=decision_interval,
+        strategy_parameters=candidate.strategy_parameters,
+        score_parameters=candidate.score_parameters,
+    )
+    return _simulation_metrics(result)
+
+
+def _evaluate_candidate(
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    window: WalkForwardWindow,
+    candidate: RefinementCandidate,
+    initial_cash: Decimal,
+    configuration: SimulationConfiguration,
+    decision_interval: timedelta,
+) -> WalkForwardCandidateEvaluation:
+    try:
+        metrics = _simulate_metrics(
+            dataset,
+            matrix,
+            initial_cash,
+            configuration.fee_rate,
+            configuration.slippage_rate,
+            decision_interval,
+            candidate,
+        )
+        return WalkForwardCandidateEvaluation(
+            window,
+            candidate,
+            WalkForwardEvaluationStatus.COMPLETED,
+            metrics,
+            None,
+        )
+    except (HistoricalSimulationError, PaperExecutionError) as error:
+        return WalkForwardCandidateEvaluation(
+            window,
+            candidate,
+            WalkForwardEvaluationStatus.FAILED,
+            None,
+            _sanitize_failure(error),
+        )
+
+
+def _evaluate_buy_and_hold(
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    window: WalkForwardWindow,
+    initial_cash: Decimal,
+    configuration: SimulationConfiguration,
+) -> WalkForwardBenchmarkEvaluation:
+    try:
+        result = simulate_buy_and_hold(
+            matrix,
+            RefinementSegmentName.TEST,
+            dataset.identity.instrument,
+            initial_cash,
+            configuration,
+        )
+        return WalkForwardBenchmarkEvaluation(
+            window,
+            "buy_and_hold",
+            WalkForwardEvaluationStatus.COMPLETED,
+            _benchmark_metrics(result),
+            None,
+        )
+    except (HistoricalSimulationError, PaperExecutionError) as error:
+        return WalkForwardBenchmarkEvaluation(
+            window,
+            "buy_and_hold",
+            WalkForwardEvaluationStatus.FAILED,
+            None,
+            _sanitize_failure(error),
+        )
 
 
 def _aggregate(
     candidate: RefinementCandidate,
     windows: tuple[WalkForwardWindow, ...],
+    selections: tuple[WalkForwardCandidateSelection, ...],
     evaluations: tuple[WalkForwardCandidateEvaluation, ...],
     benchmarks: tuple[WalkForwardBenchmarkEvaluation, ...],
-    baseline_id: str,
     configuration: WalkForwardConfiguration,
 ) -> WalkForwardStability:
-    selected = tuple(
+    selected_ordinals = {
+        item.window.ordinal
+        for item in selections
+        if item.candidate.stable_candidate_id == candidate.stable_candidate_id
+        and item.selected_for_test
+    }
+    completed = tuple(
         item
         for item in evaluations
         if item.candidate.stable_candidate_id == candidate.stable_candidate_id
+        and item.window.ordinal in selected_ordinals
         and item.status is WalkForwardEvaluationStatus.COMPLETED
         and item.metrics is not None
     )
-    if len(selected) < configuration.minimum_valid_windows:
-        classification = (
-            WalkForwardClassification.EVALUATION_FAILED
-            if len(selected) < len(windows)
-            else WalkForwardClassification.INSUFFICIENT_EVIDENCE
+    if len(completed) < configuration.minimum_valid_windows:
+        return _empty_stability(
+            candidate,
+            WalkForwardClassification.INSUFFICIENT_EVIDENCE,
+            len(completed),
         )
-        return _empty_stability(candidate, classification, len(selected))
-    metrics = tuple(item.metrics for item in selected if item.metrics is not None)
+    metrics = tuple(item.metrics for item in completed if item.metrics is not None)
     returns = tuple(item.total_return for item in metrics)
     drawdowns = tuple(item.max_drawdown for item in metrics)
+
     profitable = sum(value > 0 for value in returns)
     ratio = _ratio(profitable, len(returns))
     mean_return = _mean(returns)
     median_return = quantize_financial(Decimal(median(returns)))
     deviation = _standard_deviation(returns, mean_return)
-    baseline_by_window = _candidate_metrics_by_window(evaluations, baseline_id)
-    buy_hold_by_window = {
-        item.window.ordinal: item.metrics
-        for item in benchmarks
-        if item.metrics is not None
-    }
-    positive_baseline = sum(
+    production = _benchmark_metrics_by_window(benchmarks, "production_baseline")
+    buy_hold = _benchmark_metrics_by_window(benchmarks, "buy_and_hold")
+    positive_production = sum(
         item.metrics is not None
-        and (baseline_metric := baseline_by_window.get(item.window.ordinal)) is not None
-        and item.metrics.total_return > baseline_metric.total_return
-        for item in selected
+        and (reference := production.get(item.window.ordinal)) is not None
+        and item.metrics.total_return > reference.total_return
+        for item in completed
     )
     positive_buy_hold = sum(
         item.metrics is not None
-        and (benchmark := buy_hold_by_window.get(item.window.ordinal)) is not None
-        and item.metrics.total_return > benchmark.total_return
-        for item in selected
+        and (reference := buy_hold.get(item.window.ordinal)) is not None
+        and item.metrics.total_return > reference.total_return
+        for item in completed
     )
     if profitable == 0:
         classification = WalkForwardClassification.CONSISTENTLY_UNPROFITABLE
@@ -544,10 +786,11 @@ def _aggregate(
     else:
         classification = WalkForwardClassification.UNSTABLE_CANDIDATE
     explanation = (
-        f"{classification.value}: profitable in {profitable} of {len(returns)} "
-        f"windows; worst return {min(returns)}; worst drawdown {max(drawdowns)}; "
-        f"beat production in {positive_baseline} windows and buy-and-hold in "
-        f"{positive_buy_hold}. Historical evidence does not guarantee future results."
+        f"{classification.value}: legitimately selected and completed in "
+        f"{len(returns)} windows; profitable in {profitable}; worst return "
+        f"{min(returns)}; worst drawdown {max(drawdowns)}; beat production in "
+        f"{positive_production} windows and buy-and-hold in {positive_buy_hold}. "
+        "Historical evidence does not guarantee future results."
     )
     return WalkForwardStability(
         candidate,
@@ -565,7 +808,7 @@ def _aggregate(
         max(drawdowns),
         quantize_financial(sum((item.fees_paid for item in metrics), Decimal(0))),
         sum(item.trade_count for item in metrics),
-        _ratio(positive_baseline, len(returns)),
+        _ratio(positive_production, len(returns)),
         _ratio(positive_buy_hold, len(returns)),
         explanation,
     )
@@ -596,56 +839,145 @@ def _empty_stability(
         zero,
         zero,
         (
-            f"{classification.value}: only {windows_evaluated} valid evaluations "
-            "were available. Historical evidence does not guarantee future results."
+            f"{classification.value}: only {windows_evaluated} legitimately selected "
+            "test evaluations completed. Historical evidence does not guarantee "
+            "future results."
         ),
     )
 
 
-def _test_rows(
+def _matrices_for_ranges(
+    matrix: HistoricalFeatureMatrix,
+    ranges: tuple[
+        tuple[datetime, datetime],
+        tuple[datetime, datetime],
+        tuple[datetime, datetime],
+    ],
+    decision_interval: timedelta,
+) -> WalkForwardMatrices:
+    values = tuple(
+        HistoricalFeatureMatrix(
+            matrix.dataset_fingerprint,
+            _rows_in_range(matrix, start, end, decision_interval),
+        )
+        for start, end in ranges
+    )
+    return WalkForwardMatrices(values[0], values[1], values[2])
+
+
+def _rows_in_range(
     matrix: HistoricalFeatureMatrix,
     start: datetime,
     end: datetime,
     decision_interval: timedelta,
 ) -> tuple[HistoricalFeatureRow, ...]:
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
     candle_duration = timedelta(minutes=5)
     return tuple(
         row
         for row in matrix.rows
-        if start <= row.candle_open_time + candle_duration < end
-        and (row.candle_open_time + candle_duration - datetime(1970, 1, 1, tzinfo=UTC))
-        % decision_interval
-        == timedelta(0)
+        if start <= (boundary := row.candle_open_time + candle_duration) < end
+        and (boundary - epoch) % decision_interval == timedelta(0)
     )
+
+
+def _selection_fingerprint(
+    training: HistoricalFeatureMatrix,
+    validation: HistoricalFeatureMatrix,
+    configuration: WalkForwardConfiguration,
+    refinement_budget: RefinementBudget,
+    decision_interval: timedelta,
+) -> str:
+    payload = {
+        "algorithm_version": WALK_FORWARD_ALGORITHM_VERSION,
+        "training": _matrix_fingerprint(training),
+        "validation": _matrix_fingerprint(validation),
+        "configuration": _canonical_dataclass(configuration),
+        "refinement_budget": _canonical_dataclass(refinement_budget),
+        "decision_interval_seconds": int(decision_interval.total_seconds()),
+    }
+    return _hash_payload(payload)
 
 
 def _window_fingerprint(
-    parent: str,
-    training_from: datetime,
-    training_to: datetime,
-    validation_to: datetime,
-    test_to: datetime,
+    selection_fingerprint: str,
+    test: HistoricalFeatureMatrix,
+    ranges: tuple[
+        tuple[datetime, datetime],
+
+        tuple[datetime, datetime],
+        tuple[datetime, datetime],
+    ],
 ) -> str:
-    payload = (
-        parent,
-        training_from.isoformat(),
-        training_to.isoformat(),
-        validation_to.isoformat(),
-        test_to.isoformat(),
-        WALK_FORWARD_ALGORITHM_VERSION,
+    return _hash_payload(
+        {
+            "selection_fingerprint": selection_fingerprint,
+            "test": _matrix_fingerprint(test),
+            "ranges": tuple(
+                (start.isoformat(), end.isoformat()) for start, end in ranges
+            ),
+        }
     )
-    return sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()
+
+
+def _matrix_fingerprint(matrix: HistoricalFeatureMatrix) -> str:
+    digest = sha256()
+    for row in matrix.rows:
+        digest.update(
+            json.dumps(
+                (
+                    row.candle_open_time.isoformat(),
+                    str(row.close_price),
+                    str(row.ema_20),
+                    str(row.ema_50),
+                    str(row.rsi_14),
+                    str(row.atr_14),
+                    str(row.return_1),
+                    str(row.return_12),
+                    str(row.relative_volume_20),
+                ),
+                separators=(",", ":"),
+            ).encode()
+        )
+    return digest.hexdigest()
+
+
+def _hash_payload(payload: object) -> str:
+    return sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _canonical_dataclass(
+    value: WalkForwardConfiguration | RefinementBudget,
+) -> dict[str, object]:
+    return {
+        name: str(item) if isinstance(item, Decimal) else item
+        for name, item in asdict(value).items()
+    }
+
+
+def _candidate_metric_ranking(
+    value: tuple[RefinementCandidate, WalkForwardMetrics],
+) -> tuple[Decimal, Decimal, int, str]:
+    candidate, metrics = value
+    return (
+        -metrics.total_return,
+        metrics.max_drawdown,
+        metrics.trade_count,
+        candidate.stable_candidate_id,
+    )
 
 
 def _simulation_metrics(result: HistoricalSimulationResult) -> WalkForwardMetrics:
     return WalkForwardMetrics(
-        total_return=result.total_return,
-        absolute_pnl=result.absolute_pnl,
-        max_drawdown=result.max_drawdown,
-        final_equity=result.final_equity,
-        fees_paid=result.fees_paid,
-        trade_count=result.trade_count,
-        return_over_drawdown=(
+        result.total_return,
+        result.absolute_pnl,
+        result.max_drawdown,
+        result.final_equity,
+        result.fees_paid,
+        result.trade_count,
+        (
             quantize_financial(result.total_return / result.max_drawdown)
             if result.max_drawdown > 0
             else Decimal(0)
@@ -665,14 +997,13 @@ def _benchmark_metrics(result: BenchmarkSegmentResult) -> WalkForwardMetrics:
     )
 
 
-def _candidate_metrics_by_window(
-    evaluations: tuple[WalkForwardCandidateEvaluation, ...], candidate_id: str
+def _benchmark_metrics_by_window(
+    evaluations: tuple[WalkForwardBenchmarkEvaluation, ...], benchmark: str
 ) -> dict[int, WalkForwardMetrics]:
     return {
         item.window.ordinal: item.metrics
         for item in evaluations
-        if item.candidate.stable_candidate_id == candidate_id
-        and item.metrics is not None
+        if item.benchmark == benchmark and item.metrics is not None
     }
 
 
@@ -704,9 +1035,10 @@ def _sanitize_failure(error: Exception) -> str:
 def _recommendation_explanation(value: WalkForwardStability) -> str:
     return (
         f"Candidate {value.candidate.stable_candidate_id} is decision-support only: "
-        f"profitable in {value.profitable_windows} of {value.windows_evaluated} "
-        f"windows, worst return {value.worst_window_return}, maximum drawdown "
-        f"{value.worst_max_drawdown}, production outperformance ratio "
+        f"legitimately selected and profitable in {value.profitable_windows} of "
+        f"{value.windows_evaluated} completed windows, worst return "
+        f"{value.worst_window_return}, maximum drawdown {value.worst_max_drawdown}, "
+        f"production outperformance ratio "
         f"{value.positive_excess_return_vs_production_ratio}, and buy-and-hold "
         f"outperformance ratio {value.positive_excess_return_vs_buy_and_hold_ratio}. "
         "It is not promoted automatically. Historical evidence does not guarantee "
