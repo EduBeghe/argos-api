@@ -374,4 +374,3 @@ def _decode_candidate_cursor(cursor: str) -> tuple[int, str]:
         return int(ranking), candidate_id
     except ValueError as error:
         raise ValueError("invalid walk-forward candidate cursor") from error
-
