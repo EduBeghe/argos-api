@@ -1,3 +1,4 @@
+
 from typing import Annotated
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from app.optimization.schemas import (
     WalkForwardCandidatePageResponse,
     WalkForwardRunDetailResponse,
     WalkForwardRunResponse,
+    WalkForwardSelectionPageResponse,
     WalkForwardWindowEvaluationPageResponse,
 )
 from app.optimization.walk_forward import WalkForwardClassification
@@ -34,6 +36,7 @@ from app.optimization.walk_forward_read import (
     read_walk_forward_candidate_windows,
     read_walk_forward_candidates,
     read_walk_forward_run,
+    read_walk_forward_selections,
 )
 
 router = APIRouter(prefix="/optimization", tags=["optimization"])
@@ -138,6 +141,32 @@ async def walk_forward_candidates(
             session,
             run_id,
             classification=classification,
+            limit=limit,
+            cursor=cursor,
+        )
+    except WalkForwardReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+
+@router.get(
+    "/walk-forward-runs/{run_id}/selections",
+    response_model=WalkForwardSelectionPageResponse,
+)
+async def walk_forward_selections(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    selected_for_test: Annotated[bool | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_OPTIMIZATION_PAGE_SIZE)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> WalkForwardSelectionPageResponse:
+    try:
+        return await read_walk_forward_selections(
+            session,
+            run_id,
+            selected_for_test=selected_for_test,
             limit=limit,
             cursor=cursor,
         )
