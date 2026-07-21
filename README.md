@@ -367,6 +367,24 @@ The MVP reads the complete aggregate snapshot history because it produces only
 two points per hour. A database aggregation or daily summaries can be introduced
 if volume later justifies them.
 
+## Predictive Edge Map
+
+Run the bounded historical diagnostic and persist aggregate evidence only:
+
+```bash
+python -m app.jobs.analyze_predictive_edges \
+  --asset BTC/USDT --provider binance --market-type spot --interval 5m \
+  --from 2024-01-01T00:00:00Z --to 2026-01-01T00:00:00Z \
+  --horizon 30m --horizon 1h --horizon 2h --horizon 6h \
+  --horizon 12h --horizon 24h --horizon 48h \
+  --fee-rate 0.001 --slippage-rate 0.0005 --persist
+```
+
+Training alone defines bins and volatility thresholds; isolated test targets and
+round-trip friction drive the conclusions. The command reuses identical completed
+experiments and never creates executable Strategies or mutates Paper Trading. See
+[`docs/009-predictive-edge-map.md`](docs/009-predictive-edge-map.md).
+
 ## Historical optimization memory API
 
 Persisted refinement evidence is exposed through read-only endpoints:
@@ -716,3 +734,4 @@ python -m app.jobs.reset_paper_account --initial-cash 10000 --reason "baseline b
 ```
 
 The command parses money as `Decimal`, stops the active experiment, and creates a fresh linked run in one transaction. Stopping a run does not liquidate it: open Positions retain their quantity and entry state, and no synthetic Trade is created. Historical runs are queryable through `GET /paper/runs` and `GET /paper/runs/{run_id}`; positions and trades accept an optional `run_id`. Reset remains CLI-only until authenticated mutation endpoints exist, and a future authenticated frontend action must reuse this use case.
+

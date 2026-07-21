@@ -5,6 +5,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
+from app.optimization.predictive_edge_read import (
+    MAX_PAGE_LIMIT,
+    PredictiveEdgeNotFoundError,
+    get_predictive_edge_run,
+    list_predictive_edge_runs,
+    list_predictive_edge_windows,
+    list_predictive_edges,
+    list_strategy_hypotheses,
+)
+from app.optimization.predictive_edge_schemas import (
+    PredictiveEdgePageResponse,
+    PredictiveEdgeRunDetailResponse,
+    PredictiveEdgeRunPageResponse,
+    PredictiveEdgeWindowPageResponse,
+    StrategyHypothesisPageResponse,
+)
+from app.optimization.predictive_edges import EvidenceStatus
 from app.optimization.read_service import (
     OptimizationReadNotFoundError,
     read_candidate,
@@ -41,6 +58,106 @@ from app.optimization.walk_forward_read import (
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 RunQuery = Annotated[RefinementRunQuery, Query()]
 CandidatesQuery = Annotated[CandidateQuery, Query()]
+
+
+@router.get("/predictive-edge-runs", response_model=PredictiveEdgeRunPageResponse)
+async def predictive_edge_runs(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    asset: Annotated[str | None, Query()] = None,
+    provider: Annotated[str | None, Query()] = None,
+    market_type: Annotated[str | None, Query()] = None,
+    interval: Annotated[str | None, Query()] = None,
+    status: Annotated[str | None, Query()] = None,
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = 50,
+) -> PredictiveEdgeRunPageResponse:
+    return await list_predictive_edge_runs(
+        session,
+        asset=asset,
+        provider=provider,
+        market_type=market_type,
+        interval=interval,
+        status=status,
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}", response_model=PredictiveEdgeRunDetailResponse
+)
+async def predictive_edge_run(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> PredictiveEdgeRunDetailResponse:
+    try:
+        return await get_predictive_edge_run(session, run_id)
+    except PredictiveEdgeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/edges", response_model=PredictiveEdgePageResponse
+)
+async def predictive_edges(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    predictor: Annotated[str | None, Query()] = None,
+    horizon_seconds: Annotated[int | None, Query(gt=0)] = None,
+    condition: Annotated[str | None, Query()] = None,
+    classification: Annotated[EvidenceStatus | None, Query()] = None,
+    cursor: Annotated[UUID | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = 50,
+) -> PredictiveEdgePageResponse:
+    try:
+        return await list_predictive_edges(
+            session,
+            run_id=run_id,
+            predictor=predictor,
+            horizon_seconds=horizon_seconds,
+            condition=condition,
+            classification=classification,
+            cursor=cursor,
+            limit=limit,
+        )
+    except PredictiveEdgeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/edges/{edge_id}/windows",
+    response_model=PredictiveEdgeWindowPageResponse,
+)
+async def predictive_edge_windows(
+    run_id: UUID,
+    edge_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    cursor: Annotated[int | None, Query(ge=0)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = 50,
+) -> PredictiveEdgeWindowPageResponse:
+    try:
+        return await list_predictive_edge_windows(
+            session, run_id=run_id, edge_id=edge_id, cursor=cursor, limit=limit
+        )
+    except PredictiveEdgeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/hypotheses",
+    response_model=StrategyHypothesisPageResponse,
+)
+async def predictive_edge_hypotheses(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = 50,
+) -> StrategyHypothesisPageResponse:
+    try:
+        return await list_strategy_hypotheses(
+            session, run_id=run_id, cursor=cursor, limit=limit
+        )
+    except PredictiveEdgeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get("/refinement-runs", response_model=list[RefinementRunSummaryResponse])
@@ -197,3 +314,4 @@ async def walk_forward_candidate_windows(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
