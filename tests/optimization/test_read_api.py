@@ -1,3 +1,4 @@
+
 from collections.abc import AsyncIterator
 from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
@@ -12,6 +13,7 @@ from app.optimization.schemas import (
     CandidatePageResponse,
     EvaluationPageResponse,
     WalkForwardCandidatePageResponse,
+    WalkForwardSelectionPageResponse,
     WalkForwardWindowEvaluationPageResponse,
 )
 from app.optimization.walk_forward import WalkForwardClassification
@@ -147,6 +149,7 @@ def test_run_evaluations_use_bounded_cursor_pagination(client: TestClient) -> No
     )
     app.dependency_overrides[get_db_session] = fake_session
     try:
+
         with patch("app.optimization.router.read_run_evaluations", reader):
             response = client.get(
                 f"/optimization/refinement-runs/{run_id}/evaluations",
@@ -237,3 +240,37 @@ def test_walk_forward_window_evidence_is_bounded_and_unknown_is_404(
         params={"limit": 201},
     )
     assert too_large.status_code == 422
+
+
+def test_walk_forward_selection_filter_and_cursor_are_forwarded(
+    client: TestClient,
+) -> None:
+    run_id = uuid4()
+    reader = AsyncMock(
+        return_value=WalkForwardSelectionPageResponse(
+            items=(), has_more=False, next_cursor=None
+        )
+    )
+    app.dependency_overrides[get_db_session] = fake_session
+    try:
+        with patch("app.optimization.router.read_walk_forward_selections", reader):
+            response = client.get(
+                f"/optimization/walk-forward-runs/{run_id}/selections",
+                params={
+                    "selected_for_test": "false",
+                    "limit": 20,
+                    "cursor": "1:2:candidate",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "has_more": False, "next_cursor": None}
+    reader.assert_awaited_once_with(
+        ANY,
+        run_id,
+        selected_for_test=False,
+        limit=20,
+        cursor="1:2:candidate",
+    )
