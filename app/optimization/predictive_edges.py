@@ -930,4 +930,3 @@ def _fingerprint(value: object) -> str:
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
-

@@ -287,4 +287,3 @@ async def persist_predictive_edge_result(
         )
     await session.commit()
     return PredictiveEdgeExecution(run_id, False, result, 0, 0)
-

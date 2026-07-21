@@ -281,4 +281,3 @@ async def _require_run(session: AsyncSession, run_id: UUID) -> None:
 
 def _run(value: PredictiveEdgeRunRecord) -> PredictiveEdgeRunResponse:
     return PredictiveEdgeRunResponse.model_validate(value, from_attributes=True)
-

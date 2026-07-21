@@ -61,4 +61,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run(run_async_migrations())
-

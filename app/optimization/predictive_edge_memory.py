@@ -315,4 +315,3 @@ class PredictiveEdgeBenchmarkRecord(Base):
     observation_count: Mapped[int] = mapped_column(Integer, nullable=False)
     directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     mean_return: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
-

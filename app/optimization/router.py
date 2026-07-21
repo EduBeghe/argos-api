@@ -314,4 +314,3 @@ async def walk_forward_candidate_windows(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-

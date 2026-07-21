@@ -166,4 +166,3 @@ def test_insufficient_observations_are_not_replaced_with_zero_correlation() -> N
 
 def test_direction_vocabulary_is_explicit() -> None:
     assert tuple(Direction) == (Direction.UP, Direction.DOWN, Direction.NEUTRAL)
-

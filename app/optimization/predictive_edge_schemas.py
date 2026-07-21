@@ -114,4 +114,3 @@ class StrategyHypothesisPageResponse(BaseModel):
 class PredictiveEdgeRunDetailResponse(BaseModel):
     run: PredictiveEdgeRunResponse
     configuration: dict[str, int | Decimal | str]
-

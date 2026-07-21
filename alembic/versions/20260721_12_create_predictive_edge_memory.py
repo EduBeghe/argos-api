@@ -43,4 +43,3 @@ def downgrade() -> None:
     bind = op.get_bind()
     for table in reversed(TABLES):
         table.drop(bind)
-
