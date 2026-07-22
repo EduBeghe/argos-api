@@ -66,26 +66,35 @@ Refinement separates training, validation, and isolated test evidence; explores 
 
 The Predictive Edge Map examines versioned predictors across horizons, conditions, and walk-forward windows. Training freezes centers, mappings, volatility thresholds, and quantile bounds. Validation selects individual bin/action identities; isolated test confirms only those same frozen bins. Evidence may be promising, unstable, or not detectable. Temporal isolation, fingerprints, frozen mappings, and segment-specific observations limit leakage; none proves causality.
 
-### Edge-guided candidates and qualification v2
+### Complete edge-guided Strategies and qualification v3
 
-Generation is bounded (default maximum 12), creates at most one candidate per confirmed hypothesis, and does not combine hypotheses automatically. `long_entry` gates a production entry: it never forces a buy that `baseline_long_only` did not request. `exit_or_avoid` closes a simulated position when open or blocks a production entry when flat. It is historical candidate behavior, not an instruction for the current live Paper run.
+Generation remains bounded, but a `long_entry` is now an independent long-only
+entry rule rather than only a filter on `baseline_long_only`. Complete candidates
+freeze entry and timed/signal/baseline exit rules, cadence, holding bounds, cooldown,
+allocation, costs, and source evidence. `exit_or_avoid` remains a separate defensive
+overlay.
 
-Qualification contract v2 assigns:
+Qualification v3 assigns `rejected_validation` before isolated test,
+`rejected_test` only after validation passes, and `confirmed_candidate` only when
+the complete Strategy satisfies the existing strict activity, net-return, production
+outperformance, risk, window, and stability evidence. Test metrics are null when
+validation does not authorize test. Buy and hold remains an independent comparison.
+Earlier evidence remains readable as legacy but is not eligible under v3.
 
-- `rejected_validation` when training, validation, or the minimum valid-window evidence fails;
-- `rejected_test` when training and validation pass but isolated test, confirmed-window count, or test stability fails;
-- `confirmed_candidate` only with sufficient trades, strictly positive net returns in training/validation/test, strict outperformance of production in validation/test, acceptable drawdown, enough windows, and required stability.
-
-Buy and hold remains an independent comparison and is not required to be beaten. Public fields include status, candidate action, validation/test return, confirmed windows, trade count, maximum drawdown, production and buy-and-hold comparisons, rejection reasons, `eligible_under_current_contract`, and `legacy`. A v1 record may remain visible as legacy evidence but is not eligible under v2. Zero hypotheses/candidates is a valid result. Confirmation is historical evidence, not a guarantee or automatic Strategy activation.
+Exact completed runs use a constant-size insert-only candle revision to short-circuit
+before loading historical candles, building the Feature matrix, analyzing edges, or
+simulating candidates. The weekly job processes scoring-enabled catalog instruments
+sequentially under a PostgreSQL advisory lock and never activates candidates or mutates
+Paper Trading. See [weekly Strategy research](014-weekly-strategy-research.md).
 
 Plain-language definitions:
 
-- Validation return is net return after fees and slippage in periods used to validate a candidate after discovery.
+- Validation return is net return after fees and slippage in periods used after discovery.
 - Test return is net return in later isolated periods that did not participate in selection.
 - Confirmed windows count independent time windows that passed validation and then test.
 
 ## Current state and next steps
 
-Implemented: live ingestion; bounded Features/Scores; Decisions; Paper execution; portfolio/performance and equity history; dashboard API; separate frontend; candle backfill; reproducible simulation; refinement persistence/reuse; Predictive Edge Map; edge-guided candidates; qualification v2; and candidate APIs/UI.
+Implemented: live ingestion; bounded Features/Scores; Decisions; Paper execution; portfolio/performance and equity history; dashboard API; separate frontend; candle backfill; reproducible simulation; refinement persistence/reuse; Predictive Edge Map; complete edge-guided Strategy research; qualification v3; weekly research execution; and candidate APIs/UI.
 
-Not implemented: candidate correction/approval workflow; parallel wallets per Strategy; stopping individual Strategies; weekly exploration scheduling; additional providers/assets; ML; news/sentiment; authentication; or real-money trading. These are possible next steps, not production commitments.
+Not implemented: candidate correction/approval or activation; parallel wallets per Strategy; stopping individual Strategies; additional providers/assets; ML; news/sentiment; authentication; or real-money trading. These are possible next steps, not production commitments.

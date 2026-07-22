@@ -7,8 +7,12 @@ from pydantic import BaseModel
 
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.edge_guided import (
+    CandidateFamily,
     EdgeGuidedCandidateStatus,
     EdgeGuidedRejectionReason,
+    EntryRule,
+    ExitRule,
+    ResearchOutcome,
 )
 from app.optimization.predictive_edges import (
     Condition,
@@ -60,6 +64,10 @@ class EdgeGuidedRunResponse(BaseModel):
     started_at: datetime
     completed_at: datetime | None
     candidate_status_counts: EdgeGuidedStatusCountsResponse
+    research_outcome: ResearchOutcome | None = None
+    outcome_explanation: str | None = None
+    funnel: dict[str, int] | None = None
+    timings: dict[str, Decimal] | None = None
 
 
 class EdgeGuidedRunPageResponse(BaseModel):
@@ -82,6 +90,19 @@ class EdgeGuidedSegmentMetricsResponse(BaseModel):
     beats_production: bool
     beats_buy_and_hold: bool
     risk_acceptable: bool
+
+
+class EdgeGuidedRankingResponse(BaseModel):
+    median_validation_return: Decimal
+    worst_validation_return: Decimal
+    maximum_drawdown: Decimal
+    return_over_drawdown: Decimal | None
+    trade_count: int
+    total_fees: Decimal
+    cost_efficiency: Decimal | None
+    positive_window_ratio: Decimal
+    positive_window_count: int
+    candidate_fingerprint: str
 
 
 class EdgeGuidedCandidateResponse(BaseModel):
@@ -128,7 +149,20 @@ class EdgeGuidedCandidateResponse(BaseModel):
     rejected_test_window_count: int
     training_metrics: EdgeGuidedSegmentMetricsResponse
     validation_metrics: EdgeGuidedSegmentMetricsResponse
-    test_metrics: EdgeGuidedSegmentMetricsResponse
+    test_metrics: EdgeGuidedSegmentMetricsResponse | None
+    candidate_family: CandidateFamily | None = None
+    entry_rule: EntryRule | None = None
+    exit_rule: ExitRule | None = None
+    cadence_seconds: int | None = None
+    minimum_holding_seconds: int | None = None
+    maximum_holding_seconds: int | None = None
+    cooldown_seconds: int | None = None
+    target_allocation_percentage: Decimal | None = None
+    generation_contract_version: int | None = None
+    ranking: EdgeGuidedRankingResponse | None = None
+    cost_efficiency: Decimal | None = None
+    positive_window_ratio: Decimal | None = None
+    worst_window_return: Decimal | None = None
 
 
 class EdgeGuidedCandidatePageResponse(BaseModel):

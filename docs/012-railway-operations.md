@@ -59,3 +59,13 @@ Use each command’s `--help` as the parser-authoritative flag reference. `refin
 - Verify database size and available memory before large backfills or analyses. Historical analyses have taken roughly 30 minutes per asset in the observed environment; duration varies with data and resources.
 - Do not run BTC and ETH historical analysis simultaneously on a small Railway service. Stop or stagger schedules to avoid competing with live jobs.
 - Do not run candidate analysis with `--persist` unless the intended experiment identity and database capacity have been reviewed.
+
+
+## Weekly Strategy research
+
+Create a separate `argos-research` service with start command
+`python -m app.jobs.run_weekly_strategy_research` and suggested UTC cron
+`17 3 * * 0`. It shares the backend database and logging variables, runs separately
+from ingest and decide, and uses a PostgreSQL advisory lock. Operational interpretation,
+retry behavior, resource bounds, and flags are documented in
+[weekly Strategy research](014-weekly-strategy-research.md).

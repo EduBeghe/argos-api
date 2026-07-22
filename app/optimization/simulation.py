@@ -39,8 +39,21 @@ from app.strategies.baseline_long_only import (
 DEFAULT_DECISION_INTERVAL = timedelta(minutes=30)
 SIMULATION_ENGINE_VERSION = 1
 _ZERO_UUID = UUID(int=0)
+
+
+@dataclass(frozen=True, slots=True)
+class SimulationDecisionOverride:
+    """A research-only action plus sizing selected by a frozen candidate."""
+
+    action: StrategyAction
+    target_allocation_percentage: Decimal | None = None
+    applied_rule: str = "edge_guided_strategy"
+    explanation: str = "The frozen research Strategy selected this action."
+
+
 DecisionActionFilter = Callable[
-    [HistoricalFeatureRow, bool, StrategyAction], StrategyAction
+    [HistoricalFeatureRow, bool, StrategyAction],
+    StrategyAction | SimulationDecisionOverride,
 ]
 
 
@@ -191,9 +204,14 @@ def simulate_historical_feature_matrix(
         raise HistoricalSimulationError("unsupported historical strategy")
     if configuration_version != CONFIGURATION_VERSION:
         raise HistoricalSimulationError("unsupported strategy configuration")
-    if decision_interval != DEFAULT_DECISION_INTERVAL:
+    if (
+        decision_interval < DEFAULT_DECISION_INTERVAL
+        or decision_interval > timedelta(hours=6)
+        or decision_interval % DEFAULT_DECISION_INTERVAL
+    ):
         raise HistoricalSimulationError(
-            "only the 30-minute decision interval is supported"
+            "decision interval must be a 30-minute multiple between 30 minutes "
+            "and 6 hours"
         )
     cash = validate_initial_cash(initial_cash)
     starting_cash = cash
@@ -233,18 +251,26 @@ def simulate_historical_feature_matrix(
             position_is_open=quantity > 0,
             parameters=strategy_parameters,
         )
-        action = (
+        filtered = (
             decision_action_filter(row, quantity > 0, decision.action)
             if decision_action_filter is not None
             else decision.action
         )
+        override = (
+            filtered if isinstance(filtered, SimulationDecisionOverride) else None
+        )
+        action = override.action if override is not None else filtered
         applied_rule = (
-            "edge_guided_candidate"
+            override.applied_rule
+            if override is not None
+            else "edge_guided_candidate"
             if action is not decision.action
             else decision.applied_rule
         )
         explanation = (
-            "The frozen edge-guided bin changed the baseline action."
+            override.explanation
+            if override is not None
+            else "The frozen edge-guided bin changed the baseline action."
             if action is not decision.action
             else decision.explanation
         )
@@ -253,8 +279,12 @@ def simulate_historical_feature_matrix(
                 cash=cash,
                 total_equity=equity_before,
                 observed_price=observed_price,
-                target_percentage=decision.requested_target_portfolio_percentage
-                or Decimal(0),
+                target_percentage=(
+                    override.target_allocation_percentage
+                    if override is not None
+                    and override.target_allocation_percentage is not None
+                    else decision.requested_target_portfolio_percentage or Decimal(0)
+                ),
                 configuration=configuration,
             )
             cash = calculation.resulting_cash

@@ -40,6 +40,7 @@ from app.optimization.predictive_edges import (
     SuggestedAction,
 )
 from app.optimization.refinement import RefinementSegmentName
+from app.optimization.simulation import SimulationDecisionOverride
 from app.optimization.walk_forward import WalkForwardWindow
 from app.paper.config import SimulationConfiguration
 from app.strategies.baseline_long_only import StrategyAction
@@ -305,6 +306,39 @@ def test_diagnostic_or_unconfirmed_evidence_produces_no_candidate() -> None:
     assert candidates(()) == ()
 
 
+def test_complete_edge_strategy_opens_without_production_and_uses_target() -> None:
+    candidate = candidates((hypothesis(),))[0]
+    policy = edge_guided_module._candidate_action_filter(candidate, Decimal("0.10"))
+    evidence = replace(row("-0.015"), candle_open_time=START + timedelta(minutes=25))
+
+    action = policy(evidence, False, StrategyAction.NO_ACTION)
+
+    assert isinstance(action, SimulationDecisionOverride)
+    assert action.action is StrategyAction.OPEN_POSITION
+    assert action.target_allocation_percentage == candidate.target_allocation_percentage
+
+
+def test_complete_edge_strategy_does_not_buy_while_open_and_timed_exit_closes() -> None:
+    candidate = candidates((hypothesis(),))[0]
+    policy = edge_guided_module._candidate_action_filter(candidate, Decimal("0.10"))
+    entry = replace(row("-0.015"), candle_open_time=START + timedelta(minutes=25))
+    before_holding = replace(
+        row("-0.015"), candle_open_time=START + timedelta(minutes=25)
+    )
+    exit_row = replace(row("-0.015"), candle_open_time=START + timedelta(minutes=55))
+
+    assert isinstance(
+        policy(entry, False, StrategyAction.NO_ACTION), SimulationDecisionOverride
+    )
+    assert (
+        policy(before_holding, True, StrategyAction.OPEN_POSITION)
+        is StrategyAction.NO_ACTION
+    )
+    exit_action = policy(exit_row, True, StrategyAction.NO_ACTION)
+    assert isinstance(exit_action, SimulationDecisionOverride)
+    assert exit_action.action is StrategyAction.SELL_ALL
+
+
 def test_zero_hypotheses_is_a_valid_empty_evaluation() -> None:
     dataset, matrix, windows = evaluation_evidence(windows=1)
     result = evaluate_edge_guided_candidates(
@@ -506,6 +540,14 @@ def test_walk_forward_candidate_rejected_in_validation(
     assert evaluation.rejected_validation_window_count == 2
     assert evaluation.confirmed_window_count == 0
     assert all(item.test is None for item in evaluation.windows)
+    assert evaluation.test is None
+    assert EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN not in (
+        evaluation.rejection_reasons
+    )
+    assert EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST not in (
+        evaluation.rejection_reasons
+    )
+    assert "test was not executed" in evaluation.explanation
 
 
 def test_walk_forward_candidate_passes_validation_but_fails_isolated_test(
@@ -666,6 +708,7 @@ def test_economically_viable_candidate_can_confirm_without_beating_buy_and_hold(
     )
     evaluation = result.evaluations[0]
     assert evaluation.status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert evaluation.test is not None
     assert evaluation.test.beats_production is True
     assert evaluation.test.beats_buy_and_hold is False
     assert "beat production" in evaluation.explanation

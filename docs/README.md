@@ -10,6 +10,7 @@ This index separates current system truth from historical decisions and future w
 | [Current system reference](010-current-system.md) | Instruments, market data, analytics, Strategy, Paper Trading, optimization, and roadmap | current |
 | [API and frontend contract](011-api-and-frontend-contract.md) | Endpoint inventory, CORS, and `argos-web` integration | current |
 | [Railway operations](012-railway-operations.md) | Deployment, cron, diagnostics, and safe historical-job commands | current |
+| [Weekly Strategy research](014-weekly-strategy-research.md) | Complete candidate search, reuse, outcomes, and research runbook | current |
 | [Glossary](013-glossary.md) | Accessible domain and financial vocabulary | current |
 | [Domain model](003-domain-model.md) | Provider-independent vocabulary and relationships | current |
 | [Binance market-data contract](004-binance-market-data-contract.md) | Binance positional kline boundary and normalization | current |

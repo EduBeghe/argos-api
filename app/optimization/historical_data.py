@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.market.catalog import Instrument
@@ -67,6 +67,68 @@ class HistoricalDataset:
     last_gap: datetime | None
     candles: tuple[HistoricalCandle, ...]
     fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalDatasetRevision:
+    """Cheap immutable-candle revision used before loading a full dataset."""
+
+    candle_count: int
+    first_open_time: datetime | None
+    last_open_time: datetime | None
+    latest_ingested_at: datetime | None
+    fingerprint: str
+
+
+async def read_historical_dataset_revision(
+    *, session: AsyncSession, identity: HistoricalDatasetIdentity, now: datetime
+) -> HistoricalDatasetRevision:
+    """Read constant-size range metadata for exact research reuse.
+
+    Market candles are insert-only (`ON CONFLICT DO NOTHING`), so count, temporal
+    bounds, and latest ingestion time identify additions to the requested range
+    without materializing candle values.
+    """
+
+    validate_historical_range(identity, now=now)
+    count, first, last, latest_ingested = (
+        await session.execute(
+            select(
+                func.count(MarketCandleRecord.id),
+                func.min(MarketCandleRecord.open_time),
+                func.max(MarketCandleRecord.open_time),
+                func.max(MarketCandleRecord.ingested_at),
+            ).where(
+                MarketCandleRecord.asset == identity.instrument.asset.value,
+                MarketCandleRecord.provider == identity.instrument.provider.value,
+                MarketCandleRecord.market_type == identity.instrument.market_type.value,
+                MarketCandleRecord.interval == identity.instrument.interval.value,
+                MarketCandleRecord.open_time >= identity.range.start,
+                MarketCandleRecord.open_time < identity.range.end,
+            )
+        )
+    ).one()
+    payload = {
+        "instrument": [
+            identity.instrument.asset.value,
+            identity.instrument.provider.value,
+            identity.instrument.market_type.value,
+            identity.instrument.interval.value,
+        ],
+        "range": [identity.range.start.isoformat(), identity.range.end.isoformat()],
+        "feature_model": [
+            identity.feature_model_name,
+            identity.feature_model_version,
+        ],
+        "candle_count": int(count),
+        "first_open_time": first.isoformat() if first else None,
+        "last_open_time": last.isoformat() if last else None,
+        "latest_ingested_at": latest_ingested.isoformat() if latest_ingested else None,
+    }
+    fingerprint = hashlib.sha256(_canonical_json(payload)).hexdigest()
+    return HistoricalDatasetRevision(
+        int(count), first, last, latest_ingested, fingerprint
+    )
 
 
 def interval_duration(interval: Interval) -> timedelta:

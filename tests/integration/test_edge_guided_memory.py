@@ -26,6 +26,7 @@ from app.optimization.edge_guided_memory import (
     EdgeGuidedRunRecord,
     EdgeGuidedWindowRecord,
     find_reusable_edge_guided_run,
+    find_reusable_weekly_research_run,
     persist_edge_guided_result,
 )
 from app.optimization.edge_guided_read import (
@@ -204,6 +205,8 @@ async def test_complete_round_trip_and_reuse_are_atomic(session: AsyncSession) -
         decision_interval=timedelta(minutes=30),
         started_at=START,
         result=original,
+        reuse_key="weekly-" + "f" * 57,
+        dataset_revision={"latest_ingested_at": START},
     )
     reused = await find_reusable_edge_guided_run(session, EDGE_KEY)
     assert first.run_id is not None
@@ -212,6 +215,11 @@ async def test_complete_round_trip_and_reuse_are_atomic(session: AsyncSession) -
     assert reused.evaluations_computed == 0
     assert reused.evaluations_reused == 1
     assert reused.result == original
+    weekly_reused = await find_reusable_weekly_research_run(
+        session, "weekly-" + "f" * 57
+    )
+    assert weekly_reused is not None
+    assert weekly_reused.result == original
     assert (
         reused.result.qualification_contract_version
         == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
@@ -223,6 +231,7 @@ async def test_complete_round_trip_and_reuse_are_atomic(session: AsyncSession) -
     assert round_trip.training.beats_buy_and_hold is False
     assert round_trip.training.risk_acceptable is True
     assert round_trip.rejection_reasons == ()
+    assert reused.result.evaluations[0].test is not None
     assert reused.result.evaluations[0].test.total_return == Decimal(
         "0.033333333333333333"
     )
@@ -239,6 +248,68 @@ async def test_complete_round_trip_and_reuse_are_atomic(session: AsyncSession) -
         await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
         == 1
     )
+
+
+async def test_validation_rejection_round_trip_preserves_nullable_test(
+    session: AsyncSession,
+) -> None:
+    parent = await parent_run(session)
+    assert parent.run_id is not None
+    original = result()
+    evaluation = original.evaluations[0]
+    window = replace(
+        evaluation.windows[0],
+        test=None,
+        validation_passed=False,
+        test_confirmed=False,
+    )
+    rejected = replace(
+        original,
+        evaluations=(
+            replace(
+                evaluation,
+                test=None,
+                windows=(window,),
+                valid_window_count=0,
+                confirmed_window_count=0,
+                rejected_validation_window_count=1,
+                status=EdgeGuidedCandidateStatus.REJECTED_VALIDATION,
+                explanation=(
+                    "Isolated test was not executed because validation failed."
+                ),
+            ),
+        ),
+    )
+    await persist_edge_guided_result(
+        session=session,
+        experiment_key=EDGE_KEY,
+        predictive_edge_run_id=parent.run_id,
+        instrument=MARKET_INSTRUMENTS[0].instrument,
+        range_start=START,
+        range_end=START + timedelta(days=1),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        decision_interval=timedelta(minutes=30),
+        started_at=START,
+        result=rejected,
+    )
+
+    loaded = await find_reusable_edge_guided_run(session, EDGE_KEY)
+    assert loaded is not None
+    assert loaded.result.evaluations[0].test is None
+    assert loaded.result.evaluations[0].windows[0].test is None
+    candidate_id = await session.scalar(
+        select(EdgeGuidedCandidateRecord.id).where(
+            EdgeGuidedCandidateRecord.run_id == loaded.run_id
+        )
+    )
+    assert candidate_id is not None
+    response = await get_edge_guided_candidate(session, candidate_id)
+    assert response.test_metrics is None
+    assert response.candidate_family is not None
+    assert response.entry_rule is not None
+    assert response.exit_rule is not None
+    assert response.generation_contract_version == 3
     assert (
         await session.scalar(
             select(func.count()).select_from(EdgeGuidedCandidateRecord)

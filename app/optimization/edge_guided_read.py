@@ -9,8 +9,12 @@ from sqlalchemy.sql.selectable import Subquery
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.edge_guided import (
     EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
+    CandidateFamily,
     EdgeGuidedCandidateStatus,
     EdgeGuidedRejectionReason,
+    EntryRule,
+    ExitRule,
+    ResearchOutcome,
 )
 from app.optimization.edge_guided_memory import (
     EdgeGuidedCandidateRecord,
@@ -22,6 +26,7 @@ from app.optimization.edge_guided_schemas import (
     EdgeGuidedCandidateDetailResponse,
     EdgeGuidedCandidatePageResponse,
     EdgeGuidedCandidateResponse,
+    EdgeGuidedRankingResponse,
     EdgeGuidedRunPageResponse,
     EdgeGuidedRunResponse,
     EdgeGuidedSegmentMetricsResponse,
@@ -318,6 +323,20 @@ def _run(
             rejected_validation=rejected_validation,
             rejected_test=rejected_test,
         ),
+        research_outcome=(
+            ResearchOutcome(record.research_outcome)
+            if record.research_outcome
+            else None
+        ),
+        outcome_explanation=record.outcome_explanation,
+        funnel={key: int(str(value)) for key, value in (record.funnel or {}).items()}
+        if record.funnel is not None
+        else None,
+        timings={
+            key: Decimal(str(value)) for key, value in (record.timings or {}).items()
+        }
+        if record.timings is not None
+        else None,
     )
 
 
@@ -351,6 +370,12 @@ def _candidate(
     record: EdgeGuidedCandidateRecord, run: EdgeGuidedRunRecord
 ) -> EdgeGuidedCandidateResponse:
     payload = record.candidate
+    ranking_payload = payload.get("ranking")
+    ranking = (
+        EdgeGuidedRankingResponse.model_validate(ranking_payload)
+        if isinstance(ranking_payload, dict)
+        else None
+    )
     return EdgeGuidedCandidateResponse(
         candidate_evaluation_id=record.id,
         run_id=record.run_id,
@@ -404,7 +429,40 @@ def _candidate(
         rejected_test_window_count=record.rejected_test_window_count,
         training_metrics=_metric(record.training_metrics),
         validation_metrics=_metric(record.validation_metrics),
-        test_metrics=_metric(record.test_metrics),
+        test_metrics=_metric(record.test_metrics) if record.test_metrics else None,
+        candidate_family=CandidateFamily(str(payload["candidate_family"]))
+        if payload.get("candidate_family") is not None
+        else None,
+        entry_rule=EntryRule(str(payload["entry_rule"]))
+        if payload.get("entry_rule") is not None
+        else None,
+        exit_rule=ExitRule(str(payload["exit_rule"]))
+        if payload.get("exit_rule") is not None
+        else None,
+        cadence_seconds=int(str(payload["cadence_seconds"]))
+        if payload.get("cadence_seconds") is not None
+        else None,
+        minimum_holding_seconds=int(str(payload["minimum_holding_seconds"]))
+        if payload.get("minimum_holding_seconds") is not None
+        else None,
+        maximum_holding_seconds=int(str(payload["maximum_holding_seconds"]))
+        if payload.get("maximum_holding_seconds") is not None
+        else None,
+        cooldown_seconds=int(str(payload["cooldown_seconds"]))
+        if payload.get("cooldown_seconds") is not None
+        else None,
+        target_allocation_percentage=Decimal(
+            str(payload["target_allocation_percentage"])
+        )
+        if payload.get("target_allocation_percentage") is not None
+        else None,
+        generation_contract_version=int(str(payload["generation_contract_version"]))
+        if payload.get("generation_contract_version") is not None
+        else None,
+        ranking=ranking,
+        cost_efficiency=ranking.cost_efficiency if ranking else None,
+        positive_window_ratio=ranking.positive_window_ratio if ranking else None,
+        worst_window_return=ranking.worst_validation_return if ranking else None,
     )
 
 
