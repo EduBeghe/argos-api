@@ -46,6 +46,12 @@ Three read-only resources expose v4 evidence:
 - `GET /optimization/predictive-edge-runs/{run_id}/near-misses`;
 - `GET /optimization/predictive-edge-runs/{run_id}/near-misses/{near_miss_id}`.
 
+`analyze_predictive_edges` remains the legacy v3 engine. Weekly research calls the separate
+`analyze_predictive_edges_v4` runtime. Its stage cache stores only completed typed
+training, validation, or isolated-test evidence; keys include the instrument experiment
+namespace, exact dataset content, cadence, horizon, frozen configuration, costs, and v4
+contract. `--force-recompute` bypasses all stage reads.
+
 Existing v3 rows remain readable. Their contract version prevents reuse as v4 evidence.
 Failure to detect an edge is not proof that none exists, and historical evidence does
 not guarantee future results.

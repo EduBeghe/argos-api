@@ -23,7 +23,7 @@ training relationships, 40 frozen validation configurations, and 12 isolated-tes
 configurations. Its diagnostic output identifies the bottleneck, strongest observed
 signal, rejection counts and requirement margins rather than reducing a zero-candidate
 run to “no stable predictive edge”. Stage timings and computed/reused counts make a
-slow first execution auditable. Exact reuse remains keyed by data content, instrument,
+slow first execution auditable. The counters are incremented by the real v4 loops: generated/computed/reused/retained cheap relationships, validation configurations, and isolated-test configurations. They are not inferred from legacy collection sizes. Exact reuse remains keyed by data content, instrument,
 costs, configuration, profile, and contract versions; v3 evidence is readable but is
 not reusable as v4.
 
