@@ -62,4 +62,4 @@ The API must expose persisted market observations, component metrics and scores,
 
 ## Open decisions
 
-Future Feature sets and Score models, metric and evaluation conventions, exact fee and slippage models, initial Paper Account cash balance, Paper Trading execution details, stop-loss and take-profit rules, future Strategy types, calibrated confidence, backtesting methodology, evaluation period, future provider and asset-class support requirements, and any future Argos Score aggregation method remain unresolved.
+Future Feature sets and Score models, stop-loss and take-profit rules, future Strategy types, calibrated confidence, additional provider and asset-class support, and any future Argos Score aggregation method remain unresolved. Versioned fees, slippage, initial Paper cash, execution rules, historical simulation, and current evaluation metrics are implemented and documented in the current system reference and ADR-010.

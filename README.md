@@ -8,6 +8,11 @@ Every generated signal must retain its component scores, supporting metrics, and
 
 ## Documentation
 
+- [Documentation index](docs/README.md)
+- [Current system reference](docs/010-current-system.md)
+- [API and frontend contract](docs/011-api-and-frontend-contract.md)
+- [Railway operations runbook](docs/012-railway-operations.md)
+- [Glossary](docs/013-glossary.md)
 - [Project vision](docs/000-project-vision.md)
 - [MVP scope](docs/001-mvp-scope.md)
 - [Architecture overview](docs/002-architecture.md)
@@ -18,10 +23,14 @@ Every generated signal must retain its component scores, supporting metrics, and
 
 ## Current phase
 
-Argos now includes a production-ready API foundation, persisted market-data and
-Paper Trading workflows, historical simulation and refinement tooling, and
-read-only decision-support APIs. It remains private and research-oriented: it
-does not trade real money or guarantee profitability.
+Argos currently runs closed-candle ingestion, bounded live Feature and Score
+calculation, 30-minute decision cycles, versioned Paper Trading, portfolio and
+performance history, historical simulation/refinement, Predictive Edge Map
+analysis, and edge-guided candidate qualification v2. The API exposes current
+and historical evidence to the separately deployed `argos-web` SPA. Candidate
+approval, parallel Strategy wallets, scheduled exploration, additional
+providers, ML, sentiment/news, authentication, and real-money trading are not
+implemented. See the [current system reference](docs/010-current-system.md).
 
 ## Development
 
@@ -644,7 +653,7 @@ The engine builds the Feature matrix once and evaluates only UTC 30-minute
 boundaries. At each boundary it uses the five-minute candle that has just
 closed: the source candle's `close_price` is both the observed Decision evidence
 and the input to the existing Paper execution calculation. No later candle or
-Feature row is visible, preventing look-ahead. BUY and SELL execution prices,
+Feature row is visible, preventing look-ahead. Open-position and sell-all execution prices,
 fees, slippage, sizing, and P&L reuse the same pure production functions.
 
 Cash, the long-only Position, Trades, realized/unrealized P&L, and the boundary

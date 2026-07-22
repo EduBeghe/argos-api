@@ -4,6 +4,22 @@ Argos is an asset-agnostic quantitative research and predictive decision-support
 
 The frontend is a responsive Angular application maintained in the separate `argos-web` repository.
 
+## Current Deployed Execution
+
+The repository is deployed as two one-shot backend jobs plus the continuously serving API:
+
+- `argos-ingest` runs every five minutes, persists fully closed Binance Spot candles, then calculates only bounded live Features and Scores. It does not generate Decisions.
+- `argos-decide` runs at UTC minutes 02 and 32, consumes existing persisted evidence for the latest 30-minute boundary, creates Decision Cycles and Decision Snapshots, executes Paper Trading, and records equity snapshots.
+- `argos-api` exposes explicit read-only HTTP operations and never runs periodic jobs as a side effect of a request.
+- PostgreSQL is the shared transactional evidence store.
+- `argos-web` is a static Angular SPA from a separate repository and resolves instruments from the catalog rather than symbol-specific branches.
+
+Candle ingestion, Feature calculation, and Score calculation commit as separate stages. A downstream failure therefore preserves earlier committed candles, and a later run retries missing recent analytics even when candle inserts are duplicates. Live Feature calculation loads at most 1,000 context candles per instrument, so historical backfill does not make live runtime proportional to the complete candle table.
+
+Decision work uses one transaction per instrument. PostgreSQL uniqueness makes completed boundaries idempotent, while independent transactions prevent one instrument failure from undoing another instrument's successful cycle. The API does not contact Binance, execute Paper Trades, or start optimization jobs.
+
+For the consolidated current-state reference, see [Current System Reference](010-current-system.md).
+
 ## High-Level Data Flow
 
 ```text

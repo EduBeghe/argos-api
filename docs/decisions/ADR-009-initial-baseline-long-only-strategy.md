@@ -4,6 +4,8 @@
 
 Accepted
 
+Implementation note: the formerly planned separate decision job and Paper Position integration described below are now implemented. The decision itself remains current; future-tense implementation notes are retained as historical context and are superseded by `docs/002-architecture.md` and `docs/010-current-system.md`.
+
 ## Context
 
 Argos needs one deterministic, explainable Strategy to turn persisted analytical evidence into simulated Decision intent. The initial policy must be narrow enough to evaluate clearly, avoid repeated buying, and separate requested sizing from later paper execution. Its thresholds and allocation are initial hypotheses, not optimized values or profitability claims.
@@ -45,4 +47,4 @@ A Decision records requested intent: target portfolio percentage for `OPEN_POSIT
 
 ## Consequences
 
-The initial Strategy is simple, reproducible, provider-independent, and directly testable across the current BTC/USDT and ETH/USDT configuration. It cannot short, use leverage, increase positions, or partially sell. Future assets or providers require compatible ingestion adapters, market-calendar handling, Features, Scores, and versioned configuration, but do not redefine the core Decision vocabulary. Individual trades may lose money. Thresholds and sizing must later be evaluated after fees and simulated slippage and compared with buy-and-hold. Stop-loss and take-profit rules, exact execution behavior, fee and slippage models, initial Paper Account cash, calibrated confidence, future Strategy types, and backtesting methodology remain open. No real-money execution is included.
+The initial Strategy is simple, reproducible, provider-independent, and directly testable across the current BTC/USDT and ETH/USDT configuration. It cannot short, use leverage, increase positions, or partially sell. Future assets or providers require compatible ingestion adapters, market-calendar handling, Features, Scores, and versioned configuration, but do not redefine the core Decision vocabulary. Individual trades may lose money. Thresholds and sizing are now evaluated after versioned fees and simulated slippage and compared with buy-and-hold through Paper Trading and historical simulation. Stop-loss and take-profit rules, calibrated confidence, future Strategy types, and real-money execution remain outside the implemented scope. Current execution and evaluation behavior is documented in `docs/010-current-system.md`.

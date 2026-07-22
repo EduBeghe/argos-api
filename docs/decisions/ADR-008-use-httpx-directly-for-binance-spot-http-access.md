@@ -4,6 +4,8 @@
 
 Accepted.
 
+Implementation note: the one-shot ingestion process now owns and reuses one `BinanceClient` for all configured instruments during a run. Retry policy remains outside the client.
+
 ## Context
 
 Argos needs one small asynchronous client for Binance Spot public market data. Introducing a Binance SDK, another HTTP library, or a generic provider abstraction would add dependencies and indirection without a current need.

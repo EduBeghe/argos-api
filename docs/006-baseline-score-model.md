@@ -34,4 +34,4 @@ Explanations use deterministic templates for trend, momentum, volume, and volati
 
 ## Limitations
 
-The constants are initial hypotheses, not empirically optimized. The model has not yet been backtested. Signal strength is neither probability nor statistical confidence, and profitability is not claimed.
+The constants are initial production hypotheses. Argos now evaluates them through deterministic historical simulation, refinement, walk-forward analysis, and Paper Trading, but historical results do not establish optimality or future profitability. Signal strength is neither probability nor statistical confidence.
