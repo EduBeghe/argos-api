@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import get_settings
 from app.market.catalog import MARKET_INSTRUMENTS
 from app.optimization.edge_guided import (
+    EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
     EdgeGuidedCandidate,
     EdgeGuidedCandidateEvaluation,
     EdgeGuidedCandidateStatus,
@@ -211,11 +212,32 @@ async def test_complete_round_trip_and_reuse_are_atomic(session: AsyncSession) -
     assert reused.evaluations_computed == 0
     assert reused.evaluations_reused == 1
     assert reused.result == original
+    assert (
+        reused.result.qualification_contract_version
+        == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+    )
+    round_trip = reused.result.evaluations[0]
+    assert round_trip.training.sufficient_trades is True
+    assert round_trip.training.positive_net_return is True
+    assert round_trip.training.beats_production is True
+    assert round_trip.training.beats_buy_and_hold is False
+    assert round_trip.training.risk_acceptable is True
+    assert round_trip.rejection_reasons == ()
     assert reused.result.evaluations[0].test.total_return == Decimal(
         "0.033333333333333333"
     )
     assert (
         await session.scalar(select(func.count()).select_from(EdgeGuidedRunRecord)) == 1
+    )
+    assert (
+        await session.scalar(
+            select(func.count()).select_from(EdgeGuidedCandidateRecord)
+        )
+        == 1
+    )
+    assert (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
+        == 1
     )
     assert (
         await session.scalar(
@@ -317,6 +339,62 @@ async def test_persisting_identical_experiment_twice_does_not_duplicate_graph(
         await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
         == 1
     )
+
+
+async def test_empty_v2_result_is_persisted_and_reused_without_candidates(
+    session: AsyncSession,
+) -> None:
+    parent = await parent_run(session)
+    assert parent.run_id is not None
+    empty = EdgeGuidedEvaluationResult("f" * 64, 0, 0, 12, 1, ())
+    first = await persist_edge_guided_result(
+        session=session,
+        experiment_key=EDGE_KEY,
+        predictive_edge_run_id=parent.run_id,
+        instrument=MARKET_INSTRUMENTS[0].instrument,
+        range_start=START,
+        range_end=START + timedelta(days=1),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        decision_interval=timedelta(minutes=30),
+        started_at=START,
+        result=empty,
+    )
+    reused = await find_reusable_edge_guided_run(session, EDGE_KEY)
+    assert first.reused_existing_experiment is False
+    assert reused is not None
+    assert reused.reused_existing_experiment is True
+    assert reused.evaluations_reused == 0
+    assert reused.result.evaluations == ()
+    assert (
+        await session.scalar(
+            select(func.count()).select_from(EdgeGuidedCandidateRecord)
+        )
+        == 0
+    )
+    assert (
+        await session.scalar(select(func.count()).select_from(EdgeGuidedWindowRecord))
+        == 0
+    )
+
+
+async def test_legacy_v1_run_is_readable_but_not_reusable_or_eligible(
+    session: AsyncSession,
+) -> None:
+    execution = await persist_complete(session)
+    assert execution.run_id is not None
+    record = await session.get(EdgeGuidedRunRecord, execution.run_id)
+    assert record is not None
+    record.qualification_contract_version = 1
+    await session.commit()
+
+    assert await find_reusable_edge_guided_run(session, EDGE_KEY) is None
+    run = await get_edge_guided_run(session, execution.run_id)
+    assert run.qualification_contract_version == 1
+    assert run.legacy is True
+    candidates = await list_edge_guided_candidates(session, run_id=execution.run_id)
+    assert candidates.items[0].legacy is True
+    assert candidates.items[0].eligible_under_current_contract is False
 
 
 async def test_insertion_failure_rolls_back_the_complete_graph(
@@ -442,6 +520,11 @@ async def test_read_api_queries_are_filtered_paginated_and_decimal_safe(
         "rejected_validation": 1,
         "rejected_test": 1,
     }
+    assert (
+        runs.items[0].qualification_contract_version
+        == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+    )
+    assert runs.items[0].legacy is False
     assert (await get_edge_guided_run(session, persisted.run_id)).id == persisted.run_id
 
     filtered = await list_edge_guided_candidates(
@@ -458,6 +541,8 @@ async def test_read_api_queries_are_filtered_paginated_and_decimal_safe(
     assert len(filtered.items) == 1
     assert not hasattr(filtered.items[0], "windows")
     assert isinstance(filtered.items[0].training_metrics.total_return, Decimal)
+    assert filtered.items[0].eligible_under_current_contract is False
+    assert isinstance(filtered.items[0].training_metrics.positive_net_return, bool)
 
     detail = await get_edge_guided_candidate(
         session, filtered.items[0].candidate_evaluation_id

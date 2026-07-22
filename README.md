@@ -420,6 +420,16 @@ limit, contract version, or input hypotheses creates a different experiment iden
 No candidate is activated or sent to Paper Trading, and historical confirmation is
 not a guarantee of future performance.
 
+Qualification contract v2 requires real trading activity, strictly positive aggregate
+training, validation, and test return after configured costs, strict validation and
+test superiority over production, acceptable drawdown, and the existing minimum-window
+and stability evidence. Buy-and-hold remains an independent comparison rather than an
+absolute rejection rule. The API exposes the five segment qualification flags and
+stable rejection reasons. Version-1 results remain readable as legacy evidence but are
+not reusable or eligible under v2. Detecting an edge or generating a candidate is not
+the same as confirming historical economic viability, and confirmation neither
+guarantees future performance nor activates a Strategy.
+
 Persisted edge-guided evidence is available through four read-only endpoints:
 
 - `GET /optimization/edge-guided/runs`

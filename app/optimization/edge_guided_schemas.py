@@ -6,7 +6,10 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.optimization.edge_guided import EdgeGuidedCandidateStatus
+from app.optimization.edge_guided import (
+    EdgeGuidedCandidateStatus,
+    EdgeGuidedRejectionReason,
+)
 from app.optimization.predictive_edges import (
     Condition,
     DirectionMapping,
@@ -49,6 +52,8 @@ class EdgeGuidedRunResponse(BaseModel):
     decision_interval_seconds: int
     maximum_candidates: int
     algorithm_version: int
+    qualification_contract_version: int
+    legacy: bool
     generated_count: int
     evaluated_count: int
     windows_available: int
@@ -72,6 +77,11 @@ class EdgeGuidedSegmentMetricsResponse(BaseModel):
     fees_paid: Decimal
     return_difference_from_production: Decimal
     return_difference_from_buy_and_hold: Decimal
+    sufficient_trades: bool
+    positive_net_return: bool
+    beats_production: bool
+    beats_buy_and_hold: bool
+    risk_acceptable: bool
 
 
 class EdgeGuidedCandidateResponse(BaseModel):
@@ -106,6 +116,10 @@ class EdgeGuidedCandidateResponse(BaseModel):
     fee_rate: Decimal
     slippage_rate: Decimal
     status: EdgeGuidedCandidateStatus
+    qualification_contract_version: int
+    legacy: bool
+    eligible_under_current_contract: bool
+    rejection_reasons: tuple[EdgeGuidedRejectionReason, ...]
     explanation: str
     unconditional_benchmark: str
     valid_window_count: int
@@ -132,6 +146,7 @@ class EdgeGuidedWindowResponse(BaseModel):
     test_metrics: EdgeGuidedSegmentMetricsResponse | None
     validation_passed: bool
     test_confirmed: bool
+    rejection_reasons: tuple[EdgeGuidedRejectionReason, ...]
 
 
 class EdgeGuidedCandidateDetailResponse(EdgeGuidedCandidateResponse):
