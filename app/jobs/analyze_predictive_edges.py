@@ -3,6 +3,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import perf_counter
@@ -23,6 +24,7 @@ from app.optimization.edge_guided_memory import (
     EdgeGuidedExecution,
     edge_guided_experiment_key,
     find_reusable_edge_guided_run,
+    find_reusable_weekly_research_run,
     persist_edge_guided_result,
 )
 from app.optimization.feature_matrix import build_historical_feature_matrix
@@ -30,6 +32,7 @@ from app.optimization.historical_data import (
     HistoricalDatasetIdentity,
     HistoricalDatasetRange,
     read_historical_dataset,
+    read_historical_dataset_revision,
 )
 from app.optimization.predictive_edge_service import (
     PredictiveEdgeExecution,
@@ -39,12 +42,14 @@ from app.optimization.predictive_edge_service import (
 )
 from app.optimization.predictive_edges import (
     DEFAULT_HORIZONS,
+    PREDICTORS,
     EvidenceStatus,
     PredictiveEdgeConfiguration,
     analyze_predictive_edges,
     build_predictive_windows,
 )
 from app.optimization.walk_forward import WalkForwardConfiguration
+from app.optimization.weekly_research import weekly_research_reuse_key
 from app.paper.config import (
     DEFAULT_INITIAL_CASH,
     FEE_RATE,
@@ -105,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run(
     args: argparse.Namespace, *, now: datetime | None = None
-) -> PredictiveEdgeExecution:
+) -> PredictiveEdgeExecution | EdgeGuidedExecution:
     settings = get_settings()
     configure_logging(settings.log_level)
     started_at = now or datetime.now(UTC)
@@ -142,6 +147,49 @@ async def run(
     guided_execution: EdgeGuidedExecution | None = None
     try:
         async with factory() as session:
+            if args.persist and getattr(args, "edge_guided_candidates", False):
+                revision = await read_historical_dataset_revision(
+                    session=session, identity=identity, now=started_at
+                )
+                preflight_key = weekly_research_reuse_key(
+                    identity=identity,
+                    revision=revision,
+                    configuration=configuration,
+                    simulation=simulation,
+                    initial_cash=getattr(args, "initial_cash", DEFAULT_INITIAL_CASH),
+                    maximum_candidates=getattr(
+                        args,
+                        "max_edge_guided_candidates",
+                        DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
+                    ),
+                    boundary=args.end,
+                )
+                preflight = await find_reusable_weekly_research_run(
+                    session, preflight_key
+                )
+                if preflight is not None:
+                    logger.info(
+                        "Predictive Edge Map completed",
+                        extra={
+                            "structured_fields": {
+                                "edge_guided_run_id": str(preflight.run_id),
+                                "reused_existing_experiment": True,
+                                "metrics_reused": preflight.result.funnel.get(
+                                    "edges_evaluated", 0
+                                ),
+                                "evaluations_reused": preflight.evaluations_reused,
+                                "evaluations_computed": 0,
+                                "compute_avoided_estimate": (
+                                    preflight.compute_avoided_estimate
+                                ),
+                                "research_outcome": preflight.result.outcome.value,
+                                "funnel": preflight.result.funnel,
+                                "timings": preflight.result.timings,
+                                "result": edge_guided_summary(preflight.result),
+                            }
+                        },
+                    )
+                    return preflight
             dataset = await read_historical_dataset(
                 session=session, identity=identity, now=started_at
             )
@@ -241,6 +289,31 @@ async def run(
                         windows=windows,
                         thresholds=configuration.thresholds,
                     )
+                    classifications = tuple(analysis_result.stability_edges)
+                    guided_result = replace(
+                        guided_result,
+                        funnel={
+                            "predictors_evaluated": len(PREDICTORS),
+                            "edges_evaluated": len(analysis_result.window_edges),
+                            "promising_positive_edges": sum(
+                                item.classification is EvidenceStatus.PROMISING_POSITIVE
+                                for item in classifications
+                            ),
+                            "promising_negative_edges": sum(
+                                item.classification is EvidenceStatus.PROMISING_NEGATIVE
+                                for item in classifications
+                            ),
+                            "unstable_edges": sum(
+                                item.classification is EvidenceStatus.UNSTABLE
+                                for item in classifications
+                            ),
+                            "no_detectable_edges": sum(
+                                item.classification is EvidenceStatus.NONE
+                                for item in classifications
+                            ),
+                            **guided_result.funnel,
+                        },
+                    )
                     if args.persist:
                         if execution.run_id is None or guided_key is None:
                             raise RuntimeError(
@@ -258,6 +331,8 @@ async def run(
                             decision_interval=configuration.decision_interval,
                             started_at=started_at,
                             result=guided_result,
+                            reuse_key=preflight_key,
+                            dataset_revision=asdict(revision),
                         )
                     else:
                         if session.new or session.dirty or session.deleted:
@@ -297,7 +372,7 @@ async def run(
                 ],
                 "dataset_fingerprint": dataset.fingerprint,
                 "windows_generated": len(windows),
-                "predictors_evaluated": 14,
+                "predictors_evaluated": len(PREDICTORS),
                 "horizons_evaluated": len(configuration.horizons),
                 "conditions_evaluated": len(configuration.conditions),
                 "aggregate_metrics_computed": len(completed_result.window_edges)

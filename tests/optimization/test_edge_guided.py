@@ -12,11 +12,13 @@ from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.edge_guided import (
     EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
+    CandidateFamily,
     EdgeGuidedCandidate,
     EdgeGuidedCandidateStatus,
     EdgeGuidedEvaluationResult,
     EdgeGuidedRejectionReason,
     EdgeGuidedSegmentEvaluation,
+    EdgeGuidedStageEvidence,
     apply_edge_guided_action,
     edge_guided_summary,
     evaluate_edge_guided_candidates,
@@ -40,6 +42,7 @@ from app.optimization.predictive_edges import (
     SuggestedAction,
 )
 from app.optimization.refinement import RefinementSegmentName
+from app.optimization.simulation import SimulationDecisionOverride
 from app.optimization.walk_forward import WalkForwardWindow
 from app.paper.config import SimulationConfiguration
 from app.strategies.baseline_long_only import StrategyAction
@@ -169,6 +172,25 @@ def evaluation_evidence(
     )
 
 
+def evaluate_cached_evidence(
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    reusable: dict[str, EdgeGuidedStageEvidence] | None = None,
+) -> EdgeGuidedEvaluationResult:
+    return evaluate_edge_guided_candidates(
+        dataset=dataset,
+        feature_matrix=matrix,
+        hypotheses=(hypothesis(),),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        maximum_candidates=1,
+        windows=windows,
+        thresholds=EvidenceThresholds(minimum_observations=1, minimum_windows=1),
+        reusable_stage_evidence=reusable,
+    )
+
+
 def segment_result(
     segment: RefinementSegmentName, difference: Decimal
 ) -> EdgeGuidedSegmentEvaluation:
@@ -200,10 +222,10 @@ def evaluate_with_differences(
         segment = args[2]
         assert isinstance(segment, RefinementSegmentName)
         if segment is RefinementSegmentName.VALIDATION:
-            value = validation[validation_index]
+            value = validation[validation_index % len(validation)]
             validation_index += 1
         elif segment is RefinementSegmentName.TEST:
-            value = test[test_index]
+            value = test[test_index % len(test)]
             test_index += 1
         else:
             value = Decimal(0)
@@ -283,8 +305,8 @@ def evaluate_with_metrics(
     )
 
 
-def test_confirmed_long_and_exit_hypotheses_generate_one_candidate_each() -> None:
-    long = hypothesis()
+def test_confirmed_hypotheses_generate_complete_strategy_alternatives() -> None:
+    long = hypothesis(horizon=timedelta(hours=6))
     exit_candidate = hypothesis(
         identifier="b" * 64,
         action=SuggestedAction.EXIT_OR_AVOID,
@@ -292,10 +314,65 @@ def test_confirmed_long_and_exit_hypotheses_generate_one_candidate_each() -> Non
         upper=Decimal("0.02"),
     )
     generated = candidates((long, exit_candidate))
-    assert len(generated) == 2
+    assert len(generated) > 2
     assert {item.suggested_action for item in generated} == {
         SuggestedAction.LONG_ENTRY,
         SuggestedAction.EXIT_OR_AVOID,
+    }
+    entry_candidates = tuple(
+        item
+        for item in generated
+        if item.suggested_action is SuggestedAction.LONG_ENTRY
+    )
+    assert {item.candidate_family for item in entry_candidates} >= {
+        CandidateFamily.EDGE_ENTRY_TIMED_EXIT,
+        CandidateFamily.EDGE_ENTRY_SIGNAL_EXIT,
+        CandidateFamily.EDGE_ENTRY_BASELINE_EXIT,
+    }
+    assert len({item.cadence for item in entry_candidates}) > 1
+    assert {item.target_allocation_percentage for item in entry_candidates} == {
+        Decimal("10"),
+        Decimal("15"),
+        Decimal("20"),
+    }
+
+
+def test_generation_is_broad_before_final_evaluation_limit() -> None:
+    generated = candidates((hypothesis(),), maximum=1)
+    assert len(generated) > 1
+    assert len(generated) <= edge_guided_module.MAX_GENERATED_STRATEGIES
+
+
+def test_generation_budget_is_stratified_across_available_families() -> None:
+    entries = tuple(
+        hypothesis(identifier=f"{index:064x}", horizon=timedelta(hours=6))
+        for index in range(1, 13)
+    )
+    exits = tuple(
+        hypothesis(
+            identifier=f"{index + 100:064x}",
+            action=SuggestedAction.EXIT_OR_AVOID,
+            lower=Decimal("0.01"),
+            upper=Decimal("0.02"),
+            horizon=timedelta(hours=6),
+        )
+        for index in range(6)
+    )
+
+    first = candidates(tuple(reversed((*entries, *exits))))
+    second = candidates((*entries, *exits))
+
+    assert len(first) == edge_guided_module.MAX_GENERATED_STRATEGIES
+    assert tuple(item.candidate_fingerprint for item in first) == tuple(
+        item.candidate_fingerprint for item in second
+    )
+    assert {item.candidate_family for item in first} == set(CandidateFamily)
+    assert len({item.source_hypothesis_id for item in first}) > 1
+    assert len({item.cadence for item in first}) > 1
+    assert {item.target_allocation_percentage for item in first} == {
+        Decimal("10"),
+        Decimal("15"),
+        Decimal("20"),
     }
 
 
@@ -303,6 +380,39 @@ def test_diagnostic_or_unconfirmed_evidence_produces_no_candidate() -> None:
     diagnostic = hypothesis(action=SuggestedAction.DIAGNOSTIC_ONLY)
     assert candidates((diagnostic,)) == ()
     assert candidates(()) == ()
+
+
+def test_complete_edge_strategy_opens_without_production_and_uses_target() -> None:
+    candidate = candidates((hypothesis(),))[0]
+    policy = edge_guided_module._candidate_action_filter(candidate, Decimal("0.10"))
+    evidence = replace(row("-0.015"), candle_open_time=START + timedelta(minutes=25))
+
+    action = policy(evidence, False, StrategyAction.NO_ACTION)
+
+    assert isinstance(action, SimulationDecisionOverride)
+    assert action.action is StrategyAction.OPEN_POSITION
+    assert action.target_allocation_percentage == candidate.target_allocation_percentage
+
+
+def test_complete_edge_strategy_does_not_buy_while_open_and_timed_exit_closes() -> None:
+    candidate = candidates((hypothesis(),))[0]
+    policy = edge_guided_module._candidate_action_filter(candidate, Decimal("0.10"))
+    entry = replace(row("-0.015"), candle_open_time=START + timedelta(minutes=25))
+    before_holding = replace(
+        row("-0.015"), candle_open_time=START + timedelta(minutes=25)
+    )
+    exit_row = replace(row("-0.015"), candle_open_time=START + timedelta(minutes=55))
+
+    assert isinstance(
+        policy(entry, False, StrategyAction.NO_ACTION), SimulationDecisionOverride
+    )
+    assert (
+        policy(before_holding, True, StrategyAction.OPEN_POSITION)
+        is StrategyAction.NO_ACTION
+    )
+    exit_action = policy(exit_row, True, StrategyAction.NO_ACTION)
+    assert isinstance(exit_action, SimulationDecisionOverride)
+    assert exit_action.action is StrategyAction.SELL_ALL
 
 
 def test_zero_hypotheses_is_a_valid_empty_evaluation() -> None:
@@ -448,7 +558,8 @@ def test_limit_order_and_fingerprints_are_deterministic_and_complete() -> None:
     first = candidates(tuple(reversed(values)), maximum=2)
     second = candidates(values, maximum=2)
     assert first == second
-    assert len(first) == 2
+    assert len(first) <= edge_guided_module.MAX_GENERATED_STRATEGIES
+    assert len(first) > 2
     base = candidates((hypothesis(),))[0]
     variants = (
         candidates((replace(hypothesis(), lower_bound=Decimal("-0.03")),))[0],
@@ -503,9 +614,18 @@ def test_walk_forward_candidate_rejected_in_validation(
     evaluation = result.evaluations[0]
     assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
     assert evaluation.valid_window_count == 0
-    assert evaluation.rejected_validation_window_count == 2
+    assert evaluation.rejected_validation_window_count == 0
+    assert evaluation.test is None
     assert evaluation.confirmed_window_count == 0
     assert all(item.test is None for item in evaluation.windows)
+    assert evaluation.test is None
+    assert EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN not in (
+        evaluation.rejection_reasons
+    )
+    assert EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST not in (
+        evaluation.rejection_reasons
+    )
+    assert "test was not executed" in evaluation.explanation
 
 
 def test_walk_forward_candidate_passes_validation_but_fails_isolated_test(
@@ -537,9 +657,8 @@ def test_candidate_confirms_across_multiple_walk_forward_windows_without_mutatio
     assert evaluation.confirmed_window_count == 3
     assert [item.window_ordinal for item in evaluation.windows] == [1, 2, 3]
     assert all(item.test_confirmed for item in evaluation.windows)
-    source = candidates((hypothesis(),))[0]
-    assert evaluation.candidate == source
-    assert evaluation.candidate.candidate_fingerprint == source.candidate_fingerprint
+    assert evaluation.candidate in candidates((hypothesis(),))
+    source = hypothesis()
     assert evaluation.candidate.condition is source.condition
     assert evaluation.candidate.lower_bound == source.lower_bound
     assert evaluation.candidate.upper_bound == source.upper_bound
@@ -568,17 +687,13 @@ def test_zero_trade_candidate_cannot_pass_validation_or_confirm(
         validation=replace(zero, segment=RefinementSegmentName.VALIDATION),
         test=replace(zero, segment=RefinementSegmentName.TEST),
     )
-    evaluation = result.evaluations[0]
     assert (
         result.qualification_contract_version
         == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
     )
-    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
-    assert evaluation.valid_window_count == 0
-    assert evaluation.confirmed_window_count == 0
-    assert EdgeGuidedRejectionReason.INSUFFICIENT_TRADES in evaluation.rejection_reasons
-    assert evaluation.validation.positive_net_return is False
-    assert evaluation.validation.sufficient_trades is False
+    assert result.evaluations == ()
+    assert result.funnel["training_retained_count"] == 0
+    assert result.funnel["test_evaluated_count"] == 0
 
 
 @pytest.mark.parametrize("candidate_return", ["-0.01", "0"])
@@ -603,12 +718,8 @@ def test_non_positive_candidate_is_rejected_even_when_it_beats_losing_production
             production_return="-0.02",
         ),
     )
-    evaluation = result.evaluations[0]
-    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
-    assert (
-        EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN
-        in evaluation.rejection_reasons
-    )
+    assert result.evaluations == ()
+    assert result.funnel["training_retained_count"] == 0
 
 
 def test_profitable_candidate_must_strictly_beat_production(
@@ -666,10 +777,175 @@ def test_economically_viable_candidate_can_confirm_without_beating_buy_and_hold(
     )
     evaluation = result.evaluations[0]
     assert evaluation.status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert evaluation.test is not None
     assert evaluation.test.beats_production is True
     assert evaluation.test.beats_buy_and_hold is False
     assert "beat production" in evaluation.explanation
     assert "beat both" not in evaluation.explanation
+
+
+def test_only_validation_candidate_beating_production_consumes_test_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    weaker = hypothesis(identifier="1" * 64)
+    stronger = hypothesis(identifier="2" * 64)
+    test_sources: list[str] = []
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        segment = args[2]
+        candidate = args[3]
+        assert isinstance(segment, RefinementSegmentName)
+        assert isinstance(candidate, EdgeGuidedCandidate)
+        if segment is RefinementSegmentName.TEST:
+            test_sources.append(candidate.source_hypothesis_id)
+        difference = (
+            Decimal("-0.001")
+            if segment is RefinementSegmentName.VALIDATION
+            and candidate.source_hypothesis_id == weaker.hypothesis_id
+            else Decimal("0.01")
+        )
+        return segment_result(segment, difference)
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    result = evaluate_edge_guided_candidates(
+        dataset=dataset,
+        feature_matrix=matrix,
+        hypotheses=(weaker, stronger),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        maximum_candidates=1,
+        windows=windows,
+        thresholds=EvidenceThresholds(minimum_observations=1, minimum_windows=1),
+    )
+
+    assert test_sources
+    assert set(test_sources) == {stronger.hypothesis_id}
+    assert result.funnel["test_evaluated_count"] == 1
+
+
+def test_stage_cache_reuses_training_validation_and_test_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    calls: dict[RefinementSegmentName, int] = {
+        stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES
+    }
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        segment = args[2]
+        assert isinstance(segment, RefinementSegmentName)
+        calls[segment] += 1
+        return segment_result(segment, Decimal("0.01"))
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
+    first_calls = dict(calls)
+    assert all(value > 0 for value in first_calls.values())
+
+    calls.update({stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES})
+    second = evaluate_cached_evidence(
+        dataset,
+        matrix,
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
+    )
+
+    assert calls == {stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES}
+    assert second.funnel["windows_computed"] == 0
+    assert second.funnel["windows_reused"] == len(second.stage_evidence)
+    assert second.funnel["test_evaluated_count"] == 1
+
+    calls.update({stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES})
+    forced = evaluate_cached_evidence(dataset, matrix, windows)
+    assert forced.funnel["windows_reused"] == 0
+    assert forced.funnel["windows_computed"] > 0
+    assert calls == first_calls
+
+
+@pytest.mark.parametrize(
+    ("failed_stage", "expected_stages"),
+    [
+        (RefinementSegmentName.TRAINING, {RefinementSegmentName.TRAINING}),
+        (
+            RefinementSegmentName.VALIDATION,
+            {RefinementSegmentName.TRAINING, RefinementSegmentName.VALIDATION},
+        ),
+    ],
+)
+def test_rejected_stage_evidence_is_reusable(
+    monkeypatch: pytest.MonkeyPatch,
+    failed_stage: RefinementSegmentName,
+    expected_stages: set[RefinementSegmentName],
+) -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    calls: list[RefinementSegmentName] = []
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        stage = args[2]
+        assert isinstance(stage, RefinementSegmentName)
+        calls.append(stage)
+        difference = Decimal("-0.02") if stage is failed_stage else Decimal("0.01")
+        return segment_result(stage, difference)
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
+    assert {item.stage for item in first.stage_evidence} == expected_stages
+
+    calls.clear()
+    second = evaluate_cached_evidence(
+        dataset,
+        matrix,
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
+    )
+    assert calls == []
+    assert second.funnel["windows_computed"] == 0
+    assert second.funnel["windows_reused"] == len(second.stage_evidence)
+
+
+def test_changed_validation_content_invalidates_only_validation_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    calls: list[RefinementSegmentName] = []
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        stage = args[2]
+        assert isinstance(stage, RefinementSegmentName)
+        calls.append(stage)
+        return segment_result(stage, Decimal("0.01"))
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
+    changed_rows = list(matrix.rows)
+    changed_rows[11] = replace(changed_rows[11], return_1=Decimal("0.123"))
+    calls.clear()
+
+    second = evaluate_cached_evidence(
+        dataset,
+        replace(matrix, rows=tuple(changed_rows)),
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
+    )
+
+    assert calls
+    assert set(calls) == {RefinementSegmentName.VALIDATION}
+    assert second.funnel["training_windows_computed"] == 0
+    assert second.funnel["test_windows_computed"] == 0
+    assert second.funnel["validation_windows_computed"] > 0
 
 
 def test_excessive_drawdown_rejects_otherwise_profitable_candidate(
@@ -786,12 +1062,18 @@ def test_zero_trades_before_test_are_classified_as_rejected_validation(
         ),
     )
 
-    evaluation = result.evaluations[0]
-    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
-    assert evaluation.confirmed_window_count == (
-        1 if failing_segment == "training" else 0
-    )
-    assert EdgeGuidedRejectionReason.INSUFFICIENT_TRADES in evaluation.rejection_reasons
+    if failing_segment == "training":
+        assert result.evaluations == ()
+        assert result.funnel["training_retained_count"] == 0
+    else:
+        evaluation = result.evaluations[0]
+        assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+        assert evaluation.confirmed_window_count == 0
+        assert evaluation.test is None
+        assert (
+            EdgeGuidedRejectionReason.INSUFFICIENT_TRADES
+            in evaluation.rejection_reasons
+        )
 
 
 def test_rejection_reasons_are_stable_and_unique(
@@ -809,9 +1091,8 @@ def test_rejection_reasons_are_stable_and_unique(
         validation=replace(zero, segment=RefinementSegmentName.VALIDATION),
         test=replace(zero, segment=RefinementSegmentName.TEST),
     )
-    reasons = result.evaluations[0].rejection_reasons
-    assert reasons == tuple(dict.fromkeys(reasons))
-    assert reasons[0] is EdgeGuidedRejectionReason.INSUFFICIENT_TRADES
+    assert result.evaluations == ()
+    assert result.funnel["training_retained_count"] == 0
 
 
 def test_evaluation_passes_effective_fees_and_slippage_to_real_simulator() -> None:
