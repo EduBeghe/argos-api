@@ -4,6 +4,8 @@
 
 Accepted
 
+Implementation note: the formerly planned separate decision job and Paper Position integration described below are now implemented. The decision itself remains current; future-tense implementation notes are retained as historical context and are superseded by `docs/002-architecture.md` and `docs/010-current-system.md`.
+
 ## Context
 
 Argos needs one deterministic, explainable Strategy to turn persisted analytical evidence into simulated Decision intent. The initial policy must be narrow enough to evaluate clearly, avoid repeated buying, and separate requested sizing from later paper execution. Its thresholds and allocation are initial hypotheses, not optimized values or profitability claims.

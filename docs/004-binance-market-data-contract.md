@@ -22,8 +22,7 @@ Binance facts in this document come from the current official [Spot REST API mar
 | --- | --- |
 | Method | `GET` |
 | Path | `/api/v3/klines` |
-| Provider | Binance |
-| Market type | Spot |
+| Provider and market | Binance Spot |
 | Authentication | None; this is public market data and does not require an API key |
 | Request weight | 2 |
 | Binance data source | Database |
@@ -103,13 +102,7 @@ The normalized name is `interval`; its initial value is `5m`. It is retained bec
 
 ### Provider
 
-The normalized name is `provider`; its initial value is Binance. Provider identifies the external venue or data provider. It forms part of provenance and must be persisted or otherwise preserved so analysis is reproducible and provider discrepancies can be investigated.
-
-### Market type
-
-The normalized name is `market_type`; its initial value is Spot. Market Type distinguishes the MVP market and prevents future ambiguity if Binance Futures or another Binance market is introduced. It also forms part of provenance.
-
-Whether Provider and Market Type live directly on every candle or through a related source/import record remains an open persistence decision.
+The normalized name is `provider`; its initial value is Binance Spot. Provider provenance must be persisted or otherwise preserved so analysis is reproducible and provider discrepancies can be investigated. Whether it lives on every candle or a related source/import record remains an open persistence decision.
 
 ### Ingestion time
 
@@ -120,8 +113,7 @@ The normalized name is `ingested_at`. It measures ingestion delay, supports debu
 Argos conceptually retains:
 
 - Asset identity;
-- Provider;
-- Market Type;
+- provider provenance;
 - interval;
 - open and close times;
 - open, high, low, and close prices;
@@ -130,11 +122,11 @@ Argos conceptually retains:
 - taker buy base and quote asset volumes; and
 - ingestion time.
 
-This contract defines no IDs, SQL column types, indexes, ORM mappings, or table names. The likely natural uniqueness is Asset, Provider, Market Type, Interval, and Open Time. The final persistence constraint must be confirmed in the following domain/persistence PR.
+The implemented natural uniqueness is Asset, Provider, Market Type, Interval, and Open Time. Persistence uses a UUIDv4 surrogate primary key and exact `NUMERIC(38,18)` prices and volumes; those implementation choices are recorded in ADR-007.
 
 ## Validation and Normalization Rules
 
-The future implementation must:
+The implemented normalizer and ingestion boundary:
 
 - require exactly 12 tuple positions and reject malformed tuples rather than shifting fields;
 - parse prices and volumes with exact decimal semantics;
@@ -154,7 +146,7 @@ Invalid provider records are rejected and logged for investigation. This contrac
 
 Argos must never calculate authoritative Features, Scores, or Decisions from a partially formed candle. Binance REST klines can include the currently forming candle; merely receiving a REST kline does not guarantee closure.
 
-For the MVP, a candle becomes analytically eligible only after its close time has passed, allowing for a small configurable ingestion-delay margin. The exact margin remains an implementation decision. The system may fetch an open candle but must not persist it as final analytical history or process it as closed.
+For the MVP, a candle becomes analytically eligible only after its close time has passed. The one-shot live job computes the latest closed five-minute window and does not persist or analyze the current open candle.
 
 A future WebSocket implementation may use Binance's explicit kline closure indicator. WebSocket ingestion is outside this contract and the immediate PR.
 
@@ -162,7 +154,7 @@ A future WebSocket implementation may use Binance's explicit kline closure indic
 
 Historical backfill uses explicit UTC `startTime`, `endTime`, and `limit`. Requests paginate because Binance limits each response to 1000 candles.
 
-Incremental ingestion starts after the latest successfully persisted closed candle. Re-fetching overlapping boundary candles is acceptable when persistence is idempotent. Exact retry, pagination, and scheduling algorithms remain implementation decisions.
+Incremental live ingestion re-fetches a bounded recent window and safely overlaps existing candles because persistence is idempotent. Historical backfill paginates explicit ranges. Scheduling remains external to the application.
 
 ## What This PR Does Not Decide
 
