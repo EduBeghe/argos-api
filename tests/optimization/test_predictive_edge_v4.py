@@ -93,9 +93,11 @@ def test_redundancy_groups_cannot_monopolize_top_k() -> None:
 
 
 def test_strict_balanced_and_exploratory_profiles_are_distinct() -> None:
-    assert len(set(EvidenceProfile)) == 3
-    assert EvidenceProfile.STRICT_V3_COMPATIBLE is not EvidenceProfile.BALANCED_V4
-    assert EvidenceProfile.EXPLORATORY_V4 is not EvidenceProfile.BALANCED_V4
+    assert {item.value for item in EvidenceProfile} == {
+        "strict_v3_compatible",
+        "balanced_v4",
+        "exploratory_v4",
+    }
 
 
 def test_sensitivity_changes_one_threshold_only() -> None:
