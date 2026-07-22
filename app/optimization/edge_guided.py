@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.6 seconds
+Output:
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
@@ -365,7 +368,12 @@ def evaluate_edge_guided_candidates(
                 "required isolated walk-forward evidence. Buy-and-hold remains an "
                 "independent comparison."
             )
-        elif _is_validation_rejection(reasons):
+        elif _validation_stage_failed(
+            training=training,
+            validation=validation,
+            valid=valid,
+            thresholds=thresholds,
+        ):
             status = EdgeGuidedCandidateStatus.REJECTED_VALIDATION
         else:
             status = EdgeGuidedCandidateStatus.REJECTED_TEST
@@ -638,18 +646,23 @@ def _stable_reasons(
     return tuple(dict.fromkeys(reasons))
 
 
-def _is_validation_rejection(
-    reasons: tuple[EdgeGuidedRejectionReason, ...],
+def _validation_stage_failed(
+    *,
+    training: EdgeGuidedSegmentEvaluation,
+    validation: EdgeGuidedSegmentEvaluation,
+    valid: int,
+    thresholds: EvidenceThresholds,
 ) -> bool:
-    validation_reasons = {
-        EdgeGuidedRejectionReason.INSUFFICIENT_TRADES,
-        EdgeGuidedRejectionReason.NON_POSITIVE_TRAINING_RETURN,
-        EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN,
-        EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION,
-        EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN,
-        EdgeGuidedRejectionReason.INSUFFICIENT_VALID_WINDOWS,
-    }
-    return any(reason in validation_reasons for reason in reasons)
+    return (
+        not training.sufficient_trades
+        or not training.positive_net_return
+        or not training.risk_acceptable
+        or not validation.sufficient_trades
+        or not validation.positive_net_return
+        or not validation.beats_production
+        or not validation.risk_acceptable
+        or valid < thresholds.minimum_windows
+    )
 
 
 def _rejection_explanation(
@@ -691,3 +704,4 @@ def _rejection_explanation(
 def _fingerprint(payload: dict[str, object]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode()).hexdigest()
+

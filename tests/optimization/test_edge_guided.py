@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.6 seconds
+Output:
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -700,6 +703,100 @@ def test_excessive_drawdown_rejects_otherwise_profitable_candidate(
     assert evaluation.validation.risk_acceptable is False
 
 
+@pytest.mark.parametrize(
+    ("test_metric", "expected_reason"),
+    [
+        (
+            economic_metric(
+                RefinementSegmentName.TEST,
+                total_return="0.02",
+                production_return="0.01",
+                trade_count=0,
+            ),
+            EdgeGuidedRejectionReason.INSUFFICIENT_TRADES,
+        ),
+        (
+            economic_metric(
+                RefinementSegmentName.TEST,
+                total_return="0",
+                production_return="-0.01",
+            ),
+            EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN,
+        ),
+        (
+            economic_metric(
+                RefinementSegmentName.TEST,
+                total_return="0.02",
+                production_return="0.01",
+                max_drawdown="0.11",
+            ),
+            EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN,
+        ),
+    ],
+    ids=("no-test-trades", "non-positive-test-return", "excessive-test-drawdown"),
+)
+def test_test_only_failure_is_classified_as_rejected_test(
+    monkeypatch: pytest.MonkeyPatch,
+    test_metric: EdgeGuidedSegmentEvaluation,
+    expected_reason: EdgeGuidedRejectionReason,
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+        test=test_metric,
+    )
+
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_TEST
+    assert evaluation.valid_window_count == 1
+    assert evaluation.confirmed_window_count == 0
+    assert expected_reason in evaluation.rejection_reasons
+
+
+@pytest.mark.parametrize("failing_segment", ["training", "validation"])
+def test_zero_trades_before_test_are_classified_as_rejected_validation(
+    monkeypatch: pytest.MonkeyPatch, failing_segment: str
+) -> None:
+    training = economic_metric(
+        RefinementSegmentName.TRAINING,
+        total_return="0.02",
+        production_return="0.01",
+        trade_count=0 if failing_segment == "training" else 1,
+    )
+    validation = economic_metric(
+        RefinementSegmentName.VALIDATION,
+        total_return="0.02",
+        production_return="0.01",
+        trade_count=0 if failing_segment == "validation" else 1,
+    )
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=training,
+        validation=validation,
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+    )
+
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert evaluation.confirmed_window_count == (
+        1 if failing_segment == "training" else 0
+    )
+    assert EdgeGuidedRejectionReason.INSUFFICIENT_TRADES in evaluation.rejection_reasons
+
+
 def test_rejection_reasons_are_stable_and_unique(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -771,3 +868,4 @@ def test_evaluation_passes_effective_fees_and_slippage_to_real_simulator() -> No
     )
     assert any(filtered for _, _, filtered in calls)
     assert any(not filtered for _, _, filtered in calls)
+
