@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.6 seconds
-Output:
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -868,4 +865,3 @@ def test_evaluation_passes_effective_fees_and_slippage_to_real_simulator() -> No
     )
     assert any(filtered for _, _, filtered in calls)
     assert any(not filtered for _, _, filtered in calls)
-

@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.6 seconds
-Output:
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
@@ -704,4 +701,3 @@ def _rejection_explanation(
 def _fingerprint(payload: dict[str, object]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode()).hexdigest()
-
