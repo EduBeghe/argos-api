@@ -11,6 +11,7 @@ from app.optimization.predictive_edge_engine_v4 import (
     encode_v4_cache_value,
 )
 from app.optimization.predictive_edge_v4 import EvidenceProfile, NeutralBandPolicy
+from app.optimization.predictive_edges import Condition
 from app.optimization.walk_forward import WalkForwardWindow
 from app.paper.config import SimulationConfiguration
 
@@ -66,6 +67,12 @@ def test_real_v4_funnel_consumes_all_bounded_dimensions() -> None:
     assert result.test_counters.generated <= 12
     assert len({item.horizon for item in result.cheap_relationships}) > 7
     assert len({item.cadence for item in result.cheap_relationships}) > 1
+    cadence_observations: dict[tuple[str, timedelta], set[int]] = {}
+    for item in result.cheap_relationships:
+        cadence_observations.setdefault((item.predictor.name, item.horizon), set()).add(
+            item.observation_count
+        )
+    assert any(len(values) > 1 for values in cadence_observations.values())
     assert {item.configuration.bins for item in result.validation_configurations} == {
         3,
         5,
@@ -77,6 +84,30 @@ def test_real_v4_funnel_consumes_all_bounded_dimensions() -> None:
     assert {
         item.configuration.profile for item in result.validation_configurations
     } == set(EvidenceProfile)
+    assert {
+        item.configuration.condition for item in result.validation_configurations
+    } == set(Condition)
+    assert all(
+        len(item.configuration.bin_bounds) in (0, item.configuration.bins - 1)
+        for item in result.validation_configurations
+    )
+    thresholds_by_policy = {
+        policy: {
+            item.configuration.neutral_threshold
+            for item in result.validation_configurations
+            if item.configuration.neutral_policy is policy
+        }
+        for policy in NeutralBandPolicy
+    }
+    assert thresholds_by_policy[NeutralBandPolicy.ECONOMIC_FRICTION] == {
+        Decimal("0.0030")
+    }
+    assert thresholds_by_policy[NeutralBandPolicy.ZERO_DIRECTION] == {Decimal(0)}
+    assert thresholds_by_policy[NeutralBandPolicy.TRAINING_NOISE] != {Decimal("0.0030")}
+    assert any(item.benchmark is not None for item in result.validation_configurations)
+    assert any(
+        item.standard_error is not None for item in result.validation_configurations
+    )
 
 
 def test_test_changes_cannot_change_validation_near_miss_ranking() -> None:

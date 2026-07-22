@@ -587,27 +587,44 @@ def _bounded_frozen_configurations(
             )
         )
     # One proposal per retained relationship avoids the full Cartesian product.
-    buckets: dict[tuple[str, str], list[FrozenConfiguration]] = {}
-    for item in proposals:
-        buckets.setdefault((item.profile.value, item.neutral_policy.value), []).append(
-            item
-        )
-    for values in buckets.values():
-        values.sort(
-            key=lambda item: (
-                item.condition.value,
-                item.bins,
-                item.predictor.name,
-                item.cadence,
-                item.horizon,
-                item.fingerprint,
-            )
-        )
     selected: list[FrozenConfiguration] = []
-    while len(selected) < VALIDATION_CONFIGURATION_LIMIT and any(buckets.values()):
-        for key in sorted(buckets):
-            if buckets[key] and len(selected) < VALIDATION_CONFIGURATION_LIMIT:
-                selected.append(buckets[key].pop(0))
+    selected_ids: set[str] = set()
+
+    def retain(value: FrozenConfiguration) -> None:
+        if value.fingerprint not in selected_ids:
+            selected.append(value)
+            selected_ids.add(value.fingerprint)
+
+    dimensions: tuple[Callable[[FrozenConfiguration], object], ...] = (
+        lambda item: item.profile.value,
+        lambda item: item.neutral_policy.value,
+        lambda item: item.condition.value,
+        lambda item: item.bins,
+    )
+    for dimension in dimensions:
+        for value in sorted({dimension(item) for item in proposals}, key=str):
+            retain(
+                min(
+                    (item for item in proposals if dimension(item) == value),
+                    key=lambda item: item.fingerprint,
+                )
+            )
+    for item in sorted(
+        proposals,
+        key=lambda value: (
+            value.predictor.name,
+            value.cadence,
+            value.horizon,
+            value.profile.value,
+            value.neutral_policy.value,
+            value.condition.value,
+            value.bins,
+            value.fingerprint,
+        ),
+    ):
+        if len(selected) >= VALIDATION_CONFIGURATION_LIMIT:
+            break
+        retain(item)
     return tuple(selected)
 
 
