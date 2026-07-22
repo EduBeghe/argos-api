@@ -13,13 +13,16 @@ from app.optimization.edge_guided import (
     EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
     EDGE_GUIDED_RANKING_CONTRACT_VERSION,
     EDGE_GUIDED_STRATEGY_CONTRACT_VERSION,
+    edge_guided_window_cache_key,
     evaluate_edge_guided_candidates,
+    generate_edge_guided_candidates,
 )
 from app.optimization.edge_guided_memory import (
     EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION,
     EdgeGuidedExecution,
     edge_guided_experiment_key,
     find_reusable_weekly_research_run,
+    load_reusable_edge_guided_windows,
     persist_edge_guided_result,
 )
 from app.optimization.feature_matrix import build_historical_feature_matrix
@@ -37,6 +40,7 @@ from app.optimization.predictive_edge_service import (
 from app.optimization.predictive_edges import (
     PREDICTIVE_EDGE_ALGORITHM_VERSION,
     PREDICTOR_VERSION,
+    PREDICTORS,
     EvidenceStatus,
     PredictiveEdgeConfiguration,
     analyze_predictive_edges,
@@ -234,6 +238,22 @@ async def execute_weekly_instrument_research(
         )
     edge_elapsed = perf_counter() - edge_started
     candidate_started = perf_counter()
+    generated_candidates = generate_edge_guided_candidates(
+        hypotheses=edge_result.hypotheses,
+        simulation=simulation,
+        decision_interval=configuration.decision_interval,
+        maximum_candidates=maximum_candidates,
+    )
+    cache_keys = tuple(
+        edge_guided_window_cache_key(candidate, window)
+        for candidate in generated_candidates
+        for window in windows
+    )
+    reusable_windows = (
+        {}
+        if force_recompute
+        else await load_reusable_edge_guided_windows(session, cache_keys)
+    )
     result = evaluate_edge_guided_candidates(
         dataset=dataset,
         feature_matrix=matrix,
@@ -244,13 +264,14 @@ async def execute_weekly_instrument_research(
         maximum_candidates=maximum_candidates,
         windows=windows,
         thresholds=configuration.thresholds,
+        reusable_windows=reusable_windows,
     )
     candidate_elapsed = perf_counter() - candidate_started
     classifications = edge_result.stability_edges
     result = replace(
         result,
         funnel={
-            "predictors_evaluated": 14,
+            "predictors_evaluated": len(PREDICTORS),
             "edges_evaluated": len(edge_result.window_edges),
             "promising_edges": sum(
                 item.classification

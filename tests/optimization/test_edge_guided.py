@@ -12,6 +12,7 @@ from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.edge_guided import (
     EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
+    CandidateFamily,
     EdgeGuidedCandidate,
     EdgeGuidedCandidateStatus,
     EdgeGuidedEvaluationResult,
@@ -201,10 +202,10 @@ def evaluate_with_differences(
         segment = args[2]
         assert isinstance(segment, RefinementSegmentName)
         if segment is RefinementSegmentName.VALIDATION:
-            value = validation[validation_index]
+            value = validation[validation_index % len(validation)]
             validation_index += 1
         elif segment is RefinementSegmentName.TEST:
-            value = test[test_index]
+            value = test[test_index % len(test)]
             test_index += 1
         else:
             value = Decimal(0)
@@ -284,8 +285,8 @@ def evaluate_with_metrics(
     )
 
 
-def test_confirmed_long_and_exit_hypotheses_generate_one_candidate_each() -> None:
-    long = hypothesis()
+def test_confirmed_hypotheses_generate_complete_strategy_alternatives() -> None:
+    long = hypothesis(horizon=timedelta(hours=6))
     exit_candidate = hypothesis(
         identifier="b" * 64,
         action=SuggestedAction.EXIT_OR_AVOID,
@@ -293,11 +294,33 @@ def test_confirmed_long_and_exit_hypotheses_generate_one_candidate_each() -> Non
         upper=Decimal("0.02"),
     )
     generated = candidates((long, exit_candidate))
-    assert len(generated) == 2
+    assert len(generated) > 2
     assert {item.suggested_action for item in generated} == {
         SuggestedAction.LONG_ENTRY,
         SuggestedAction.EXIT_OR_AVOID,
     }
+    entry_candidates = tuple(
+        item
+        for item in generated
+        if item.suggested_action is SuggestedAction.LONG_ENTRY
+    )
+    assert {item.candidate_family for item in entry_candidates} >= {
+        CandidateFamily.EDGE_ENTRY_TIMED_EXIT,
+        CandidateFamily.EDGE_ENTRY_SIGNAL_EXIT,
+        CandidateFamily.EDGE_ENTRY_BASELINE_EXIT,
+    }
+    assert len({item.cadence for item in entry_candidates}) > 1
+    assert {item.target_allocation_percentage for item in entry_candidates} == {
+        Decimal("10"),
+        Decimal("15"),
+        Decimal("20"),
+    }
+
+
+def test_generation_is_broad_before_final_evaluation_limit() -> None:
+    generated = candidates((hypothesis(),), maximum=1)
+    assert len(generated) > 1
+    assert len(generated) <= edge_guided_module.MAX_GENERATED_STRATEGIES
 
 
 def test_diagnostic_or_unconfirmed_evidence_produces_no_candidate() -> None:
@@ -482,7 +505,8 @@ def test_limit_order_and_fingerprints_are_deterministic_and_complete() -> None:
     first = candidates(tuple(reversed(values)), maximum=2)
     second = candidates(values, maximum=2)
     assert first == second
-    assert len(first) == 2
+    assert len(first) <= edge_guided_module.MAX_GENERATED_STRATEGIES
+    assert len(first) > 2
     base = candidates((hypothesis(),))[0]
     variants = (
         candidates((replace(hypothesis(), lower_bound=Decimal("-0.03")),))[0],
@@ -537,7 +561,8 @@ def test_walk_forward_candidate_rejected_in_validation(
     evaluation = result.evaluations[0]
     assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
     assert evaluation.valid_window_count == 0
-    assert evaluation.rejected_validation_window_count == 2
+    assert evaluation.rejected_validation_window_count == 0
+    assert evaluation.test is None
     assert evaluation.confirmed_window_count == 0
     assert all(item.test is None for item in evaluation.windows)
     assert evaluation.test is None
@@ -579,9 +604,8 @@ def test_candidate_confirms_across_multiple_walk_forward_windows_without_mutatio
     assert evaluation.confirmed_window_count == 3
     assert [item.window_ordinal for item in evaluation.windows] == [1, 2, 3]
     assert all(item.test_confirmed for item in evaluation.windows)
-    source = candidates((hypothesis(),))[0]
-    assert evaluation.candidate == source
-    assert evaluation.candidate.candidate_fingerprint == source.candidate_fingerprint
+    assert evaluation.candidate in candidates((hypothesis(),))
+    source = hypothesis()
     assert evaluation.candidate.condition is source.condition
     assert evaluation.candidate.lower_bound == source.lower_bound
     assert evaluation.candidate.upper_bound == source.upper_bound
@@ -831,9 +855,8 @@ def test_zero_trades_before_test_are_classified_as_rejected_validation(
 
     evaluation = result.evaluations[0]
     assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
-    assert evaluation.confirmed_window_count == (
-        1 if failing_segment == "training" else 0
-    )
+    assert evaluation.confirmed_window_count == 0
+    assert evaluation.test is None
     assert EdgeGuidedRejectionReason.INSUFFICIENT_TRADES in evaluation.rejection_reasons
 
 

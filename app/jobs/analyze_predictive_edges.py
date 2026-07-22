@@ -42,6 +42,7 @@ from app.optimization.predictive_edge_service import (
 )
 from app.optimization.predictive_edges import (
     DEFAULT_HORIZONS,
+    PREDICTORS,
     EvidenceStatus,
     PredictiveEdgeConfiguration,
     analyze_predictive_edges,
@@ -109,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def run(
     args: argparse.Namespace, *, now: datetime | None = None
-) -> PredictiveEdgeExecution:
+) -> PredictiveEdgeExecution | EdgeGuidedExecution:
     settings = get_settings()
     configure_logging(settings.log_level)
     started_at = now or datetime.now(UTC)
@@ -168,7 +169,7 @@ async def run(
                 )
                 if preflight is not None:
                     logger.info(
-                        "Predictive Edge Map exact run reused before dataset load",
+                        "Predictive Edge Map completed",
                         extra={
                             "structured_fields": {
                                 "edge_guided_run_id": str(preflight.run_id),
@@ -184,16 +185,11 @@ async def run(
                                 "research_outcome": preflight.result.outcome.value,
                                 "funnel": preflight.result.funnel,
                                 "timings": preflight.result.timings,
+                                "result": edge_guided_summary(preflight.result),
                             }
                         },
                     )
-                    return PredictiveEdgeExecution(
-                        None,
-                        True,
-                        None,
-                        int(preflight.result.funnel.get("edges_evaluated", 0)),
-                        preflight.compute_avoided_estimate,
-                    )
+                    return preflight
             dataset = await read_historical_dataset(
                 session=session, identity=identity, now=started_at
             )
@@ -297,7 +293,7 @@ async def run(
                     guided_result = replace(
                         guided_result,
                         funnel={
-                            "predictors_evaluated": 14,
+                            "predictors_evaluated": len(PREDICTORS),
                             "edges_evaluated": len(analysis_result.window_edges),
                             "promising_positive_edges": sum(
                                 item.classification is EvidenceStatus.PROMISING_POSITIVE
@@ -376,7 +372,7 @@ async def run(
                 ],
                 "dataset_fingerprint": dataset.fingerprint,
                 "windows_generated": len(windows),
-                "predictors_evaluated": 14,
+                "predictors_evaluated": len(PREDICTORS),
                 "horizons_evaluated": len(configuration.horizons),
                 "conditions_evaluated": len(configuration.conditions),
                 "aggregate_metrics_computed": len(completed_result.window_edges)

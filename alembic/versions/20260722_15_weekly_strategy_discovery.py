@@ -23,6 +23,10 @@ def upgrade() -> None:
         sa.Column("reuse_key", sa.String(length=64), nullable=True),
     )
     _add_column_if_missing(
+        "edge_guided_window_evidence",
+        sa.Column("cache_key", sa.String(length=64), nullable=True),
+    )
+    _add_column_if_missing(
         "edge_guided_evaluation_runs",
         sa.Column(
             "dataset_revision",
@@ -57,6 +61,16 @@ def upgrade() -> None:
             ["reuse_key"],
             unique=True,
         )
+    window_indexes = {
+        item["name"]
+        for item in sa.inspect(op.get_bind()).get_indexes("edge_guided_window_evidence")
+    }
+    if "ix_edge_guided_windows_cache_key" not in window_indexes:
+        op.create_index(
+            "ix_edge_guided_windows_cache_key",
+            "edge_guided_window_evidence",
+            ["cache_key"],
+        )
     op.alter_column(
         "edge_guided_candidate_evaluations",
         "test_metrics",
@@ -80,6 +94,11 @@ def downgrade() -> None:
         "uq_edge_guided_runs_reuse_key",
         table_name="edge_guided_evaluation_runs",
     )
+    op.drop_index(
+        "ix_edge_guided_windows_cache_key",
+        table_name="edge_guided_window_evidence",
+    )
+    op.drop_column("edge_guided_window_evidence", "cache_key")
     for name in (
         "timings",
         "funnel",

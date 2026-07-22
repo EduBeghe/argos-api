@@ -1,6 +1,6 @@
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -43,7 +43,11 @@ from app.strategies.baseline_long_only import (
 
 DEFAULT_MAX_EDGE_GUIDED_CANDIDATES = 12
 MAX_EDGE_GUIDED_CANDIDATES = 100
-EDGE_GUIDED_STRATEGY_CONTRACT_VERSION = 3
+MAX_GENERATED_STRATEGIES = 60
+MAX_TRAINING_RETAINED = 24
+MAX_VALIDATION_RETAINED = 12
+MAX_TEST_EVALUATED = 5
+EDGE_GUIDED_STRATEGY_CONTRACT_VERSION = 4
 EDGE_GUIDED_RANKING_CONTRACT_VERSION = 1
 EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION = 3
 MINIMUM_TRADES_PER_SEGMENT = 1
@@ -237,6 +241,7 @@ class EdgeGuidedWindowEvaluation:
     validation_passed: bool
     test_confirmed: bool
     rejection_reasons: tuple[EdgeGuidedRejectionReason, ...] = ()
+    cache_key: str = ""
 
 
 def generate_edge_guided_candidates(
@@ -280,41 +285,43 @@ def generate_edge_guided_candidates(
             StrategyHypothesis | None,
         ]
     ] = []
-    for index, entry in enumerate(entries):
-        cadences = _compatible_cadences(entry.horizon)[:2]
+    for entry in entries:
+        cadences = _compatible_cadences(entry.horizon)
         compatible_exits = tuple(
             value
             for value in exits
             if value.condition is entry.condition
             and abs(value.horizon - entry.horizon) <= entry.horizon
-        )[:1]
-        family_index = index % 3
-        family = (
-            CandidateFamily.EDGE_ENTRY_TIMED_EXIT
-            if family_index == 0
-            else CandidateFamily.EDGE_ENTRY_SIGNAL_EXIT
-            if family_index == 1 and compatible_exits
-            else CandidateFamily.EDGE_ENTRY_BASELINE_EXIT
         )
-        exit_rule = {
-            CandidateFamily.EDGE_ENTRY_TIMED_EXIT: ExitRule.TIMED,
-            CandidateFamily.EDGE_ENTRY_SIGNAL_EXIT: ExitRule.EDGE_MATCH,
-            CandidateFamily.EDGE_ENTRY_BASELINE_EXIT: ExitRule.PRODUCTION_BASELINE,
-        }[family]
-        holding = max(cadences[0], entry.horizon)
-        definitions.append(
+        families = (
+            (CandidateFamily.EDGE_ENTRY_TIMED_EXIT, ExitRule.TIMED, None),
             (
-                entry,
-                family,
-                exit_rule,
-                cadences[0],
-                holding,
-                TARGET_ALLOCATIONS[index % len(TARGET_ALLOCATIONS)],
-                compatible_exits[0]
-                if family is CandidateFamily.EDGE_ENTRY_SIGNAL_EXIT
-                else None,
-            )
+                CandidateFamily.EDGE_ENTRY_BASELINE_EXIT,
+                ExitRule.PRODUCTION_BASELINE,
+                None,
+            ),
+            *tuple(
+                (CandidateFamily.EDGE_ENTRY_SIGNAL_EXIT, ExitRule.EDGE_MATCH, exit_edge)
+                for exit_edge in compatible_exits
+            ),
         )
+        for cadence in cadences:
+            # Horizon is frozen evidence. Holding and cooldown are deterministic
+            # cadence-aligned derivatives, never ranking-position choices.
+            holding = max(cadence, entry.horizon)
+            for allocation in TARGET_ALLOCATIONS:
+                for family, exit_rule, exit_edge in families:
+                    definitions.append(
+                        (
+                            entry,
+                            family,
+                            exit_rule,
+                            cadence,
+                            holding,
+                            allocation,
+                            exit_edge,
+                        )
+                    )
     for overlay in exits:
         definitions.append(
             (
@@ -426,7 +433,11 @@ def generate_edge_guided_candidates(
             )
         )
     unique = {item.candidate_fingerprint: item for item in candidates}
-    return tuple(sorted(unique.values(), key=_candidate_rank))[:maximum_candidates]
+    # Generate and economically pre-screen broadly first. maximum_candidates is
+    # intentionally applied by the staged evaluator, not candidate generation.
+    return tuple(sorted(unique.values(), key=_candidate_rank))[
+        :MAX_GENERATED_STRATEGIES
+    ]
 
 
 def apply_edge_guided_action(
@@ -557,6 +568,7 @@ def evaluate_edge_guided_candidates(
     maximum_candidates: int = DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
     windows: tuple[WalkForwardWindow, ...],
     thresholds: EvidenceThresholds,
+    reusable_windows: dict[str, EdgeGuidedWindowEvaluation] | None = None,
 ) -> EdgeGuidedEvaluationResult:
     """Evaluate frozen candidates through the existing isolated walk-forward windows."""
 
@@ -566,8 +578,68 @@ def evaluate_edge_guided_candidates(
         decision_interval=decision_interval,
         maximum_candidates=maximum_candidates,
     )
+    cache = reusable_windows or {}
+    reused_keys: set[str] = set()
+    computed_keys: set[str] = set()
+    training_results = tuple(
+        (
+            candidate,
+            _evaluate_candidate_stage(
+                dataset=dataset,
+                feature_matrix=feature_matrix,
+                windows=windows,
+                candidate=candidate,
+                initial_cash=initial_cash,
+                simulation=simulation,
+                decision_interval=decision_interval,
+                segment=RefinementSegmentName.TRAINING,
+                reusable_windows=cache,
+                reused_keys=reused_keys,
+                computed_keys=computed_keys,
+            ),
+        )
+        for candidate in candidates
+    )
+    training_retained = tuple(
+        sorted(
+            training_results,
+            key=lambda item: _segment_rank(item[1], item[0].candidate_fingerprint),
+        )[:MAX_TRAINING_RETAINED]
+    )
+    validation_results = tuple(
+        (
+            candidate,
+            training,
+            _evaluate_candidate_stage(
+                dataset=dataset,
+                feature_matrix=feature_matrix,
+                windows=windows,
+                candidate=candidate,
+                initial_cash=initial_cash,
+                simulation=simulation,
+                decision_interval=decision_interval,
+                segment=RefinementSegmentName.VALIDATION,
+                reusable_windows=cache,
+                reused_keys=reused_keys,
+                computed_keys=computed_keys,
+            ),
+        )
+        for candidate, training in training_retained
+    )
+    validation_qualified = tuple(
+        item
+        for item in validation_results
+        if _stage_qualifies(item[1]) and _stage_qualifies(item[2])
+    )
+    validation_retained = tuple(
+        sorted(
+            validation_qualified,
+            key=lambda item: _segment_rank(item[2], item[0].candidate_fingerprint),
+        )[:MAX_VALIDATION_RETAINED]
+    )
+    test_candidates = validation_retained[: min(MAX_TEST_EVALUATED, maximum_candidates)]
     evaluations: list[EdgeGuidedCandidateEvaluation] = []
-    for candidate in candidates:
+    for candidate, _, _ in test_candidates:
         window_results = _evaluate_candidate_windows(
             dataset=dataset,
             feature_matrix=feature_matrix,
@@ -577,6 +649,9 @@ def evaluate_edge_guided_candidates(
             simulation=simulation,
             decision_interval=decision_interval,
             thresholds=thresholds,
+            reusable_windows=cache,
+            reused_keys=reused_keys,
+            computed_keys=computed_keys,
         )
         confirmed = sum(item.test_confirmed for item in window_results)
         validation_passed_count = sum(item.validation_passed for item in window_results)
@@ -649,6 +724,44 @@ def evaluate_edge_guided_candidates(
                 _ranking(window_results, candidate.candidate_fingerprint),
             )
         )
+    tested_fingerprints = {item.candidate.candidate_fingerprint for item in evaluations}
+    for candidate, training, validation in validation_results:
+        if candidate.candidate_fingerprint in tested_fingerprints:
+            continue
+        if _stage_qualifies(training) and _stage_qualifies(validation):
+            # Qualified candidates below the isolated-test budget are intentionally
+            # represented only by funnel counters; they are not test rejections.
+            continue
+        reasons = _candidate_rejection_reasons(
+            training=training,
+            validation=validation,
+            test=None,
+            valid=0,
+            confirmed=0,
+            ratio=Decimal(0),
+            thresholds=thresholds,
+        )
+        evaluations.append(
+            EdgeGuidedCandidateEvaluation(
+                candidate,
+                training,
+                validation,
+                None,
+                (),
+                0,
+                0,
+                0,
+                0,
+                "always_up"
+                if candidate.suggested_action is SuggestedAction.LONG_ENTRY
+                else "always_down",
+                EdgeGuidedCandidateStatus.REJECTED_VALIDATION,
+                _rejection_explanation(reasons)
+                + " Isolated test was not executed because validation failed.",
+                reasons,
+                None,
+            )
+        )
     outcome = _research_outcome(tuple(evaluations), bool(hypotheses), bool(candidates))
     return EdgeGuidedEvaluationResult(
         dataset.fingerprint,
@@ -662,17 +775,111 @@ def evaluate_edge_guided_candidates(
         {
             "hypotheses_generated": len(hypotheses),
             "complete_strategies_generated": len(candidates),
-            "training_screened": len(evaluations),
-            "validation_evaluated": sum(
-                item.valid_window_count > 0 for item in evaluations
-            ),
-            "test_evaluated": sum(item.test is not None for item in evaluations),
+            "generated_count": len(candidates),
+            "training_evaluated_count": len(training_results),
+            "training_retained_count": len(training_retained),
+            "validation_evaluated_count": len(validation_results),
+            "validation_retained_count": len(validation_retained),
+            "test_evaluated_count": len(evaluations),
+            "training_screened": len(training_results),
+            "validation_evaluated": len(validation_results),
+            "test_evaluated": len(evaluations),
             "confirmed_candidates": sum(
                 item.status is EdgeGuidedCandidateStatus.CONFIRMED
                 for item in evaluations
             ),
+            "windows_reused": len(reused_keys),
+            "windows_computed": len(computed_keys),
         },
     )
+
+
+def _evaluate_candidate_stage(
+    *,
+    dataset: HistoricalDataset,
+    feature_matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    candidate: EdgeGuidedCandidate,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    decision_interval: timedelta,
+    segment: RefinementSegmentName,
+    reusable_windows: dict[str, EdgeGuidedWindowEvaluation],
+    reused_keys: set[str],
+    computed_keys: set[str],
+) -> EdgeGuidedSegmentEvaluation:
+    values: list[EdgeGuidedSegmentEvaluation] = []
+    for window in windows:
+        cache_key = edge_guided_window_cache_key(candidate, window)
+        cached = reusable_windows.get(cache_key)
+        if cached is not None:
+            reused_keys.add(cache_key)
+            values.append(
+                cached.training
+                if segment is RefinementSegmentName.TRAINING
+                else cached.validation
+            )
+            continue
+        computed_keys.add(cache_key)
+        matrices = build_window_matrices(
+            feature_matrix, window, decision_interval=decision_interval
+        )
+        matrix = (
+            matrices.training
+            if segment is RefinementSegmentName.TRAINING
+            else matrices.validation
+        )
+        if not matrix.rows or not matrices.training.rows:
+            continue
+        volatility_threshold = predictive_edge_volatility_threshold(
+            matrices.training.rows
+        )
+        values.append(
+            _evaluate_segment(
+                dataset,
+                matrix,
+                segment,
+                candidate,
+                initial_cash,
+                simulation,
+                _candidate_action_filter(candidate, volatility_threshold),
+            )
+        )
+    return _aggregate_values(tuple(values), segment)
+
+
+def _aggregate_values(
+    values: tuple[EdgeGuidedSegmentEvaluation, ...],
+    segment: RefinementSegmentName,
+) -> EdgeGuidedSegmentEvaluation:
+    if not values:
+        return EdgeGuidedSegmentEvaluation(
+            segment, Decimal(0), Decimal(0), 0, Decimal(0), Decimal(0), Decimal(0)
+        )
+    count = Decimal(len(values))
+    return EdgeGuidedSegmentEvaluation(
+        segment,
+        sum((item.total_return for item in values), Decimal(0)) / count,
+        sum((item.max_drawdown for item in values), Decimal(0)) / count,
+        sum(item.trade_count for item in values),
+        sum((item.fees_paid for item in values), Decimal(0)),
+        sum((item.return_difference_from_production for item in values), Decimal(0))
+        / count,
+        sum((item.return_difference_from_buy_and_hold for item in values), Decimal(0))
+        / count,
+    )
+
+
+def _stage_qualifies(value: EdgeGuidedSegmentEvaluation) -> bool:
+    return (
+        value.sufficient_trades and value.positive_net_return and value.risk_acceptable
+    )
+
+
+def _segment_rank(
+    value: EdgeGuidedSegmentEvaluation, fingerprint: str
+) -> tuple[Decimal, Decimal, int, str]:
+    return (-value.total_return, value.max_drawdown, -value.trade_count, fingerprint)
 
 
 def _evaluate_candidate_windows(
@@ -685,11 +892,14 @@ def _evaluate_candidate_windows(
     simulation: SimulationConfiguration,
     decision_interval: timedelta,
     thresholds: EvidenceThresholds,
+    reusable_windows: dict[str, EdgeGuidedWindowEvaluation],
+    reused_keys: set[str],
+    computed_keys: set[str],
 ) -> tuple[EdgeGuidedWindowEvaluation, ...]:
     prepared: list[
         tuple[
             WalkForwardWindow,
-            HistoricalFeatureMatrix,
+            HistoricalFeatureMatrix | None,
             Decimal,
             EdgeGuidedSegmentEvaluation,
             EdgeGuidedSegmentEvaluation,
@@ -697,6 +907,26 @@ def _evaluate_candidate_windows(
         ]
     ] = []
     for window in windows:
+        cache_key = edge_guided_window_cache_key(candidate, window)
+        cached = reusable_windows.get(cache_key)
+        if cached is not None:
+            reused_keys.add(cache_key)
+            # Reused evidence is immutable and already contains isolated test
+            # semantics for this exact candidate, window data, and contracts.
+            prepared.append(
+                (
+                    window,
+                    None,
+                    cached.volatility_threshold,
+                    cached.training,
+                    cached.validation,
+                    _window_segment_rejection_reasons(
+                        cached.validation, RefinementSegmentName.VALIDATION
+                    ),
+                )
+            )
+            continue
+        computed_keys.add(cache_key)
         matrices = build_window_matrices(
             feature_matrix, window, decision_interval=decision_interval
         )
@@ -751,6 +981,10 @@ def _evaluate_candidate_windows(
         validation_reasons,
     ) in prepared:
         validation_passed = not validation_reasons
+        cached = reusable_windows.get(edge_guided_window_cache_key(candidate, window))
+        if cached is not None:
+            results.append(replace(cached, window_ordinal=window.ordinal))
+            continue
         action_filter = _candidate_action_filter(candidate, volatility_threshold)
         test = (
             _evaluate_segment(
@@ -762,7 +996,7 @@ def _evaluate_candidate_windows(
                 simulation,
                 action_filter,
             )
-            if validation_passed and allow_test
+            if validation_passed and allow_test and test_matrix is not None
             else None
         )
         test_confirmed = test is not None and not _window_segment_rejection_reasons(
@@ -788,9 +1022,31 @@ def _evaluate_candidate_windows(
                 validation_passed,
                 test_confirmed,
                 window_reasons,
+                edge_guided_window_cache_key(candidate, window),
             )
         )
     return tuple(results)
+
+
+def edge_guided_window_cache_key(
+    candidate: EdgeGuidedCandidate, window: WalkForwardWindow
+) -> str:
+    """Identify immutable candidate evidence for one stable data window."""
+
+    return _fingerprint(
+        {
+            "candidate_fingerprint": candidate.candidate_fingerprint,
+            "training": [window.training_from, window.training_to],
+            "validation": [window.validation_from, window.validation_to],
+            "test": [window.test_from, window.test_to],
+            "window_dataset_fingerprint": window.dataset_fingerprint,
+            "window_selection_fingerprint": window.selection_fingerprint,
+            "ranking_contract_version": EDGE_GUIDED_RANKING_CONTRACT_VERSION,
+            "qualification_contract_version": (
+                EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+            ),
+        }
+    )
 
 
 def _evaluate_segment(

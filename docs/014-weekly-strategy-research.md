@@ -41,10 +41,17 @@ calculation functions.
 
 ## Budget, Ranking, and Outcomes
 
-The default run retains at most 12 entry hypotheses and 6 exit hypotheses and evaluates
-at most the configured candidate budget. Ranking is deterministic; a fingerprint is
-the final tie breaker. Before simulation, a multiplicative round-trip cost screen
-rejects expected movement that cannot cover fees, slippage, and the versioned margin.
+The generator considers at most 12 entry hypotheses and 6 exit hypotheses. It expands
+each viable entry across compatible timed, signal, and production-baseline exits,
+30-minute through six-hour cadences, and 10%, 15%, and 20% allocations. After complete
+fingerprint deduplication, the economic pre-screen retains at most 60 Strategies.
+
+The staged funnel evaluates at most 60 candidates on training, retains 24 using only
+training evidence, evaluates those on validation, retains at most 12 qualified
+candidates using only validation evidence, and executes isolated test once for at
+most the best 5. The configured candidate budget limits that final test set. Test data
+never participates in generation or earlier ranking. Ranking is deterministic and a
+complete candidate fingerprint is the final tie breaker.
 
 Every run persists a funnel and one explicit outcome, including confirmed candidates,
 validation rejection, isolated-test rejection, no predictive edge, or edges that were
@@ -68,6 +75,12 @@ ranking, qualification, cost, capital, cadence, and candidate-budget inputs. A c
 and structurally valid graph short-circuits candle loading, Feature matrix construction,
 edge analysis, and candidate simulation. Running, failed, incomplete, or legacy graphs
 are not reusable.
+
+Weekly runs also cache immutable evidence by candidate fingerprint and exact stable
+training, validation, and test boundaries plus the data fingerprint inside that
+window. The identity includes costs and generation, ranking, and qualification
+versions. A later week reuses only unchanged windows and computes new or changed
+windows; `--force-recompute` bypasses both exact-run and window reuse.
 
 ## Railway Runbook
 

@@ -159,6 +159,7 @@ class EdgeGuidedWindowRecord(Base):
             "window_ordinal",
             name="uq_edge_guided_windows_identity",
         ),
+        Index("ix_edge_guided_windows_cache_key", "cache_key"),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
     candidate_evaluation_id: Mapped[UUID] = mapped_column(
@@ -167,6 +168,7 @@ class EdgeGuidedWindowRecord(Base):
         nullable=False,
     )
     window_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    cache_key: Mapped[str | None] = mapped_column(String(64))
     volatility_threshold: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
     )
@@ -267,6 +269,52 @@ async def find_reusable_weekly_research_run(
         return None
     result = await _load_valid_result(session, run)
     return _reused_execution(run, result) if result is not None else None
+
+
+async def load_reusable_edge_guided_windows(
+    session: AsyncSession, cache_keys: tuple[str, ...]
+) -> dict[str, EdgeGuidedWindowEvaluation]:
+    """Load only complete immutable evidence matching exact stable window keys."""
+
+    if not cache_keys:
+        return {}
+    records = (
+        await session.scalars(
+            select(EdgeGuidedWindowRecord)
+            .join(
+                EdgeGuidedCandidateRecord,
+                EdgeGuidedCandidateRecord.id
+                == EdgeGuidedWindowRecord.candidate_evaluation_id,
+            )
+            .join(
+                EdgeGuidedRunRecord,
+                EdgeGuidedRunRecord.id == EdgeGuidedCandidateRecord.run_id,
+            )
+            .where(
+                EdgeGuidedWindowRecord.cache_key.in_(cache_keys),
+                EdgeGuidedRunRecord.status == "completed",
+                EdgeGuidedRunRecord.qualification_contract_version
+                == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
+            )
+            .order_by(EdgeGuidedRunRecord.completed_at.desc())
+        )
+    ).all()
+    reusable: dict[str, EdgeGuidedWindowEvaluation] = {}
+    for item in records:
+        if item.cache_key is None or item.cache_key in reusable:
+            continue
+        reusable[item.cache_key] = EdgeGuidedWindowEvaluation(
+            item.window_ordinal,
+            item.volatility_threshold,
+            _read_metric(item.training_metrics),
+            _read_metric(item.validation_metrics),
+            _read_metric(item.test_metrics) if item.test_metrics else None,
+            item.validation_passed,
+            item.test_confirmed,
+            tuple(EdgeGuidedRejectionReason(value) for value in item.rejection_reasons),
+            item.cache_key,
+        )
+    return reusable
 
 
 def _reused_execution(
@@ -426,6 +474,7 @@ async def persist_edge_guided_result(
                     id=uuid4(),
                     candidate_evaluation_id=candidate_id,
                     window_ordinal=window.window_ordinal,
+                    cache_key=window.cache_key or None,
                     volatility_threshold=window.volatility_threshold,
                     training_metrics=_metric(window.training),
                     validation_metrics=_metric(window.validation),
@@ -506,6 +555,7 @@ async def _load_result(
                             EdgeGuidedRejectionReason(value)
                             for value in item.rejection_reasons
                         ),
+                        item.cache_key or "",
                     )
                     for item in windows
                 ),
