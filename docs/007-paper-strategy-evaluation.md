@@ -28,8 +28,8 @@ no performance or benchmark is fabricated.
   Snapshot. No newer candle valuation is performed.
 - **Fees paid:** sum of persisted Trade `fee_amount` values through the boundary.
   No hypothetical exit fee is added for an open Position.
-- **Estimated slippage cost:** for a BUY,
-  `max(execution_price - observed_market_price, 0) × quantity`; for a SELL,
+- **Estimated slippage cost:** for an open-position execution,
+  `max(execution_price - observed_market_price, 0) × quantity`; for a sell-all execution,
   `max(observed_market_price - execution_price, 0) × quantity`.
 - **Decision and Trade counts:** mappings preserve every persisted action and
   side. Decisions without Trades do not fabricate executions; `no_action` is a

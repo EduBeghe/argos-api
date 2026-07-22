@@ -62,7 +62,7 @@ Binance returns each kline as a positional tuple in this order:
 10. Taker buy quote asset volume
 11. Ignore
 
-Prices and volumes are decimal strings. Timestamps are Unix milliseconds. Monetary and quantity values must use exact decimal semantics in the future implementation, not binary floating point.
+Prices and volumes arrive as decimal strings and are parsed with Python `Decimal`; persisted monetary and quantity columns use PostgreSQL `NUMERIC(38,18)`. Timestamps arrive as Unix milliseconds and are normalized to UTC datetimes. Binary floating point is not used for these values.
 
 ## Field-by-Field Retention and Usage
 
@@ -100,9 +100,9 @@ Asset identity is retained because tuples do not repeat the symbol, every candle
 
 The normalized name is `interval`; its initial value is `5m`. It is retained because the same Asset may later have multiple intervals, uniqueness and Feature interpretation depend on it, and stored history must not rely on an implicit global interval.
 
-### Provider
+### Provider and market type
 
-The normalized name is `provider`; its initial value is Binance Spot. Provider provenance must be persisted or otherwise preserved so analysis is reproducible and provider discrepancies can be investigated. Whether it lives on every candle or a related source/import record remains an open persistence decision.
+The normalized fields are `provider=Binance` and `market_type=Spot`. Both are persisted on every Market Candle and form part of its natural uniqueness, queries, and provenance. Keeping them separate prevents ambiguity if Binance Futures or another Binance market is introduced later.
 
 ### Ingestion time
 
@@ -156,18 +156,14 @@ Historical backfill uses explicit UTC `startTime`, `endTime`, and `limit`. Reque
 
 Incremental live ingestion re-fetches a bounded recent window and safely overlaps existing candles because persistence is idempotent. Historical backfill paginates explicit ranges. Scheduling remains external to the application.
 
-## What This PR Does Not Decide
+## Historical Contract Boundary and Subsequent Decisions
 
-- Python DTOs or domain classes;
-- SQLAlchemy entities;
-- database table names;
-- column types and precision;
-- surrogate UUID versus natural database primary key;
-- indexes and partitioning;
-- raw-response archival;
-- Binance client library versus direct HTTP;
-- retry policy;
-- rate-limit implementation;
-- exact ingestion-delay margin;
-- WebSocket ingestion; or
-- first Feature formulas.
+This document originally preceded implementation and deliberately left application details open. Those historical scope exclusions are now resolved as follows:
+
+- typed domain models, SQLAlchemy records, table names, constraints, and indexes are implemented in the market module and Alembic migrations;
+- ADR-007 defines UUIDv4 surrogate identity, complete natural uniqueness, and `NUMERIC(38,18)` storage;
+- ADR-008 defines direct asynchronous HTTP access through `httpx`, with transport separate from normalization;
+- live ingestion uses a bounded overlapping window and PostgreSQL idempotency rather than a client-level retry policy;
+- the seven version-1 Feature formulas are defined in [Analytical Feature Reference](005-analytical-features.md).
+
+Still outside the current contract are WebSocket ingestion, table partitioning or retention tiers, raw provider-response archival, additional provider rate-limit policies, and support for other market types. These are future decisions, not implied implementation.

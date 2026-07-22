@@ -653,7 +653,7 @@ The engine builds the Feature matrix once and evaluates only UTC 30-minute
 boundaries. At each boundary it uses the five-minute candle that has just
 closed: the source candle's `close_price` is both the observed Decision evidence
 and the input to the existing Paper execution calculation. No later candle or
-Feature row is visible, preventing look-ahead. BUY and SELL execution prices,
+Feature row is visible, preventing look-ahead. Open-position and sell-all execution prices,
 fees, slippage, sizing, and P&L reuse the same pure production functions.
 
 Cash, the long-only Position, Trades, realized/unrealized P&L, and the boundary
