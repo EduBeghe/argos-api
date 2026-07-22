@@ -36,6 +36,12 @@ from app.optimization.predictive_edge_service import (
     persist_predictive_edge_result,
     predictive_edge_experiment_key,
 )
+from app.optimization.predictive_edge_v4 import (
+    CHEAP_RELATIONSHIP_LIMIT,
+    ISOLATED_TEST_CONFIGURATION_LIMIT,
+    NEAR_MISS_LIMIT,
+    VALIDATION_CONFIGURATION_LIMIT,
+)
 from app.optimization.predictive_edges import (
     PREDICTIVE_EDGE_ALGORITHM_VERSION,
     PREDICTOR_VERSION,
@@ -270,7 +276,21 @@ async def execute_weekly_instrument_research(
         result,
         funnel={
             "predictors_evaluated": len(PREDICTORS),
+            "redundancy_groups": len({item.source for item in PREDICTORS}),
             "edges_evaluated": len(edge_result.window_edges),
+            "cheap_relationships_evaluated": min(
+                len(edge_result.window_edges), CHEAP_RELATIONSHIP_LIMIT
+            ),
+            "training_configurations_evaluated": min(
+                len(edge_result.window_edges), CHEAP_RELATIONSHIP_LIMIT
+            ),
+            "validation_configurations_evaluated": min(
+                len(edge_result.stability_edges), VALIDATION_CONFIGURATION_LIMIT
+            ),
+            "test_configurations_evaluated": min(
+                sum(item.windows_selected_for_test > 0 for item in classifications),
+                ISOLATED_TEST_CONFIGURATION_LIMIT,
+            ),
             "promising_edges": sum(
                 item.classification
                 in (
@@ -278,6 +298,21 @@ async def execute_weekly_instrument_research(
                     EvidenceStatus.PROMISING_NEGATIVE,
                 )
                 for item in classifications
+            ),
+            "diagnostic_only_edges": sum(
+                item.suggested_action.value == "diagnostic_only"
+                for item in classifications
+            ),
+            "near_misses": min(
+                sum(
+                    item.classification
+                    not in (
+                        EvidenceStatus.PROMISING_POSITIVE,
+                        EvidenceStatus.PROMISING_NEGATIVE,
+                    )
+                    for item in classifications
+                ),
+                NEAR_MISS_LIMIT,
             ),
             **result.funnel,
         },

@@ -13,10 +13,24 @@ from app.optimization.predictive_edge_memory import (
     PredictiveEdgeAggregateRecord,
     PredictiveEdgeBenchmarkRecord,
     PredictiveEdgeBinAggregateRecord,
+    PredictiveEdgeNearMissRecord,
+    PredictiveEdgeRunDiagnosticRecord,
     PredictiveEdgeRunRecord,
+    PredictiveEdgeSensitivityRecord,
     PredictiveEdgeWindowMetricRecord,
     PredictiveEdgeWindowRecord,
     StrategyHypothesisRecord,
+)
+from app.optimization.predictive_edge_v4 import (
+    PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+    DiscoveryConfiguration,
+    EvidenceProfile,
+    NeutralBandPolicy,
+    audited_parameters,
+    diagnose_stability_edge,
+    diagnostic_conclusion,
+    rank_near_misses,
+    threshold_sensitivity,
 )
 from app.optimization.predictive_edges import (
     PREDICTIVE_EDGE_ALGORITHM_VERSION,
@@ -390,5 +404,151 @@ async def persist_predictive_edge_result(
                 mean_forward_gross_return=benchmark.mean_forward_gross_return,
             )
         )
+    if PREDICTIVE_EDGE_ALGORITHM_VERSION == PREDICTIVE_EDGE_V4_CONTRACT_VERSION:
+        discovery = DiscoveryConfiguration(
+            cadence=configuration.decision_interval,
+            horizon=configuration.horizons[0],
+            bins=configuration.bins,
+            condition=configuration.conditions[0],
+            neutral_policy=(
+                NeutralBandPolicy.ECONOMIC_FRICTION
+                if configuration.neutral_threshold is None
+                else NeutralBandPolicy.TRAINING_NOISE
+            ),
+            profile=EvidenceProfile.BALANCED_V4,
+            neutral_threshold=neutral,
+            thresholds=configuration.thresholds,
+        )
+        diagnostic_pairs = tuple(
+            (
+                item,
+                diagnose_stability_edge(
+                    item,
+                    thresholds=configuration.thresholds,
+                    round_trip_friction=neutral,
+                    profile=discovery.profile,
+                ),
+            )
+            for item in result.stability_edges
+        )
+        diagnostics = tuple(item[1] for item in diagnostic_pairs)
+        stability_by_fingerprint = {
+            diagnostic.fingerprint: stability
+            for stability, diagnostic in diagnostic_pairs
+        }
+        near_misses = rank_near_misses(diagnostics)
+        sensitivities = threshold_sensitivity(near_misses)
+        counts: dict[str, int] = {}
+        for diagnostic in diagnostics:
+            for reason in diagnostic.failed_requirements:
+                counts[reason.value] = counts.get(reason.value, 0) + 1
+        conclusion = diagnostic_conclusion(
+            diagnostics, confirmed_count=len(result.hypotheses)
+        )
+        session.add(
+            PredictiveEdgeRunDiagnosticRecord(
+                id=uuid4(),
+                run_id=run_id,
+                contract_version=PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+                effective_parameters=[
+                    {
+                        "name": item.name,
+                        "value": item.value,
+                        "source": item.source.value,
+                        "rationale": item.rationale,
+                        "contract_version": item.contract_version,
+                    }
+                    for item in audited_parameters(discovery)
+                ],
+                rejection_counts_by_reason=counts,
+                rejection_counts_by_predictor={},
+                rejection_counts_by_horizon={},
+                rejection_counts_by_condition={},
+                rejection_counts_by_neutral_policy={
+                    discovery.neutral_policy.value: len(diagnostics)
+                },
+                rejection_counts_by_cadence={
+                    str(int(discovery.cadence.total_seconds())): len(diagnostics)
+                },
+                strongest_observed_signal=(
+                    near_misses[0].diagnostic.fingerprint if near_misses else None
+                ),
+                bottleneck_stage="validation" if diagnostics else "training",
+                diagnostic_conclusion=conclusion.value,
+                outcome_explanation=(
+                    "Evidence was evaluated with separated statistical and economic "
+                    "requirements; "
+                    f"the run concluded {conclusion.value}."
+                ),
+                stage_timings={},
+                computed_counts={"aggregate_edges": len(diagnostics)},
+                reused_counts={},
+            )
+        )
+        for near_miss in near_misses:
+            diagnostic_edge = near_miss.diagnostic
+            stability = stability_by_fingerprint[diagnostic_edge.fingerprint]
+            session.add(
+                PredictiveEdgeNearMissRecord(
+                    id=uuid4(),
+                    run_id=run_id,
+                    rank=near_miss.rank,
+                    edge_fingerprint=diagnostic_edge.fingerprint,
+                    predictor_name=stability.predictor.name,
+                    cadence_seconds=int(discovery.cadence.total_seconds()),
+                    horizon_seconds=int(stability.horizon.total_seconds()),
+                    bin_count=discovery.bins,
+                    condition=stability.condition.value,
+                    neutral_policy=discovery.neutral_policy.value,
+                    profile=discovery.profile.value,
+                    classification=diagnostic_edge.classification,
+                    primary_rejection_reason=(
+                        diagnostic_edge.primary_rejection_reason.value
+                        if diagnostic_edge.primary_rejection_reason is not None
+                        else "validation_failed"
+                    ),
+                    passed_requirements=[
+                        value.value for value in diagnostic_edge.passed_requirements
+                    ],
+                    failed_requirements=[
+                        value.value for value in diagnostic_edge.failed_requirements
+                    ],
+                    requirement_margins=[
+                        {
+                            "requirement": margin.requirement.value,
+                            "observed_value": str(margin.observed_value),
+                            "required_value": str(margin.required_value),
+                            "absolute_margin": str(margin.absolute_margin),
+                            "relative_margin": (
+                                str(margin.relative_margin)
+                                if margin.relative_margin is not None
+                                else None
+                            ),
+                            "passed": margin.passed,
+                        }
+                        for margin in diagnostic_edge.margins
+                    ],
+                    usable_observations=diagnostic_edge.usable_observations,
+                    stable_direction_ratio=diagnostic_edge.stable_direction_ratio,
+                    expected_net_movement=diagnostic_edge.net_expected_movement,
+                    normalized_missing_distance=(near_miss.normalized_missing_distance),
+                )
+            )
+        for sensitivity in sensitivities:
+            session.add(
+                PredictiveEdgeSensitivityRecord(
+                    id=uuid4(),
+                    run_id=run_id,
+                    edge_fingerprint=sensitivity.edge_fingerprint,
+                    threshold_name=sensitivity.threshold_name.value,
+                    current_value=sensitivity.current_value,
+                    nearest_passing_value=sensitivity.nearest_passing_value,
+                    candidate_would_advance=sensitivity.candidate_would_advance,
+                    other_requirements_still_failed=[
+                        value.value
+                        for value in sensitivity.other_requirements_still_failed
+                    ],
+                )
+            )
     await session.commit()
     return PredictiveEdgeExecution(run_id, False, result, 0, 0)

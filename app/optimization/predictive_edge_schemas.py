@@ -4,6 +4,13 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.optimization.predictive_edge_v4 import (
+    DiagnosticConclusion,
+    EvidenceProfile,
+    NeutralBandPolicy,
+    ParameterSource,
+    RejectionReason,
+)
 from app.optimization.predictive_edges import (
     DirectionMapping,
     EvidenceStatus,
@@ -180,3 +187,79 @@ class StrategyHypothesisPageResponse(BaseModel):
 class PredictiveEdgeRunDetailResponse(BaseModel):
     run: PredictiveEdgeRunResponse
     configuration: dict[str, int | Decimal | str]
+
+
+class AuditedParameterResponse(BaseModel):
+    name: str
+    value: str
+    source: ParameterSource
+    rationale: str
+    contract_version: int
+
+
+class RequirementMarginResponse(BaseModel):
+    requirement: RejectionReason
+    observed_value: Decimal
+    required_value: Decimal
+    absolute_margin: Decimal
+    relative_margin: Decimal | None
+    passed: bool
+
+
+class PredictiveEdgeDiagnosticResponse(BaseModel):
+    contract_version: int
+    effective_parameters: tuple[AuditedParameterResponse, ...]
+    rejection_counts_by_reason: dict[str, int]
+    rejection_counts_by_predictor: dict[str, int]
+    rejection_counts_by_horizon: dict[str, int]
+    rejection_counts_by_condition: dict[str, int]
+    rejection_counts_by_neutral_policy: dict[str, int]
+    rejection_counts_by_cadence: dict[str, int]
+    strongest_observed_signal: str | None
+    bottleneck_stage: str
+    diagnostic_conclusion: DiagnosticConclusion
+    outcome_explanation: str
+    stage_timings: dict[str, str]
+    computed_counts: dict[str, int]
+    reused_counts: dict[str, int]
+
+
+class PredictiveEdgeNearMissResponse(BaseModel):
+    id: UUID
+    rank: int
+    edge_fingerprint: str
+    predictor_name: str
+    cadence_seconds: int
+    horizon_seconds: int
+    bin_count: int
+    condition: str
+    neutral_policy: NeutralBandPolicy
+    profile: EvidenceProfile
+    classification: str
+    primary_rejection_reason: RejectionReason
+    passed_requirements: tuple[RejectionReason, ...]
+    failed_requirements: tuple[RejectionReason, ...]
+    requirement_margins: tuple[RequirementMarginResponse, ...]
+    usable_observations: int
+    stable_direction_ratio: Decimal
+    expected_net_movement: Decimal | None
+    normalized_missing_distance: Decimal
+
+
+class PredictiveEdgeNearMissPageResponse(BaseModel):
+    items: tuple[PredictiveEdgeNearMissResponse, ...]
+    next_cursor: int | None
+    has_more: bool
+
+
+class ThresholdSensitivityResponse(BaseModel):
+    threshold_name: RejectionReason
+    current_value: Decimal
+    nearest_passing_value: Decimal
+    candidate_would_advance: bool
+    other_requirements_still_failed: tuple[RejectionReason, ...]
+
+
+class PredictiveEdgeNearMissDetailResponse(BaseModel):
+    near_miss: PredictiveEdgeNearMissResponse
+    sensitivity: tuple[ThresholdSensitivityResponse, ...]

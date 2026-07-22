@@ -13,7 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -415,4 +415,143 @@ class PredictiveEdgeBenchmarkRecord(Base):
     directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     mean_forward_gross_return: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
+    )
+
+
+class PredictiveEdgeRunDiagnosticRecord(Base):
+    """Bounded v4 run summary; v3 runs remain readable without this child."""
+
+    __tablename__ = "predictive_edge_run_diagnostics"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_predictive_edge_run_diagnostics_run"),
+    )
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("predictive_edge_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_parameters: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    rejection_counts_by_reason: Mapped[dict[str, int]] = mapped_column(
+        JSONB, nullable=False
+    )
+    rejection_counts_by_predictor: Mapped[dict[str, int]] = mapped_column(
+        JSONB, nullable=False
+    )
+    rejection_counts_by_horizon: Mapped[dict[str, int]] = mapped_column(
+        JSONB, nullable=False
+    )
+    rejection_counts_by_condition: Mapped[dict[str, int]] = mapped_column(
+        JSONB, nullable=False
+    )
+    rejection_counts_by_neutral_policy: Mapped[dict[str, int]] = mapped_column(
+        JSONB, nullable=False
+    )
+    rejection_counts_by_cadence: Mapped[dict[str, int]] = mapped_column(
+        JSONB, nullable=False
+    )
+    strongest_observed_signal: Mapped[str | None] = mapped_column(Text)
+    bottleneck_stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    diagnostic_conclusion: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome_explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    stage_timings: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False)
+    computed_counts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
+    reused_counts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
+
+
+class PredictiveEdgeNearMissRecord(Base):
+    __tablename__ = "predictive_edge_near_misses"
+    __table_args__ = (
+        UniqueConstraint("run_id", "rank", name="uq_predictive_edge_near_misses_rank"),
+        Index("ix_predictive_edge_near_misses_run_rank", "run_id", "rank"),
+    )
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("predictive_edge_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    edge_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    predictor_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    cadence_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    bin_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    condition: Mapped[str] = mapped_column(String(64), nullable=False)
+    neutral_policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    profile: Mapped[str] = mapped_column(String(32), nullable=False)
+    classification: Mapped[str] = mapped_column(String(48), nullable=False)
+    primary_rejection_reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    passed_requirements: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False
+    )
+    failed_requirements: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False
+    )
+    requirement_margins: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    usable_observations: Mapped[int] = mapped_column(Integer, nullable=False)
+    stable_direction_ratio: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    expected_net_movement: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    normalized_missing_distance: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+
+
+class PredictiveEdgeSensitivityRecord(Base):
+    __tablename__ = "predictive_edge_threshold_sensitivity"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "edge_fingerprint",
+            "threshold_name",
+            name="uq_predictive_edge_sensitivity_identity",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("predictive_edge_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    edge_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    threshold_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    current_value: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    nearest_passing_value: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18), nullable=False
+    )
+    candidate_would_advance: Mapped[bool] = mapped_column(nullable=False)
+    other_requirements_still_failed: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False
+    )
+
+
+class PredictiveEdgeV4CacheRecord(Base):
+    __tablename__ = "predictive_edge_v4_cache"
+    __table_args__ = (
+        UniqueConstraint("cache_key", name="uq_predictive_edge_v4_cache_key"),
+        Index("ix_predictive_edge_v4_cache_kind", "evidence_kind"),
+    )
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    cache_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    dataset_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    cadence_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    bin_count: Mapped[int | None] = mapped_column(Integer)
+    condition: Mapped[str | None] = mapped_column(String(64))
+    neutral_policy: Mapped[str | None] = mapped_column(String(32))
+    profile: Mapped[str | None] = mapped_column(String(32))
+    fee_rate: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    slippage_rate: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
     )

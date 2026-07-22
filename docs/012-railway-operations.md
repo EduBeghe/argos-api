@@ -4,6 +4,10 @@
 
 Deploy `argos-api`, `argos-ingest`, and `argos-decide` from this repository, PostgreSQL as the shared datastore, and `argos-web` from its separate repository. Configure external cron schedules:
 
+The weekly Predictive Edge Discovery v4 cron remains intentionally pending until its
+first-run timing and diagnostics have been validated on Railway. Do not infer a
+profitable pattern from a successful job or enable a candidate automatically.
+
 - ingest: every five minutes;
 - decide: `2,32 * * * *` (UTC), allowing boundary candles and Scores to be persisted before the 30-minute cycle.
 
@@ -59,13 +63,3 @@ Use each command’s `--help` as the parser-authoritative flag reference. `refin
 - Verify database size and available memory before large backfills or analyses. Historical analyses have taken roughly 30 minutes per asset in the observed environment; duration varies with data and resources.
 - Do not run BTC and ETH historical analysis simultaneously on a small Railway service. Stop or stagger schedules to avoid competing with live jobs.
 - Do not run candidate analysis with `--persist` unless the intended experiment identity and database capacity have been reviewed.
-
-
-## Weekly Strategy research
-
-Create a separate `argos-research` service with start command
-`python -m app.jobs.run_weekly_strategy_research` and suggested UTC cron
-`17 3 * * 0`. It shares the backend database and logging variables, runs separately
-from ingest and decide, and uses a PostgreSQL advisory lock. Operational interpretation,
-retry behavior, resource bounds, and flags are documented in
-[weekly Strategy research](014-weekly-strategy-research.md).
