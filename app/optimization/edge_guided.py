@@ -762,6 +762,7 @@ def evaluate_edge_guided_candidates(
                 None,
             )
         )
+    evaluations = evaluations[:maximum_candidates]
     outcome = _research_outcome(tuple(evaluations), bool(hypotheses), bool(candidates))
     return EdgeGuidedEvaluationResult(
         dataset.fingerprint,
