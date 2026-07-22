@@ -27,10 +27,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database.base import Base
 from app.market.catalog import Instrument
 from app.optimization.edge_guided import (
+    EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
     EdgeGuidedCandidate,
     EdgeGuidedCandidateEvaluation,
     EdgeGuidedCandidateStatus,
     EdgeGuidedEvaluationResult,
+    EdgeGuidedRejectionReason,
     EdgeGuidedSegmentEvaluation,
     EdgeGuidedWindowEvaluation,
 )
@@ -76,6 +78,9 @@ class EdgeGuidedRunRecord(Base):
     decision_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     maximum_candidates: Mapped[int] = mapped_column(Integer, nullable=False)
     algorithm_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    qualification_contract_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+    )
     generated_count: Mapped[int] = mapped_column(Integer, nullable=False)
     evaluated_count: Mapped[int] = mapped_column(Integer, nullable=False)
     windows_available: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -119,6 +124,9 @@ class EdgeGuidedCandidateRecord(Base):
     candidate: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    rejection_reasons: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     valid_window_count: Mapped[int] = mapped_column(Integer, nullable=False)
     confirmed_window_count: Mapped[int] = mapped_column(Integer, nullable=False)
     rejected_validation_window_count: Mapped[int] = mapped_column(
@@ -155,6 +163,9 @@ class EdgeGuidedWindowRecord(Base):
     test_metrics: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     validation_passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     test_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    rejection_reasons: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +195,7 @@ def edge_guided_experiment_key(
 ) -> str:
     payload = {
         "persistence_contract_version": EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION,
+        "qualification_contract_version": EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
         "predictive_edge_run_id": str(predictive_edge_run_id),
         "dataset_fingerprint": dataset_fingerprint,
         "instrument": [
@@ -214,6 +226,8 @@ async def find_reusable_edge_guided_run(
         select(EdgeGuidedRunRecord).where(
             EdgeGuidedRunRecord.experiment_key == experiment_key,
             EdgeGuidedRunRecord.status == "completed",
+            EdgeGuidedRunRecord.qualification_contract_version
+            == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
         )
     )
     if run is None:
@@ -294,6 +308,7 @@ async def persist_edge_guided_result(
             decision_interval_seconds=int(decision_interval.total_seconds()),
             maximum_candidates=result.maximum_candidates,
             algorithm_version=EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION,
+            qualification_contract_version=result.qualification_contract_version,
             generated_count=result.generated_count,
             evaluated_count=result.evaluated_count,
             windows_available=result.windows_available,
@@ -340,6 +355,7 @@ async def persist_edge_guided_result(
                 candidate=_candidate_payload(evaluation.candidate),
                 status=evaluation.status.value,
                 explanation=evaluation.explanation,
+                rejection_reasons=[item.value for item in evaluation.rejection_reasons],
                 valid_window_count=evaluation.valid_window_count,
                 confirmed_window_count=evaluation.confirmed_window_count,
                 rejected_validation_window_count=evaluation.rejected_validation_window_count,
@@ -367,6 +383,7 @@ async def persist_edge_guided_result(
                     test_metrics=_metric(window.test) if window.test else None,
                     validation_passed=window.validation_passed,
                     test_confirmed=window.test_confirmed,
+                    rejection_reasons=[item.value for item in window.rejection_reasons],
                 )
             )
     try:
@@ -420,6 +437,10 @@ async def _load_result(
                         _read_metric(item.test_metrics) if item.test_metrics else None,
                         item.validation_passed,
                         item.test_confirmed,
+                        tuple(
+                            EdgeGuidedRejectionReason(value)
+                            for value in item.rejection_reasons
+                        ),
                     )
                     for item in windows
                 ),
@@ -430,6 +451,10 @@ async def _load_result(
                 record.unconditional_benchmark,
                 EdgeGuidedCandidateStatus(record.status),
                 record.explanation,
+                tuple(
+                    EdgeGuidedRejectionReason(value)
+                    for value in record.rejection_reasons
+                ),
             )
         )
     return EdgeGuidedEvaluationResult(
@@ -439,12 +464,15 @@ async def _load_result(
         run.maximum_candidates,
         run.windows_available,
         tuple(evaluations),
+        run.qualification_contract_version,
     )
 
 
 async def _load_valid_result(
     session: AsyncSession, run: EdgeGuidedRunRecord
 ) -> EdgeGuidedEvaluationResult | None:
+    if run.qualification_contract_version != EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION:
+        return None
     if run.generated_count < run.evaluated_count:
         return None
     result = await _load_result(session, run)
@@ -532,4 +560,5 @@ def _candidate(value: dict[str, object]) -> EdgeGuidedCandidate:
         str(value["account_currency"]),
         Decimal(str(value["fee_rate"])),
         Decimal(str(value["slippage_rate"])),
+        int(str(value.get("qualification_contract_version", 1))),
     )

@@ -3,7 +3,11 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
+
+import app.optimization.edge_guided_memory as memory_module
 from app.market.catalog import MARKET_INSTRUMENTS
+from app.optimization.edge_guided import EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
 from app.optimization.edge_guided_memory import (
     EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION,
     edge_guided_experiment_key,
@@ -43,6 +47,7 @@ def key(
 
 def test_experiment_key_is_deterministic_and_hypothesis_order_independent() -> None:
     assert EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION == 1
+    assert EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION == 2
     assert key(hypotheses=("b" * 64, "c" * 64)) == key(hypotheses=("c" * 64, "b" * 64))
 
 
@@ -66,3 +71,11 @@ def test_experiment_key_changes_with_dataset_windows_limit_or_hypothesis() -> No
     )
     assert key(maximum_candidates=3) != baseline
     assert key(hypotheses=("e" * 64,)) != baseline
+
+
+def test_qualification_contract_version_changes_experiment_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = key()
+    monkeypatch.setattr(memory_module, "EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION", 1)
+    assert key() != baseline

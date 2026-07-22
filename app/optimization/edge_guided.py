@@ -1,6 +1,6 @@
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -21,6 +21,7 @@ from app.optimization.predictive_edges import (
     predictive_edge_volatility_threshold,
 )
 from app.optimization.refinement import (
+    MAX_VALIDATION_DRAWDOWN,
     RefinementSegmentName,
     simulate_buy_and_hold,
 )
@@ -41,6 +42,8 @@ from app.strategies.baseline_long_only import (
 
 DEFAULT_MAX_EDGE_GUIDED_CANDIDATES = 12
 MAX_EDGE_GUIDED_CANDIDATES = 100
+EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION = 2
+MINIMUM_TRADES_PER_SEGMENT = 1
 
 
 class EdgeGuidedCandidateError(ValueError):
@@ -51,6 +54,19 @@ class EdgeGuidedCandidateStatus(StrEnum):
     REJECTED_VALIDATION = "rejected_validation"
     REJECTED_TEST = "rejected_test"
     CONFIRMED = "confirmed_candidate"
+
+
+class EdgeGuidedRejectionReason(StrEnum):
+    INSUFFICIENT_TRADES = "insufficient_trades"
+    NON_POSITIVE_TRAINING_RETURN = "non_positive_training_return"
+    NON_POSITIVE_VALIDATION_RETURN = "non_positive_validation_return"
+    NON_POSITIVE_TEST_RETURN = "non_positive_test_return"
+    DID_NOT_BEAT_PRODUCTION_VALIDATION = "did_not_beat_production_validation"
+    DID_NOT_BEAT_PRODUCTION_TEST = "did_not_beat_production_test"
+    EXCESSIVE_DRAWDOWN = "excessive_drawdown"
+    INSUFFICIENT_VALID_WINDOWS = "insufficient_valid_windows"
+    INSUFFICIENT_CONFIRMED_WINDOWS = "insufficient_confirmed_windows"
+    UNSTABLE_ACROSS_WINDOWS = "unstable_across_windows"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +92,7 @@ class EdgeGuidedCandidate:
     account_currency: str
     fee_rate: Decimal
     slippage_rate: Decimal
+    qualification_contract_version: int = EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +104,28 @@ class EdgeGuidedSegmentEvaluation:
     fees_paid: Decimal
     return_difference_from_production: Decimal
     return_difference_from_buy_and_hold: Decimal
+    sufficient_trades: bool = field(init=False)
+    positive_net_return: bool = field(init=False)
+    beats_production: bool = field(init=False)
+    beats_buy_and_hold: bool = field(init=False)
+    risk_acceptable: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "sufficient_trades", self.trade_count >= MINIMUM_TRADES_PER_SEGMENT
+        )
+        object.__setattr__(self, "positive_net_return", self.total_return > 0)
+        object.__setattr__(
+            self, "beats_production", self.return_difference_from_production > 0
+        )
+        object.__setattr__(
+            self,
+            "beats_buy_and_hold",
+            self.return_difference_from_buy_and_hold > 0,
+        )
+        object.__setattr__(
+            self, "risk_acceptable", self.max_drawdown <= MAX_VALIDATION_DRAWDOWN
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +142,7 @@ class EdgeGuidedCandidateEvaluation:
     unconditional_benchmark: str
     status: EdgeGuidedCandidateStatus
     explanation: str
+    rejection_reasons: tuple[EdgeGuidedRejectionReason, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +153,7 @@ class EdgeGuidedEvaluationResult:
     maximum_candidates: int
     windows_available: int
     evaluations: tuple[EdgeGuidedCandidateEvaluation, ...]
+    qualification_contract_version: int = EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +165,7 @@ class EdgeGuidedWindowEvaluation:
     test: EdgeGuidedSegmentEvaluation | None
     validation_passed: bool
     test_confirmed: bool
+    rejection_reasons: tuple[EdgeGuidedRejectionReason, ...] = ()
 
 
 def generate_edge_guided_candidates(
@@ -155,6 +197,9 @@ def generate_edge_guided_candidates(
         ):
             continue
         payload = {
+            "qualification_contract_version": (
+                EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+            ),
             "source_hypothesis_id": hypothesis.hypothesis_id,
             "predictor_name": hypothesis.predictor_name,
             "predictor_version": hypothesis.predictor_version,
@@ -291,40 +336,47 @@ def evaluate_edge_guided_candidates(
         )
         valid = len(window_results)
         confirmed = sum(item.test_confirmed for item in window_results)
-        rejected_validation = sum(not item.validation_passed for item in window_results)
+        valid = sum(item.validation_passed for item in window_results)
+        rejected_validation = len(window_results) - valid
         rejected_test = sum(
             item.validation_passed and not item.test_confirmed
             for item in window_results
         )
         ratio = Decimal(confirmed) / Decimal(valid) if valid else Decimal(0)
-        if (
-            valid >= thresholds.minimum_windows
-            and confirmed >= thresholds.minimum_windows
-            and ratio >= thresholds.minimum_stable_direction_ratio
-        ):
+        training = _aggregate_segment(window_results, RefinementSegmentName.TRAINING)
+        validation = _aggregate_segment(
+            window_results, RefinementSegmentName.VALIDATION
+        )
+        test = _aggregate_segment(window_results, RefinementSegmentName.TEST)
+        reasons = _candidate_rejection_reasons(
+            training=training,
+            validation=validation,
+            test=test,
+            valid=valid,
+            confirmed=confirmed,
+            ratio=ratio,
+            thresholds=thresholds,
+        )
+        if not reasons:
             status = EdgeGuidedCandidateStatus.CONFIRMED
             explanation = (
-                "Frozen candidate confirmed against production across the required "
-                "isolated walk-forward test windows."
+                "The frozen candidate had positive net returns, sufficient trading "
+                "activity, acceptable risk, and strictly beat production across the "
+                "required isolated walk-forward evidence. Buy-and-hold remains an "
+                "independent comparison."
             )
-        elif not any(item.validation_passed for item in window_results):
+        elif _is_validation_rejection(reasons):
             status = EdgeGuidedCandidateStatus.REJECTED_VALIDATION
-            explanation = (
-                "Candidate did not pass validation in the required walk-forward "
-                "windows."
-            )
         else:
             status = EdgeGuidedCandidateStatus.REJECTED_TEST
-            explanation = (
-                "Frozen validation candidate did not satisfy the existing stability "
-                "criteria across isolated test windows."
-            )
+        if reasons:
+            explanation = _rejection_explanation(reasons)
         evaluations.append(
             EdgeGuidedCandidateEvaluation(
                 candidate,
-                _aggregate_segment(window_results, RefinementSegmentName.TRAINING),
-                _aggregate_segment(window_results, RefinementSegmentName.VALIDATION),
-                _aggregate_segment(window_results, RefinementSegmentName.TEST),
+                training,
+                validation,
+                test,
                 window_results,
                 valid,
                 confirmed,
@@ -335,6 +387,7 @@ def evaluate_edge_guided_candidates(
                 else "always_down",
                 status,
                 explanation,
+                reasons,
             )
         )
     return EdgeGuidedEvaluationResult(
@@ -389,7 +442,10 @@ def _evaluate_candidate_windows(
             simulation,
             action_filter,
         )
-        validation_passed = validation.return_difference_from_production > 0
+        validation_reasons = _window_segment_rejection_reasons(
+            validation, RefinementSegmentName.VALIDATION
+        )
+        validation_passed = not validation_reasons
         test = (
             _evaluate_segment(
                 dataset,
@@ -403,6 +459,19 @@ def _evaluate_candidate_windows(
             if validation_passed
             else None
         )
+        test_confirmed = test is not None and not _window_segment_rejection_reasons(
+            test, RefinementSegmentName.TEST
+        )
+        window_reasons = validation_reasons
+        if test is not None:
+            window_reasons = _stable_reasons(
+                (
+                    *window_reasons,
+                    *_window_segment_rejection_reasons(
+                        test, RefinementSegmentName.TEST
+                    ),
+                )
+            )
         results.append(
             EdgeGuidedWindowEvaluation(
                 window.ordinal,
@@ -411,7 +480,8 @@ def _evaluate_candidate_windows(
                 validation,
                 test,
                 validation_passed,
-                test is not None and test.return_difference_from_production > 0,
+                test_confirmed,
+                window_reasons,
             )
         )
     return tuple(results)
@@ -502,6 +572,120 @@ def edge_guided_summary(result: EdgeGuidedEvaluationResult) -> dict[str, object]
     if not isinstance(value, dict):
         raise EdgeGuidedCandidateError("edge-guided summary must be an object")
     return value
+
+
+def _window_segment_rejection_reasons(
+    value: EdgeGuidedSegmentEvaluation, segment: RefinementSegmentName
+) -> tuple[EdgeGuidedRejectionReason, ...]:
+    reasons: list[EdgeGuidedRejectionReason] = []
+    if not value.sufficient_trades:
+        reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_TRADES)
+    if not value.positive_net_return:
+        reasons.append(
+            EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN
+            if segment is RefinementSegmentName.VALIDATION
+            else EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN
+        )
+    if not value.beats_production:
+        reasons.append(
+            EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION
+            if segment is RefinementSegmentName.VALIDATION
+            else EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST
+        )
+    if not value.risk_acceptable:
+        reasons.append(EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN)
+    return _stable_reasons(tuple(reasons))
+
+
+def _candidate_rejection_reasons(
+    *,
+    training: EdgeGuidedSegmentEvaluation,
+    validation: EdgeGuidedSegmentEvaluation,
+    test: EdgeGuidedSegmentEvaluation,
+    valid: int,
+    confirmed: int,
+    ratio: Decimal,
+    thresholds: EvidenceThresholds,
+) -> tuple[EdgeGuidedRejectionReason, ...]:
+    reasons: list[EdgeGuidedRejectionReason] = []
+    if not all(item.sufficient_trades for item in (training, validation, test)):
+        reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_TRADES)
+    for value, reason in (
+        (training, EdgeGuidedRejectionReason.NON_POSITIVE_TRAINING_RETURN),
+        (validation, EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN),
+        (test, EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN),
+    ):
+        if not value.positive_net_return:
+            reasons.append(reason)
+    if not validation.beats_production:
+        reasons.append(EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION)
+    if not test.beats_production:
+        reasons.append(EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST)
+    if not all(item.risk_acceptable for item in (training, validation, test)):
+        reasons.append(EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN)
+    if valid < thresholds.minimum_windows:
+        reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_VALID_WINDOWS)
+    if confirmed < thresholds.minimum_windows:
+        reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_CONFIRMED_WINDOWS)
+    if valid and ratio < thresholds.minimum_stable_direction_ratio:
+        reasons.append(EdgeGuidedRejectionReason.UNSTABLE_ACROSS_WINDOWS)
+    return _stable_reasons(tuple(reasons))
+
+
+def _stable_reasons(
+    reasons: tuple[EdgeGuidedRejectionReason, ...],
+) -> tuple[EdgeGuidedRejectionReason, ...]:
+    return tuple(dict.fromkeys(reasons))
+
+
+def _is_validation_rejection(
+    reasons: tuple[EdgeGuidedRejectionReason, ...],
+) -> bool:
+    validation_reasons = {
+        EdgeGuidedRejectionReason.INSUFFICIENT_TRADES,
+        EdgeGuidedRejectionReason.NON_POSITIVE_TRAINING_RETURN,
+        EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN,
+        EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION,
+        EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN,
+        EdgeGuidedRejectionReason.INSUFFICIENT_VALID_WINDOWS,
+    }
+    return any(reason in validation_reasons for reason in reasons)
+
+
+def _rejection_explanation(
+    reasons: tuple[EdgeGuidedRejectionReason, ...],
+) -> str:
+    labels = {
+        EdgeGuidedRejectionReason.INSUFFICIENT_TRADES: "insufficient trading activity",
+        EdgeGuidedRejectionReason.NON_POSITIVE_TRAINING_RETURN: (
+            "non-positive training return"
+        ),
+        EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN: (
+            "non-positive validation return"
+        ),
+        EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN: "non-positive test return",
+        EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION: (
+            "validation did not strictly beat production"
+        ),
+        EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST: (
+            "test did not strictly beat production"
+        ),
+        EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN: (
+            "drawdown exceeded the existing risk limit"
+        ),
+        EdgeGuidedRejectionReason.INSUFFICIENT_VALID_WINDOWS: (
+            "insufficient validation windows"
+        ),
+        EdgeGuidedRejectionReason.INSUFFICIENT_CONFIRMED_WINDOWS: (
+            "insufficient confirmed test windows"
+        ),
+        EdgeGuidedRejectionReason.UNSTABLE_ACROSS_WINDOWS: (
+            "insufficient stability across windows"
+        ),
+    }
+    return (
+        "Candidate rejected: " + "; ".join(labels[reason] for reason in reasons) + "."
+    )
 
 
 def _fingerprint(payload: dict[str, object]) -> str:

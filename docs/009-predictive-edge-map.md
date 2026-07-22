@@ -82,17 +82,31 @@ Candidates reuse the existing historical simulator, fees, slippage, initial cash
 30-minute cadence, score model, Strategy version, and existing walk-forward windows.
 Every window keeps isolated training, validation, and test phases. Parameters come only
 from the frozen hypothesis and the training-frozen condition boundary; validation
-selects and test only confirms. Final status aggregates valid, confirmed, validation-
-rejected, and test-rejected windows using the existing minimum-window and stability
-criteria. Results are `rejected_validation`, `rejected_test`, or
-`confirmed_candidate` and retain informative comparisons with production and
-buy-and-hold. The stage is bounded and opt-in. Without `--persist`, it remains strictly
-in memory. With both flags, one transaction stores the evaluation run, each candidate,
-and each valid walk-forward window. A deterministic experiment key includes the source
-analysis, dataset and range, window configuration, capital, costs, cadence, candidate
-limit, persistence-contract version, and input hypotheses. An identical completed run
-is reconstructed without reevaluation; partial data is never reusable. Persistence
-does not activate a Strategy, mutate Paper Trading, or guarantee future results.
+selects and test only confirms. Qualification contract v2 distinguishes detecting an
+edge, generating a frozen candidate, and confirming economic viability. Every counted
+validation or test window must contain at least one Trade, have strictly positive net
+return after configured fees and slippage, strictly beat production for the same
+window, and remain within the existing 10% drawdown limit. Aggregate training,
+validation, and test evidence must also contain Trades and have strictly positive
+returns; aggregate validation and test must strictly beat production. Existing
+minimum-window and stability criteria still apply. Zero Trades or return less than or
+equal to zero can therefore never produce `confirmed_candidate`.
+
+Buy-and-hold remains an independent outcome and risk reference rather than an absolute
+rejection rule. Structured segment evidence reports whether the candidate beats
+production, beats buy-and-hold, has positive net return, has sufficient Trades, and has
+acceptable risk. Deterministic rejection reasons explain every failed qualification
+without implying that both benchmarks were beaten. Results are `rejected_validation`,
+`rejected_test`, or `confirmed_candidate`. The stage is bounded and opt-in. Without
+`--persist`, it remains strictly in memory. With both flags, one transaction stores the
+evaluation run, each candidate, and each valid walk-forward window. A deterministic
+experiment key includes the source analysis, dataset and range, window configuration,
+capital, costs, cadence, candidate limit, persistence- and qualification-contract
+versions, and input hypotheses. An identical completed run is reconstructed without
+reevaluation; partial data is never reusable. Qualification-v1 records remain readable
+legacy evidence, are never reused for v2, and are explicitly ineligible under the
+current contract. Persistence does not activate a Strategy, mutate Paper Trading, or
+guarantee future results.
 
 ```text
 Predictive Edge Map

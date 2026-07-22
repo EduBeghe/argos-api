@@ -7,7 +7,11 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import Subquery
 
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.optimization.edge_guided import EdgeGuidedCandidateStatus
+from app.optimization.edge_guided import (
+    EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
+    EdgeGuidedCandidateStatus,
+    EdgeGuidedRejectionReason,
+)
 from app.optimization.edge_guided_memory import (
     EdgeGuidedCandidateRecord,
     EdgeGuidedRunRecord,
@@ -299,6 +303,11 @@ def _run(
         decision_interval_seconds=record.decision_interval_seconds,
         maximum_candidates=record.maximum_candidates,
         algorithm_version=record.algorithm_version,
+        qualification_contract_version=record.qualification_contract_version,
+        legacy=(
+            record.qualification_contract_version
+            < EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+        ),
         generated_count=record.generated_count,
         evaluated_count=record.evaluated_count,
         windows_available=record.windows_available,
@@ -313,17 +322,27 @@ def _run(
 
 
 def _metric(value: dict[str, object]) -> EdgeGuidedSegmentMetricsResponse:
+    total_return = Decimal(str(value["total_return"]))
+    max_drawdown = Decimal(str(value["max_drawdown"]))
+    trade_count = int(str(value["trade_count"]))
+    production_difference = Decimal(str(value["return_difference_from_production"]))
+    buy_and_hold_difference = Decimal(str(value["return_difference_from_buy_and_hold"]))
     return EdgeGuidedSegmentMetricsResponse(
         segment=RefinementSegmentName(str(value["segment"])),
-        total_return=Decimal(str(value["total_return"])),
-        max_drawdown=Decimal(str(value["max_drawdown"])),
-        trade_count=int(str(value["trade_count"])),
+        total_return=total_return,
+        max_drawdown=max_drawdown,
+        trade_count=trade_count,
         fees_paid=Decimal(str(value["fees_paid"])),
-        return_difference_from_production=Decimal(
-            str(value["return_difference_from_production"])
+        return_difference_from_production=production_difference,
+        return_difference_from_buy_and_hold=buy_and_hold_difference,
+        sufficient_trades=bool(value.get("sufficient_trades", trade_count > 0)),
+        positive_net_return=bool(value.get("positive_net_return", total_return > 0)),
+        beats_production=bool(value.get("beats_production", production_difference > 0)),
+        beats_buy_and_hold=bool(
+            value.get("beats_buy_and_hold", buy_and_hold_difference > 0)
         ),
-        return_difference_from_buy_and_hold=Decimal(
-            str(value["return_difference_from_buy_and_hold"])
+        risk_acceptable=bool(
+            value.get("risk_acceptable", max_drawdown <= Decimal("0.10"))
         ),
     )
 
@@ -364,6 +383,19 @@ def _candidate(
         fee_rate=Decimal(str(payload["fee_rate"])),
         slippage_rate=Decimal(str(payload["slippage_rate"])),
         status=EdgeGuidedCandidateStatus(record.status),
+        qualification_contract_version=run.qualification_contract_version,
+        legacy=(
+            run.qualification_contract_version
+            < EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+        ),
+        eligible_under_current_contract=(
+            run.qualification_contract_version
+            == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+            and record.status == EdgeGuidedCandidateStatus.CONFIRMED.value
+        ),
+        rejection_reasons=tuple(
+            EdgeGuidedRejectionReason(value) for value in record.rejection_reasons
+        ),
         explanation=record.explanation,
         unconditional_benchmark=record.unconditional_benchmark,
         valid_window_count=record.valid_window_count,
@@ -385,4 +417,7 @@ def _window(record: EdgeGuidedWindowRecord) -> EdgeGuidedWindowResponse:
         test_metrics=_metric(record.test_metrics) if record.test_metrics else None,
         validation_passed=record.validation_passed,
         test_confirmed=record.test_confirmed,
+        rejection_reasons=tuple(
+            EdgeGuidedRejectionReason(value) for value in record.rejection_reasons
+        ),
     )

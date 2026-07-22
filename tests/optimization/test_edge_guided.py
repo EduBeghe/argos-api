@@ -11,9 +11,11 @@ from app.jobs.analyze_predictive_edges import build_parser
 from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.optimization.edge_guided import (
+    EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
     EdgeGuidedCandidate,
     EdgeGuidedCandidateStatus,
     EdgeGuidedEvaluationResult,
+    EdgeGuidedRejectionReason,
     EdgeGuidedSegmentEvaluation,
     apply_edge_guided_action,
     edge_guided_summary,
@@ -223,6 +225,64 @@ def evaluate_with_differences(
     )
 
 
+def economic_metric(
+    segment: RefinementSegmentName,
+    *,
+    total_return: str,
+    production_return: str,
+    buy_and_hold_return: str = "0",
+    trade_count: int = 1,
+    max_drawdown: str = "0.02",
+) -> EdgeGuidedSegmentEvaluation:
+    total = Decimal(total_return)
+    return EdgeGuidedSegmentEvaluation(
+        segment,
+        total,
+        Decimal(max_drawdown),
+        trade_count,
+        Decimal("1"),
+        total - Decimal(production_return),
+        total - Decimal(buy_and_hold_return),
+    )
+
+
+def evaluate_with_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    training: EdgeGuidedSegmentEvaluation,
+    validation: EdgeGuidedSegmentEvaluation,
+    test: EdgeGuidedSegmentEvaluation,
+) -> EdgeGuidedEvaluationResult:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        segment = args[2]
+        assert isinstance(segment, RefinementSegmentName)
+        return {
+            RefinementSegmentName.TRAINING: training,
+            RefinementSegmentName.VALIDATION: validation,
+            RefinementSegmentName.TEST: test,
+        }[segment]
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    return evaluate_edge_guided_candidates(
+        dataset=dataset,
+        feature_matrix=matrix,
+        hypotheses=(hypothesis(),),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        windows=windows,
+        thresholds=EvidenceThresholds(
+            minimum_observations=1,
+            minimum_windows=1,
+            minimum_stable_direction_ratio=Decimal(1),
+        ),
+    )
+
+
 def test_confirmed_long_and_exit_hypotheses_generate_one_candidate_each() -> None:
     long = hypothesis()
     exit_candidate = hypothesis(
@@ -243,6 +303,22 @@ def test_diagnostic_or_unconfirmed_evidence_produces_no_candidate() -> None:
     diagnostic = hypothesis(action=SuggestedAction.DIAGNOSTIC_ONLY)
     assert candidates((diagnostic,)) == ()
     assert candidates(()) == ()
+
+
+def test_zero_hypotheses_is_a_valid_empty_evaluation() -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    result = evaluate_edge_guided_candidates(
+        dataset=dataset,
+        feature_matrix=matrix,
+        hypotheses=(),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        windows=windows,
+        thresholds=EvidenceThresholds(minimum_windows=1),
+    )
+    assert result.generated_count == 0
+    assert result.evaluated_count == 0
+    assert result.evaluations == ()
 
 
 def test_long_entry_gates_only_a_baseline_entry() -> None:
@@ -426,7 +502,7 @@ def test_walk_forward_candidate_rejected_in_validation(
     )
     evaluation = result.evaluations[0]
     assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
-    assert evaluation.valid_window_count == 2
+    assert evaluation.valid_window_count == 0
     assert evaluation.rejected_validation_window_count == 2
     assert evaluation.confirmed_window_count == 0
     assert all(item.test is None for item in evaluation.windows)
@@ -472,6 +548,176 @@ def test_candidate_confirms_across_multiple_walk_forward_windows_without_mutatio
     summary_evaluations = summary["evaluations"]
     assert isinstance(summary_evaluations, list)
     assert summary_evaluations[0]["candidate"]["condition"] == "all"
+    assert summary_evaluations[0]["test"]["positive_net_return"] is True
+    assert summary_evaluations[0]["test"]["sufficient_trades"] is True
+    assert summary_evaluations[0]["rejection_reasons"] == []
+
+
+def test_zero_trade_candidate_cannot_pass_validation_or_confirm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zero = economic_metric(
+        RefinementSegmentName.TRAINING,
+        total_return="0",
+        production_return="-0.01",
+        trade_count=0,
+    )
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=zero,
+        validation=replace(zero, segment=RefinementSegmentName.VALIDATION),
+        test=replace(zero, segment=RefinementSegmentName.TEST),
+    )
+    evaluation = result.evaluations[0]
+    assert (
+        result.qualification_contract_version
+        == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+    )
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert evaluation.valid_window_count == 0
+    assert evaluation.confirmed_window_count == 0
+    assert EdgeGuidedRejectionReason.INSUFFICIENT_TRADES in evaluation.rejection_reasons
+    assert evaluation.validation.positive_net_return is False
+    assert evaluation.validation.sufficient_trades is False
+
+
+@pytest.mark.parametrize("candidate_return", ["-0.01", "0"])
+def test_non_positive_candidate_is_rejected_even_when_it_beats_losing_production(
+    monkeypatch: pytest.MonkeyPatch, candidate_return: str
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return=candidate_return,
+            production_return="-0.02",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return=candidate_return,
+            production_return="-0.02",
+        ),
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return=candidate_return,
+            production_return="-0.02",
+        ),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert (
+        EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN
+        in evaluation.rejection_reasons
+    )
+
+
+def test_profitable_candidate_must_strictly_beat_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return="0.01",
+            production_return="0",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return="0.01",
+            production_return="0.02",
+        ),
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return="0.01",
+            production_return="0",
+        ),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert (
+        EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION
+        in evaluation.rejection_reasons
+    )
+
+
+def test_economically_viable_candidate_can_confirm_without_beating_buy_and_hold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return="0.02",
+            production_return="0.01",
+            buy_and_hold_return="0.03",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return="0.02",
+            production_return="0.01",
+            buy_and_hold_return="0.03",
+        ),
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return="0.02",
+            production_return="0.01",
+            buy_and_hold_return="0.03",
+        ),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert evaluation.test.beats_production is True
+    assert evaluation.test.beats_buy_and_hold is False
+    assert "beat production" in evaluation.explanation
+    assert "beat both" not in evaluation.explanation
+
+
+def test_excessive_drawdown_rejects_otherwise_profitable_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return="0.02",
+            production_return="0.01",
+            max_drawdown="0.11",
+        ),
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN in evaluation.rejection_reasons
+    assert evaluation.validation.risk_acceptable is False
+
+
+def test_rejection_reasons_are_stable_and_unique(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zero = economic_metric(
+        RefinementSegmentName.TRAINING,
+        total_return="0",
+        production_return="0",
+        trade_count=0,
+    )
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=zero,
+        validation=replace(zero, segment=RefinementSegmentName.VALIDATION),
+        test=replace(zero, segment=RefinementSegmentName.TEST),
+    )
+    reasons = result.evaluations[0].rejection_reasons
+    assert reasons == tuple(dict.fromkeys(reasons))
+    assert reasons[0] is EdgeGuidedRejectionReason.INSUFFICIENT_TRADES
 
 
 def test_evaluation_passes_effective_fees_and_slippage_to_real_simulator() -> None:
