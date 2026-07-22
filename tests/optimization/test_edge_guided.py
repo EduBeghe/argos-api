@@ -18,6 +18,7 @@ from app.optimization.edge_guided import (
     EdgeGuidedEvaluationResult,
     EdgeGuidedRejectionReason,
     EdgeGuidedSegmentEvaluation,
+    EdgeGuidedStageEvidence,
     apply_edge_guided_action,
     edge_guided_summary,
     evaluate_edge_guided_candidates,
@@ -168,6 +169,25 @@ def evaluation_evidence(
         dataset,
         HistoricalFeatureMatrix("fingerprint", tuple(rows)),
         tuple(configured_windows),
+    )
+
+
+def evaluate_cached_evidence(
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    reusable: dict[str, EdgeGuidedStageEvidence] | None = None,
+) -> EdgeGuidedEvaluationResult:
+    return evaluate_edge_guided_candidates(
+        dataset=dataset,
+        feature_matrix=matrix,
+        hypotheses=(hypothesis(),),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        maximum_candidates=1,
+        windows=windows,
+        thresholds=EvidenceThresholds(minimum_observations=1, minimum_windows=1),
+        reusable_stage_evidence=reusable,
     )
 
 
@@ -825,24 +845,16 @@ def test_stage_cache_reuses_training_validation_and_test_work(
         return segment_result(segment, Decimal("0.01"))
 
     monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
-    arguments = {
-        "dataset": dataset,
-        "feature_matrix": matrix,
-        "hypotheses": (hypothesis(),),
-        "initial_cash": Decimal("10000"),
-        "simulation": SimulationConfiguration(),
-        "maximum_candidates": 1,
-        "windows": windows,
-        "thresholds": EvidenceThresholds(minimum_observations=1, minimum_windows=1),
-    }
-    first = evaluate_edge_guided_candidates(**arguments)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
     first_calls = dict(calls)
     assert all(value > 0 for value in first_calls.values())
 
     calls.update({stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES})
-    second = evaluate_edge_guided_candidates(
-        **arguments,
-        reusable_stage_evidence={item.cache_key: item for item in first.stage_evidence},
+    second = evaluate_cached_evidence(
+        dataset,
+        matrix,
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
     )
 
     assert calls == {stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES}
@@ -851,7 +863,7 @@ def test_stage_cache_reuses_training_validation_and_test_work(
     assert second.funnel["test_evaluated_count"] == 1
 
     calls.update({stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES})
-    forced = evaluate_edge_guided_candidates(**arguments)
+    forced = evaluate_cached_evidence(dataset, matrix, windows)
     assert forced.funnel["windows_reused"] == 0
     assert forced.funnel["windows_computed"] > 0
     assert calls == first_calls
@@ -886,23 +898,15 @@ def test_rejected_stage_evidence_is_reusable(
         return segment_result(stage, difference)
 
     monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
-    arguments = {
-        "dataset": dataset,
-        "feature_matrix": matrix,
-        "hypotheses": (hypothesis(),),
-        "initial_cash": Decimal("10000"),
-        "simulation": SimulationConfiguration(),
-        "maximum_candidates": 1,
-        "windows": windows,
-        "thresholds": EvidenceThresholds(minimum_observations=1, minimum_windows=1),
-    }
-    first = evaluate_edge_guided_candidates(**arguments)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
     assert {item.stage for item in first.stage_evidence} == expected_stages
 
     calls.clear()
-    second = evaluate_edge_guided_candidates(
-        **arguments,
-        reusable_stage_evidence={item.cache_key: item for item in first.stage_evidence},
+    second = evaluate_cached_evidence(
+        dataset,
+        matrix,
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
     )
     assert calls == []
     assert second.funnel["windows_computed"] == 0
@@ -925,24 +929,16 @@ def test_changed_validation_content_invalidates_only_validation_stage(
         return segment_result(stage, Decimal("0.01"))
 
     monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
-    arguments = {
-        "dataset": dataset,
-        "hypotheses": (hypothesis(),),
-        "initial_cash": Decimal("10000"),
-        "simulation": SimulationConfiguration(),
-        "maximum_candidates": 1,
-        "windows": windows,
-        "thresholds": EvidenceThresholds(minimum_observations=1, minimum_windows=1),
-    }
-    first = evaluate_edge_guided_candidates(feature_matrix=matrix, **arguments)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
     changed_rows = list(matrix.rows)
     changed_rows[11] = replace(changed_rows[11], return_1=Decimal("0.123"))
     calls.clear()
 
-    second = evaluate_edge_guided_candidates(
-        feature_matrix=replace(matrix, rows=tuple(changed_rows)),
-        **arguments,
-        reusable_stage_evidence={item.cache_key: item for item in first.stage_evidence},
+    second = evaluate_cached_evidence(
+        dataset,
+        replace(matrix, rows=tuple(changed_rows)),
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
     )
 
     assert calls
