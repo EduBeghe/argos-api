@@ -68,25 +68,28 @@ The Predictive Edge Map examines versioned predictors across horizons, condition
 
 ### Complete edge-guided Strategies and qualification v3
 
-Generation remains bounded, but a `long_entry` is now an independent long-only entry
-rule rather than only a filter on `baseline_long_only`. Complete candidates freeze an
-entry, a timed/signal/baseline exit, cadence, holding bounds, cooldown, allocation,
-costs, and evidence. `exit_or_avoid` remains a separate defensive overlay.
+Generation remains bounded, but a `long_entry` is now an independent long-only
+entry rule rather than only a filter on `baseline_long_only`. Complete candidates
+freeze entry and timed/signal/baseline exit rules, cadence, holding bounds, cooldown,
+allocation, costs, and source evidence. `exit_or_avoid` remains a separate defensive
+overlay.
 
-Qualification contract v3 assigns:
+Qualification v3 assigns `rejected_validation` before isolated test,
+`rejected_test` only after validation passes, and `confirmed_candidate` only when
+the complete Strategy satisfies the existing strict activity, net-return, production
+outperformance, risk, window, and stability evidence. Test metrics are null when
+validation does not authorize test. Buy and hold remains an independent comparison.
+Earlier evidence remains readable as legacy but is not eligible under v3.
 
-- `rejected_validation` when training, validation, or the minimum valid-window evidence fails;
-- `rejected_test` when training and validation pass but isolated test, confirmed-window count, or test stability fails;
-- `confirmed_candidate` only with sufficient trades, strictly positive net returns in training/validation/test, strict outperformance of production in validation/test, acceptable drawdown, enough windows, and required stability.
-
-Buy and hold remains an independent comparison and is not required to be beaten. Test
-metrics are null when validation does not authorize isolated test. Earlier evidence
-remains readable as legacy but is not eligible under v3. See
-[`014-weekly-strategy-research.md`](014-weekly-strategy-research.md).
+Exact completed runs use a constant-size insert-only candle revision to short-circuit
+before loading historical candles, building the Feature matrix, analyzing edges, or
+simulating candidates. The weekly job processes scoring-enabled catalog instruments
+sequentially under a PostgreSQL advisory lock and never activates candidates or mutates
+Paper Trading. See [weekly Strategy research](014-weekly-strategy-research.md).
 
 Plain-language definitions:
 
-- Validation return is net return after fees and slippage in periods used to validate a candidate after discovery.
+- Validation return is net return after fees and slippage in periods used after discovery.
 - Test return is net return in later isolated periods that did not participate in selection.
 - Confirmed windows count independent time windows that passed validation and then test.
 
