@@ -16,9 +16,9 @@ from app.optimization.walk_forward import WalkForwardConfiguration, WalkForwardW
 from app.paper.config import SimulationConfiguration
 from app.scores.calculator import BaselineScoreInput, calculate_baseline_score
 
-PREDICTIVE_EDGE_ALGORITHM_VERSION = 4
-PREDICTOR_VERSION = 4
-HYPOTHESIS_CONTRACT_VERSION = 3
+PREDICTIVE_EDGE_ALGORITHM_VERSION = 3
+PREDICTOR_VERSION = 3
+HYPOTHESIS_CONTRACT_VERSION = 2
 DEFAULT_HORIZONS = tuple(
     timedelta(minutes=value) for value in (30, 60, 120, 360, 720, 1440, 2880)
 )

@@ -385,16 +385,40 @@ def diagnostic_conclusion(
 ) -> DiagnosticConclusion:
     if confirmed_count:
         return DiagnosticConclusion.CONFIRMED_PREDICTIVE_EDGES_FOUND
-    reasons = {reason for item in diagnostics for reason in item.failed_requirements}
-    if reasons and reasons <= {RejectionReason.MOVEMENT_DOES_NOT_COVER_COSTS}:
+    counts: dict[RejectionReason, int] = {}
+    for item in diagnostics:
+        for reason in item.failed_requirements:
+            counts[reason] = counts.get(reason, 0) + 1
+    if not counts:
+        return DiagnosticConclusion.NO_DETECTABLE_RELATIONSHIP
+    dominant, dominant_count = max(
+        counts.items(), key=lambda item: (item[1], item[0].value)
+    )
+    majority = dominant_count * 2 >= len(diagnostics)
+    statistical = {
+        RejectionReason.CORRELATION_BELOW_THRESHOLD,
+        RejectionReason.HIT_RATE_BELOW_THRESHOLD,
+        RejectionReason.BENCHMARK_IMPROVEMENT_BELOW_THRESHOLD,
+    }
+    economics_only = tuple(
+        item
+        for item in diagnostics
+        if item.failed_requirements
+        and set(item.failed_requirements)
+        <= {RejectionReason.MOVEMENT_DOES_NOT_COVER_COSTS}
+    )
+    if economics_only and len(economics_only) * 2 >= len(diagnostics):
         return DiagnosticConclusion.SIGNAL_FOUND_BUT_NOT_ECONOMIC
-    if RejectionReason.UNSTABLE_DIRECTION in reasons:
+    if majority and dominant in {
+        RejectionReason.UNSTABLE_DIRECTION,
+        RejectionReason.INCONSISTENT_SIGN,
+    }:
         return DiagnosticConclusion.ECONOMIC_SIGNAL_BUT_UNSTABLE
-    if RejectionReason.HIT_RATE_BELOW_THRESHOLD in reasons:
+    if majority and dominant in statistical:
         return DiagnosticConclusion.STABLE_SIGNAL_BELOW_HIT_RATE
-    if RejectionReason.INSUFFICIENT_OBSERVATIONS in reasons:
+    if majority and dominant is RejectionReason.INSUFFICIENT_OBSERVATIONS:
         return DiagnosticConclusion.INSUFFICIENT_OBSERVATIONS_AFTER_CONDITIONING
-    if diagnostics and all(len(item.failed_requirements) == 1 for item in diagnostics):
+    if all(len(item.failed_requirements) == 1 for item in diagnostics):
         return DiagnosticConclusion.THRESHOLDS_PROBABLY_OVERRESTRICTIVE
     return DiagnosticConclusion.NO_DETECTABLE_RELATIONSHIP
 

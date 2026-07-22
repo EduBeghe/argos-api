@@ -536,10 +536,16 @@ class PredictiveEdgeV4CacheRecord(Base):
     __tablename__ = "predictive_edge_v4_cache"
     __table_args__ = (
         UniqueConstraint("cache_key", name="uq_predictive_edge_v4_cache_key"),
+        CheckConstraint(
+            "status IN ('completed', 'running', 'failed')",
+            name="ck_predictive_edge_v4_cache_status",
+        ),
         Index("ix_predictive_edge_v4_cache_kind", "evidence_kind"),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
     cache_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    cache_namespace: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
     evidence_kind: Mapped[str] = mapped_column(String(40), nullable=False)
     contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
     dataset_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)

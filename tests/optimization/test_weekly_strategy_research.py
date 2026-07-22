@@ -97,7 +97,7 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     monkeypatch.setattr(
         research_module, "build_historical_feature_matrix", matrix_builder
     )
-    monkeypatch.setattr(research_module, "analyze_predictive_edges", edge_analyzer)
+    monkeypatch.setattr(research_module, "analyze_predictive_edges_v4", edge_analyzer)
     monkeypatch.setattr(
         research_module, "evaluate_edge_guided_candidates", candidate_evaluator
     )

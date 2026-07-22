@@ -143,7 +143,7 @@ async def test_predictive_edge_round_trip_preserves_selection_semantics(
     detail = await get_predictive_edge_run(session, execution.run_id)
     edges = await list_predictive_edges(session, run_id=execution.run_id, limit=200)
 
-    assert detail.run.algorithm_version == 4
+    assert detail.run.algorithm_version == 3
     assert detail.run.windows_available == 1
     assert edges.items
     assert all(item.semantic_kind.value for item in edges.items)

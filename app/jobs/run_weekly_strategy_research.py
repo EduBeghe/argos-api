@@ -135,6 +135,7 @@ async def run(
                                     "funnel": item.execution.result.funnel,
                                     "work": asdict(item.work),
                                     "timings": item.timings,
+                                    "predictive_edge_diagnostics": item.diagnostics,
                                 }
                             )
                     except Exception as error:

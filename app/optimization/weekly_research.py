@@ -1,6 +1,6 @@
 import hashlib
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import perf_counter
@@ -31,24 +31,19 @@ from app.optimization.historical_data import (
     read_historical_dataset,
     read_historical_dataset_revision,
 )
+from app.optimization.predictive_edge_engine_v4 import analyze_predictive_edges_v4
 from app.optimization.predictive_edge_service import (
     find_reusable_predictive_edge_run,
-    persist_predictive_edge_result,
-    predictive_edge_experiment_key,
+    load_predictive_edge_v4_cache,
+    persist_predictive_edge_v4_result,
+    predictive_edge_v4_experiment_key,
 )
 from app.optimization.predictive_edge_v4 import (
-    CHEAP_RELATIONSHIP_LIMIT,
-    ISOLATED_TEST_CONFIGURATION_LIMIT,
-    NEAR_MISS_LIMIT,
-    VALIDATION_CONFIGURATION_LIMIT,
+    PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
 )
 from app.optimization.predictive_edges import (
-    PREDICTIVE_EDGE_ALGORITHM_VERSION,
     PREDICTOR_VERSION,
-    PREDICTORS,
-    EvidenceStatus,
     PredictiveEdgeConfiguration,
-    analyze_predictive_edges,
     build_predictive_windows,
 )
 from app.paper.config import SimulationConfiguration
@@ -77,6 +72,7 @@ class WeeklyInstrumentResearch:
     execution: EdgeGuidedExecution
     work: WeeklyResearchWork
     timings: dict[str, Decimal]
+    diagnostics: dict[str, object] = field(default_factory=dict)
 
 
 def weekly_boundary(now: datetime) -> datetime:
@@ -104,7 +100,7 @@ def weekly_research_reuse_key(
     payload = {
         "weekly_research_contract_version": WEEKLY_RESEARCH_CONTRACT_VERSION,
         "predictor_version": PREDICTOR_VERSION,
-        "edge_algorithm_version": PREDICTIVE_EDGE_ALGORITHM_VERSION,
+        "edge_algorithm_version": PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
         "strategy_contract_version": EDGE_GUIDED_STRATEGY_CONTRACT_VERSION,
         "ranking_contract_version": EDGE_GUIDED_RANKING_CONTRACT_VERSION,
         "qualification_contract_version": EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
@@ -206,29 +202,37 @@ async def execute_weekly_instrument_research(
     windows = build_predictive_windows(
         dataset=dataset, matrix=matrix, configuration=configuration
     )
-    edge_key = predictive_edge_experiment_key(
+    edge_key = predictive_edge_v4_experiment_key(
         dataset_fingerprint=dataset.fingerprint,
         instrument=identity.instrument,
         range_start=identity.range.start,
         range_end=identity.range.end,
-        configuration=configuration,
         fee_rate=simulation.fee_rate,
         slippage_rate=simulation.slippage_rate,
     )
     edge_started = perf_counter()
     edge_execution = (
-        await find_reusable_predictive_edge_run(session, edge_key) if persist else None
+        await find_reusable_predictive_edge_run(session, edge_key)
+        if persist and not force_recompute
+        else None
     )
-    edge_result = edge_execution.result if edge_execution is not None else None
-    if edge_result is None:
-        edge_result = analyze_predictive_edges(
-            matrix=matrix,
-            windows=windows,
-            simulation=simulation,
-            configuration=configuration,
-        )
+    stage_cache = (
+        await load_predictive_edge_v4_cache(session, cache_namespace=edge_key)
+        if persist and not force_recompute
+        else {}
+    )
+    edge_result = analyze_predictive_edges_v4(
+        matrix=matrix,
+        windows=windows,
+        simulation=simulation,
+        cache_namespace=edge_key,
+        stage_cache=stage_cache,
+        force_recompute=force_recompute,
+    )
+    if persist and force_recompute:
+        edge_execution = await find_reusable_predictive_edge_run(session, edge_key)
     if persist and (edge_execution is None or edge_execution.run_id is None):
-        edge_execution = await persist_predictive_edge_result(
+        edge_execution = await persist_predictive_edge_v4_result(
             session=session,
             experiment_key=edge_key,
             instrument=identity.instrument,
@@ -271,49 +275,27 @@ async def execute_weekly_instrument_research(
         reusable_stage_evidence=reusable_stages,
     )
     candidate_elapsed = perf_counter() - candidate_started
-    classifications = edge_result.stability_edges
     result = replace(
         result,
         funnel={
-            "predictors_evaluated": len(PREDICTORS),
-            "redundancy_groups": len({item.source for item in PREDICTORS}),
-            "edges_evaluated": len(edge_result.window_edges),
-            "cheap_relationships_evaluated": min(
-                len(edge_result.window_edges), CHEAP_RELATIONSHIP_LIMIT
+            "cheap_relationships_generated": edge_result.training_counters.generated,
+            "cheap_relationships_computed": edge_result.training_counters.computed,
+            "cheap_relationships_reused": edge_result.training_counters.reused,
+            "cheap_relationships_retained": edge_result.training_counters.retained,
+            "validation_configurations_computed": (
+                edge_result.validation_counters.computed
             ),
-            "training_configurations_evaluated": min(
-                len(edge_result.window_edges), CHEAP_RELATIONSHIP_LIMIT
+            "validation_configurations_reused": (
+                edge_result.validation_counters.reused
             ),
-            "validation_configurations_evaluated": min(
-                len(edge_result.stability_edges), VALIDATION_CONFIGURATION_LIMIT
+            "validation_configurations_retained": (
+                edge_result.validation_counters.retained
             ),
-            "test_configurations_evaluated": min(
-                sum(item.windows_selected_for_test > 0 for item in classifications),
-                ISOLATED_TEST_CONFIGURATION_LIMIT,
-            ),
-            "promising_edges": sum(
-                item.classification
-                in (
-                    EvidenceStatus.PROMISING_POSITIVE,
-                    EvidenceStatus.PROMISING_NEGATIVE,
-                )
-                for item in classifications
-            ),
-            "diagnostic_only_edges": sum(
-                item.suggested_action.value == "diagnostic_only"
-                for item in classifications
-            ),
-            "near_misses": min(
-                sum(
-                    item.classification
-                    not in (
-                        EvidenceStatus.PROMISING_POSITIVE,
-                        EvidenceStatus.PROMISING_NEGATIVE,
-                    )
-                    for item in classifications
-                ),
-                NEAR_MISS_LIMIT,
-            ),
+            "test_configurations_computed": edge_result.test_counters.computed,
+            "test_configurations_reused": edge_result.test_counters.reused,
+            "confirmed_edges": len(edge_result.confirmed_edges),
+            "diagnostic_only_edges": len(edge_result.diagnostic_only_edges),
+            "near_misses": len(edge_result.near_misses),
             **result.funnel,
         },
         timings={
@@ -391,5 +373,12 @@ async def execute_weekly_instrument_research(
             "candidate_evaluation": Decimal(str(candidate_elapsed)),
             "persistence": Decimal(str(persistence_elapsed)),
             "total": Decimal(str(total_elapsed)),
+        },
+        {
+            "rejection_counts": edge_result.rejection_counts,
+            "bottleneck_stage": edge_result.bottleneck_stage,
+            "strongest_observed_signal": edge_result.strongest_observed_signal,
+            "diagnostic_conclusion": edge_result.conclusion.value,
+            "outcome_explanation": edge_result.outcome_explanation,
         },
     )
