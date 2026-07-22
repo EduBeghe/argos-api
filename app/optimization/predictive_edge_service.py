@@ -339,7 +339,62 @@ async def persist_predictive_edge_result(
                     ),
                     selected_for_test=selection.selected_for_test,
                     test_observation_count=selection.test_observation_count,
-                    test_confirmation_status=(selection.test_confirmation_status.value),Ûüm¢Gß≤⁄Óù∆≠yŸ
+                    test_confirmation_status=(selection.test_confirmation_status.value),
+                    test_gross_return=selection.test_gross_return,
+                    test_long_aligned_net_return=(
+                        selection.test_long_aligned_net_return
+                    ),
+                    test_avoided_downside=selection.test_avoided_downside,
+                    test_directional_hit_rate=selection.test_directional_hit_rate,
+                    rejection_reason=selection.rejection_reason,
+                )
+            )
+    for value in result.hypotheses:
+        hypothesis_id = hashlib.sha256(
+            "|".join(
+                (
+                    instrument.asset.value,
+                    instrument.provider.value,
+                    instrument.market_type.value,
+                    instrument.interval.value,
+                    value.hypothesis_id,
+                )
+            ).encode()
+        ).hexdigest()
+        session.add(
+            StrategyHypothesisRecord(
+                id=uuid4(),
+                hypothesis_id=hypothesis_id,
+                run_id=run_id,
+                predictor_name=value.predictor_name,
+                predictor_version=value.predictor_version,
+                hypothesis_contract_version=value.hypothesis_contract_version,
+                direction_mapping=value.direction_mapping.value,
+                bin_ordinal=value.bin_ordinal,
+                lower_bound=value.lower_bound,
+                upper_bound=value.upper_bound,
+                suggested_action=value.suggested_action.value,
+                horizon_seconds=int(value.horizon.total_seconds()),
+                condition=value.condition.value,
+                supporting_bin_ordinals=list(value.supporting_bin_ordinals),
+                expected_gross_return=value.expected_gross_return,
+                expected_net_return=value.expected_net_return,
+                expected_avoided_loss=value.expected_avoided_loss,
+                directional_hit_rate=value.directional_hit_rate,
+                stability_ratio=value.stability_ratio,
+                evaluation_interval_seconds=int(
+                    value.minimum_evaluation_interval.total_seconds()
+                ),
+                holding_period_from_seconds=int(
+                    value.minimum_holding_period_from.total_seconds()
+                ),
+                holding_period_to_seconds=int(
+                    value.minimum_holding_period_to.total_seconds()
+                ),
+                evidence_status=value.evidence_status.value,
+                rationale=value.rationale,
+                limitations=value.limitations,
+            )
         )
     for benchmark in result.benchmarks:
         session.add(

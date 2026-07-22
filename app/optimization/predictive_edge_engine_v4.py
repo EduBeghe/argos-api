@@ -434,4 +434,931 @@ def _cheap_training_relationships(
                     continue
                 correlations: list[Decimal] = []
                 observations = 0
-                for window in wiën=¶‰žËkºwµç@¡¥ÑÌ€ôÑÕÁ±” (€€€€€€€¥Ñ•´¹‘¥É•Ñ¥½¹…±}¡¥Ñ}É…Ñ”(€€€€€€€™½È¥Ñ•´¥¸Ý¥¹‘½Ý}µ•ÑÉ¥Ì(€€€€€€€¥˜¥Ñ•´¹‘¥É•Ñ¥½¹…±}¡¥Ñ}É…Ñ”¥Ì¹½Ð9½¹”(€€€€¤(€€€‰•¹¡µ…É­Ì€ôÑÕÁ±” (€€€€€€€¥Ñ•´¹‘¥É•Ñ¥½¹}‰•¹¡µ…É­Ì¹ÍÑÉ½¹•ÍÐ(€€€€€€€™½È¥Ñ•´¥¸Ý¥¹‘½Ý}µ•ÑÉ¥Ì(€€€€€€€¥˜¥Ñ•´¹‘¥É•Ñ¥½¹}‰•¹¡µ…É­Ì¥Ì¹½Ð9½¹”(€€€€¤(€€€ÕÍ…‰±”€ôÍÕ´¡¥Ñ•´¹ÕÍ…‰±•}½Õ¹Ð™½È¥Ñ•´¥¸Ý¥¹‘½Ý}µ•ÑÉ¥Ì¤(€€€½ÉÉ•±…Ñ¥½¸€ô€ (€€€€€€€ÍÕ´ ¡…‰Ì¡¥Ñ•´¤™½È¥Ñ•´¥¸½ÉÉ•±…Ñ¥½¹Ì¤°•¥µ…° À¤¤(€€€€€€€€¼•¥µ…°¡±•¸¡½ÉÉ•±…Ñ¥½¹Ì¤¤(€€€€€€€¥˜½ÉÉ•±…Ñ¥½¹Ì(€€€€€€€•±Í”•¥µ…° À¤(€€€€¤(€€€¡¥Ð€ôÍÕ´¡¡¥ÑÌ°•¥µ…° À¤¤€¼•¥µ…°¡±•¸¡¡¥ÑÌ¤¤¥˜¡¥ÑÌ•±Í”•¥µ…° À¤(€€€‰•¹¡µ…É¬€ôµ…à¡‰•¹¡µ…É­Ì¤¥˜‰•¹¡µ…É­Ì•±Í”•¥µ…° À¤(€€€¥µÁÉ½Ù•µ•¹Ð€ô¡¥Ð€´‰•¹¡µ…É¬(€€€É½ÍÌ€ô€ (€€€€€€€ÍÕ´ ¡¥Ñ•´¹™½ÉÝ…É‘}É½ÍÍ}É•ÑÕÉ¸™½È¥Ñ•´¥¸Ù…±Õ•Ì¤°•¥µ…° À¤¤(€€€€€€€€¼•¥µ…°¡±•¸¡Ù…±Õ•Ì¤¤(€€€€€€€¥˜Ù…±Õ•Ì(€€€€€€€•±Í”•¥µ…° À¤(€€€€¤(€€€¹•Ð€ô…‰Ì¡É½ÍÌ¤€´•¥µ…° È¤€¨€¡Í¥µÕ±…Ñ¥½¸¹™••}É…Ñ”€¬Í¥µÕ±…Ñ¥½¸¹Í±¥ÁÁ…•}É…Ñ”¤(€€€ÍÑ…¹‘…É‘}•ÉÉ½ÉÌ€ôÑÕÁ±” (€€€€€€€¥Ñ•´¹ÍÑ…¹‘…É‘}•ÉÉ½È(€€€€€€€™½È¥Ñ•´¥¸Ý¥¹‘½Ý}µ•ÑÉ¥Ì(€€€€€€€¥˜¥Ñ•´¹ÍÑ…¹‘…É‘}•ÉÉ½È¥Ì¹½Ð9½¹”(€€€€¤(€€€ÍÑ…¹‘…É‘}•ÉÉ½È€ô€ (€€€€€€€ÍÕ´¡ÍÑ…¹‘…É‘}•ÉÉ½ÉÌ°•¥µ…° À¤¤€¼•¥µ…°¡±•¸¡ÍÑ…¹‘…É‘}•ÉÉ½ÉÌ¤¤(€€€€€€€¥˜ÍÑ…¹‘…É‘}•ÉÉ½ÉÌ(€€€€€€€•±Í”9½¹”(€€€€¤(€€€Í¥¹Ì€ôÑÕÁ±” Ä¥˜¥Ñ•´€ø€À•±Í”€´Ä¥˜¥Ñ•´€ð€À•±Í”€À™½È¥Ñ•´¥¸½ÉÉ•±…Ñ¥½¹Ì¤(€€€‘½µ¥¹…¹Ð€ôµ…à¡Í¥¹Ì¹½Õ¹Ð Ä¤°Í¥¹Ì¹½Õ¹Ð ´Ä¤¤¥˜Í¥¹Ì•±Í”€À(€€€ÍÑ…‰¥±¥Ñä€ô•¥µ…°¡‘½µ¥¹…¹Ð¤€¼•¥µ…°¡±•¸¡Í¥¹Ì¤¤¥˜Í¥¹Ì•±Í”•¥µ…° À¤(€€€‘¥ÍÁ•ÉÍ¥½¸€ô€ (€€€€€€€µ…à¡½ÉÉ•±…Ñ¥½¹Ì¤€´µ¥¸¡½ÉÉ•±…Ñ¥½¹Ì¤¥˜±•¸¡½ÉÉ•±…Ñ¥½¹Ì¤€ø€Ä•±Í”•¥µ…° À¤(€€€€¤(€€€Ñ¡É•Í¡½±‘Ì€ô½¹™¥ÕÉ…Ñ¥½¸¹Ñ¡É•Í¡½±‘Ì(€€€µ…É¥¹Ì€ô€ (€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹%9MU%%9Q}=	MIYQ%=9L°(€€€€€€€€€€€•¥µ…°¡ÕÍ…‰±”¤°(€€€€€€€€€€€•¥µ…°¡Ñ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}½‰Í•ÉÙ…Ñ¥½¹Ì¤°(€€€€€€€€¤°(€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹%9MU%%9Q}]%9=]L°(€€€€€€€€€€€•¥µ…°¡±•¸¡Ý¥¹‘½Ý}µ•ÑÉ¥Ì¤¤°(€€€€€€€€€€€•¥µ…°¡Ñ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}Ý¥¹‘½ÝÌ¤°(€€€€€€€€¤°(€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹U9MQ	1}%IQ%=8°(€€€€€€€€€€€ÍÑ…‰¥±¥Ñä°(€€€€€€€€€€€Ñ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}ÍÑ…‰±•}‘¥É•Ñ¥½¹}É…Ñ¥¼°(€€€€€€€€¤°(€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹=II1Q%=9}	1=]}Q!IM!=1°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¸°(€€€€€€€€€€€Ñ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}…‰Í½±ÕÑ•}½ÉÉ•±…Ñ¥½¸°(€€€€€€€€¤°(€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹!%Q}IQ}	1=]}Q!IM!=1°(€€€€€€€€€€€¡¥Ð°(€€€€€€€€€€€Ñ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}‘¥É•Ñ¥½¹…±}¡¥Ñ}É…Ñ”°(€€€€€€€€¤°(€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹	9!5I-}%5AI=Y59Q}	1=]}Q!IM!=1°(€€€€€€€€€€€¥µÁÉ½Ù•µ•¹Ð°(€€€€€€€€€€€Ñ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}¡¥Ñ}É…Ñ•}¥µÁÉ½Ù•µ•¹Ñ}½Ù•É}‰•¹¡µ…É¬°(€€€€€€€€¤°(€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹5=Y59Q}=M}9=Q}=YI}=MQL°¹•Ð°=9=5%}}5I%8(€€€€€€€€¤°(€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹aMM%Y}%MAIM%=8°(€€€€€€€€€€€•¥µ…° ˆÀ¸ÔÀˆ¤€´‘¥ÍÁ•ÉÍ¥½¸°(€€€€€€€€€€€•¥µ…° À¤°(€€€€€€€€¤°(€€€€€€€É•ÅÕ¥É•µ•¹Ñ}µ…É¥¸ (€€€€€€€€€€€I•©•Ñ¥½¹I•…Í½¸¹%9=9M%MQ9Q}M%8°(€€€€€€€€€€€ÍÑ…‰¥±¥Ñä°(€€€€€€€€€€€Ñ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}ÍÑ…‰±•}‘¥É•Ñ¥½¹}É…Ñ¥¼°(€€€€€€€€¤°(€€€€¤(€€€™…¥±•€ôÑÕÁ±”¡¥Ñ•´¹É•ÅÕ¥É•µ•¹Ð™½È¥Ñ•´¥¸µ…É¥¹Ì¥˜¹½Ð¥Ñ•´¹Á…ÍÍ•¤(€€€Á…ÍÍ•€ôÑÕÁ±”¡¥Ñ•´¹É•ÅÕ¥É•µ•¹Ð™½È¥Ñ•´¥¸µ…É¥¹Ì¥˜¥Ñ•´¹Á…ÍÍ•¤(€€€É•ÑÕÉ¸‘•¥…¹½ÍÑ¥Œ (€€€€€€€½¹™¥ÕÉ…Ñ¥½¸¹™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€€‰ÁÉ½µ¥Í¥¹œˆ¥˜¹½Ð™…¥±••±Í”€‰¹•…É}µ¥ÍÌˆ°(€€€€€€€™…¥±•°(€€€€€€€Á…ÍÍ•°(€€€€€€€™…¥±•‘lÁt¥˜™…¥±••±Í”9½¹”°(€€€€€€€µ…É¥¹Ì°(€€€€€€€ÕÍ…‰±”°(€€€€€€€±•¸¡Ý¥¹‘½Ý}µ•ÑÉ¥Ì¤°(€€€€€€€‘½µ¥¹…¹Ð°(€€€€€€€ÍÑ…‰¥±¥Ñä°(€€€€€€€½ÉÉ•±…Ñ¥½¸¥˜½ÉÉ•±…Ñ¥½¹Ì•±Í”9½¹”°(€€€€€€€µ•‘¥…¸¡½ÉÉ•±…Ñ¥½¹Ì¤¥˜½ÉÉ•±…Ñ¥½¹Ì•±Í”9½¹”°(€€€€€€€µ¥¸¡½ÉÉ•±…Ñ¥½¹Ì¤¥˜½ÉÉ•±…Ñ¥½¹Ì•±Í”9½¹”°(€€€€€€€¡¥Ð¥˜¡¥ÑÌ•±Í”9½¹”°(€€€€€€€‰•¹¡µ…É¬¥˜‰•¹¡µ…É­Ì•±Í”9½¹”°(€€€€€€€¥µÁÉ½Ù•µ•¹Ð¥˜‰•¹¡µ…É­Ì…¹¡¥ÑÌ•±Í”9½¹”°(€€€€€€€É½ÍÌ¥˜Ù…±Õ•Ì•±Í”9½¹”°(€€€€€€€¹•Ð¥˜Ù…±Õ•Ì•±Í”9½¹”°(€€€€€€€ÍÑ…¹‘…É‘}•ÉÉ½È°(€€€€€€€‘¥ÍÁ•ÉÍ¥½¸¥˜½ÉÉ•±…Ñ¥½¹Ì•±Í”9½¹”°(€€€€¤(()‘•˜}•™™•Ñ¥Ù•}Á…É…µ•Ñ•ÉÌ (€€€Ù…±¥‘…Ñ¥½¸èÑÕÁ±•mY…±¥‘…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¹I•ÍÕ±Ð°€¸¸¹t°(€€€Í¥µÕ±…Ñ¥½¸èM¥µÕ±…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¸°(¤€´øÑÕÁ±•mÕ‘¥Ñ•‘A…É…µ•Ñ•È°€¸¸¹tè(€€€Ù…±Õ•Ìè±¥ÍÑmÕ‘¥Ñ•‘A…É…µ•Ñ•Ét€ôl(€€€€€€€Õ‘¥Ñ•‘A…É…µ•Ñ•È (€€€€€€€€€€€€‰™••}É…Ñ”ˆ°(€€€€€€€€€€€ÍÑÈ¡Í¥µÕ±…Ñ¥½¸¹™••}É…Ñ”¤°(€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€‰Í¥µÕ±…Ñ¥½¸½ÍÐ…ÍÍÕµÁÑ¥½¸ˆ°(€€€€€€€€¤°(€€€€€€€Õ‘¥Ñ•‘A…É…µ•Ñ•È (€€€€€€€€€€€€‰Í±¥ÁÁ…•}É…Ñ”ˆ°(€€€€€€€€€€€ÍÑÈ¡Í¥µÕ±…Ñ¥½¸¹Í±¥ÁÁ…•}É…Ñ”¤°(€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€‰Í¥µÕ±…Ñ¥½¸½ÍÐ…ÍÍÕµÁÑ¥½¸ˆ°(€€€€€€€€¤°(€€€€€€€Õ‘¥Ñ•‘A…É…µ•Ñ•È (€€€€€€€€€€€€‰¡•…Á}É•±…Ñ¥½¹Í¡¥Á}±¥µ¥Ðˆ°(€€€€€€€€€€€ÍÑÈ¡!A}I1Q%=9M!%A}1%5%P¤°(€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€‰‰½Õ¹‘•ÑÉ…¥¹¥¹œ™Õ¹¹•°ˆ°(€€€€€€€€¤°(€€€€€€€Õ‘¥Ñ•‘A…É…µ•Ñ•È (€€€€€€€€€€€€‰Ù…±¥‘…Ñ¥½¹}½¹™¥ÕÉ…Ñ¥½¹}±¥µ¥Ðˆ°(€€€€€€€€€€€ÍÑÈ¡Y1%Q%=9}=9%UIQ%=9}1%5%P¤°(€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€‰‰½Õ¹‘•Ù…±¥‘…Ñ¥½¸™Õ¹¹•°ˆ°(€€€€€€€€¤°(€€€€€€€Õ‘¥Ñ•‘A…É…µ•Ñ•È (€€€€€€€€€€€€‰¥Í½±…Ñ•‘}Ñ•ÍÑ}½¹™¥ÕÉ…Ñ¥½¹}±¥µ¥Ðˆ°(€€€€€€€€€€€ÍÑÈ¡%M=1Q}QMQ}=9%UIQ%=9}1%5%P¤°(€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€‰¥Í½±…Ñ•Ñ•ÍÐ‰Õ‘•Ðˆ°(€€€€€€€€¤°(€€€t(€€€™½ÈÉ•ÍÕ±Ð¥¸Ù…±¥‘…Ñ¥½¸è(€€€€€€€½¹™¥ÕÉ…Ñ¥½¸€ôÉ•ÍÕ±Ð¹½¹™¥ÕÉ…Ñ¥½¸(€€€€€€€ÁÉ•™¥à€ô½¹™¥ÕÉ…Ñ¥½¸¹™¥¹•ÉÁÉ¥¹Ð(€€€€€€€™½È¹…µ”°Ù…±Õ”°Í½ÕÉ”°É…Ñ¥½¹…±”¥¸€ (€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€‰…‘•¹”ˆ°(€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¸¹…‘•¹”°(€€€€€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹QI%9%9}1%	IQ°(€€€€€€€€€€€€€€€€‰Í•±•Ñ•‰äÑÉ…¥¹¥¹œµ½¹±äÍÉ••¹¥¹œ…¹™É½é•¸‰•™½É”Ù…±¥‘…Ñ¥½¸ˆ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€‰¡½É¥é½¸ˆ°(€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¸¹¡½É¥é½¸°(€€€€€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹QI%9%9}1%	IQ°(€€€€€€€€€€€€€€€€‰Í•±•Ñ•‰äÑÉ…¥¹¥¹œµ½¹±äÍÉ••¹¥¹œ…¹™É½é•¸‰•™½É”Ù…±¥‘…Ñ¥½¸ˆ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€‰‰¥¹Ìˆ°(€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¸¹‰¥¹Ì°(€€€€€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€€€€€‰Ù•ÉÍ¥½¹•‰½Õ¹‘••áÁ…¹Í¥½¸ˆ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€‰½¹‘¥Ñ¥½¸ˆ°(€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¸¹½¹‘¥Ñ¥½¸¹Ù…±Õ”°(€€€€€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€€€€€‰•á¥ÍÑ¥¹œ½¹‘¥Ñ¥½¸½¹ÑÉ…Ðˆ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€‰¹•ÕÑÉ…±}Á½±¥äˆ°(€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¸¹¹•ÕÑÉ…±}Á½±¥ä¹Ù…±Õ”°(€€€€€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€€€€€‰Ù•ÉÍ¥½¹•¹•ÕÑÉ…°Á½±¥äˆ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€‰¹•ÕÑÉ…±}Ñ¡É•Í¡½±ˆ°(€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¸¹¹•ÕÑÉ…±}Ñ¡É•Í¡½±°(€€€€€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹QI%9%9}1%	IQ(€€€€€€€€€€€€€€€¥˜½¹™¥ÕÉ…Ñ¥½¸¹¹•ÕÑÉ…±}Á½±¥ä¥Ì9•ÕÑÉ…±	…¹‘A½±¥ä¹QI%9%9}9=%M(€€€€€€€€€€€€€€€•±Í”A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€€€€€‰™É½é•¸‰•™½É”Ù…±¥‘…Ñ¥½¸ˆ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€‰ÁÉ½™¥±”ˆ°(€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¸¹ÁÉ½™¥±”¹Ù…±Õ”°(€€€€€€€€€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”¹%a}U1P°(€€€€€€€€€€€€€€€€‰Ù•ÉÍ¥½¹•É•Í•…É ÁÉ½™¥±”ˆ°(€€€€€€€€€€€€¤°(€€€€€€€€¤è(€€€€€€€€€€€Ù…±Õ•Ì¹…ÁÁ•¹ (€€€€€€€€€€€€€€€Õ‘¥Ñ•‘A…É…µ•Ñ•È¡˜‰íÁÉ•™¥áôéí¹…µ•ôˆ°ÍÑÈ¡Ù…±Õ”¤°Í½ÕÉ”°É…Ñ¥½¹…±”¤(€€€€€€€€€€€€¤(€€€€€€€™½È…±¥‰É…Ñ¥½¸¥¸½¹™¥ÕÉ…Ñ¥½¸¹Ñ¡É•Í¡½±‘}…±¥‰É…Ñ¥½¹Ìè(€€€€€€€€€€€Ù…±Õ•Ì¹…ÁÁ•¹ (€€€€€€€€€€€€€€€Õ‘¥Ñ•‘A…É…µ•Ñ•È (€€€€€€€€€€€€€€€€€€€˜‰íÁÉ•™¥áôéí…±¥‰É…Ñ¥½¸¹¹…µ•ôˆ°(€€€€€€€€€€€€€€€€€€€ÍÑÈ¡…±¥‰É…Ñ¥½¸¹™¥¹…±}Ù…±Õ”¤°(€€€€€€€€€€€€€€€€€€€…±¥‰É…Ñ¥½¸¹Í½ÕÉ”°(€€€€€€€€€€€€€€€€€€€…±¥‰É…Ñ¥½¸¹µ•Ñ¡½°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤(€€€É•ÑÕÉ¸ÑÕÁ±”¡Ù…±Õ•Ì¤(()‘•˜}¡åÁ½Ñ¡•Í¥Ì¡Ù…±Õ”èY…±¥‘…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¹I•ÍÕ±Ð¤€´øMÑÉ…Ñ•å!åÁ½Ñ¡•Í¥Ìè(€€€½¹™¥œ€ôÙ…±Õ”¹½¹™¥ÕÉ…Ñ¥½¸(€€€¥‘•¹Ñ¥™¥•È€ô}™¥¹•ÉÁÉ¥¹Ð (€€€€€€€½¹™¥œ¹™¥¹•ÉÁÉ¥¹Ð°€‰¡åÁ½Ñ¡•Í¥Ìˆ°!eA=Q!M%M}=9QIQ}YIM%=8(€€€€¤(€€€É•ÑÕÉ¸MÑÉ…Ñ•å!åÁ½Ñ¡•Í¥Ì (€€€€€€€¥‘•¹Ñ¥™¥•È°(€€€€€€€½¹™¥œ¹ÁÉ•‘¥Ñ½È¹¹…µ”°(€€€€€€€½¹™¥œ¹ÁÉ•‘¥Ñ½È¹Ù•ÉÍ¥½¸°(€€€€€€€!eA=Q!M%M}=9QIQ}YIM%=8°(€€€€€€€½¹™¥œ¹‘¥É•Ñ¥½¹}µ…ÁÁ¥¹œ°(€€€€€€€½¹™¥œ¹Í•±•Ñ•‘}‰¥¹}½É‘¥¹…°°(€€€€€€€½¹™¥œ¹±½Ý•É}‰½Õ¹°(€€€€€€€½¹™¥œ¹ÕÁÁ•É}‰½Õ¹°(€€€€€€€½¹™¥œ¹ÍÕ•ÍÑ•‘}…Ñ¥½¸°(€€€€€€€½¹™¥œ¹¡½É¥é½¸°(€€€€€€€½¹™¥œ¹½¹‘¥Ñ¥½¸°(€€€€€€€€¡½¹™¥œ¹Í•±•Ñ•‘}‰¥¹}½É‘¥¹…°°¤°(€€€€€€€Ù…±Õ”¹É½ÍÍ}•áÁ•Ñ•‘}µ½Ù•µ•¹Ð°(€€€€€€€Ù…±Õ”¹¹•Ñ}•áÁ•Ñ•‘}µ½Ù•µ•¹Ð(€€€€€€€¥˜½¹™¥œ¹ÍÕ•ÍÑ•‘}…Ñ¥½¸¥ÌMÕ•ÍÑ•‘Ñ¥½¸¹1=9}9QId(€€€€€€€•±Í”9½¹”°(€€€€€€€…‰Ì¡Ù…±Õ”¹¹•Ñ}•áÁ•Ñ•‘}µ½Ù•µ•¹Ð½È•¥µ…° À¤¤(€€€€€€€¥˜½¹™¥œ¹ÍÕ•ÍÑ•‘}…Ñ¥½¸¥ÌMÕ•ÍÑ•‘Ñ¥½¸¹a%Q}=I}Y=%(€€€€€€€•±Í”9½¹”°(€€€€€€€Ù…±Õ”¹‘¥…¹½ÍÑ¥Œ¹‘¥É•Ñ¥½¹…±}¡¥Ñ}É…Ñ”°(€€€€€€€Ù…±Õ”¹‘¥…¹½ÍÑ¥Œ¹ÍÑ…‰±•}‘¥É•Ñ¥½¹}É…Ñ¥¼°(€€€€€€€½¹™¥œ¹…‘•¹”°(€€€€€€€½¹™¥œ¹¡½É¥é½¸°(€€€€€€€½¹™¥œ¹¡½É¥é½¸°(€€€€€€€ÑÕÁ±”¡É…¹”¡Ù…±Õ”¹‘¥…¹½ÍÑ¥Œ¹Ý¥¹‘½ÝÍ}•Ù…±Õ…Ñ•¤¤°(€€€€€€€Ù¥‘•¹•MÑ…ÑÕÌ¹AI=5%M%9}A=M%Q%Y°(€€€€€€€€‰ØÐÙ…±¥‘…Ñ¥½¸•Ù¥‘•¹”Ý…Ì™É½é•¸‰•™½É”¥Í½±…Ñ•Ñ•ÍÐ…¹½¹™¥Éµ•€ˆ(€€€€€€€€‰Ý¥Ñ¡½ÕÐÁ…É…µ•Ñ•È¡…¹•Ìˆ°(€€€€€€€€‰¡¥ÍÑ½É¥…°•Ù¥‘•¹”‘½•Ì¹½ÐÕ…É…¹Ñ•”™ÕÑÕÉ”É•ÍÕ±ÑÌì¹¼Í¡½ÉÐÍ•±±¥¹œ€ˆ(€€€€€€€€‰½È…ÕÑ½µ…Ñ¥Œ…Ñ¥Ù…Ñ¥½¸ˆ°(€€€€¤(()‘•˜}Ù…±¥‘…Ñ¥½¹}É…¹¬¡Ù…±Õ”èY…±¥‘…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¹I•ÍÕ±Ð¤€´øÑÕÁ±•m½‰©•Ð°€¸¸¹tè(€€€É•ÑÕÉ¸€ (€€€€€€€±•¸¡Ù…±Õ”¹‘¥…¹½ÍÑ¥Œ¹™…¥±•‘}É•ÅÕ¥É•µ•¹ÑÌ¤°(€€€€€€€€´¡Ù…±Õ”¹¹•Ñ}•áÁ•Ñ•‘}µ½Ù•µ•¹Ð½È•¥µ…° À¤¤°(€€€€€€€€µÙ…±Õ”¹‘¥…¹½ÍÑ¥Œ¹ÍÑ…‰±•}‘¥É•Ñ¥½¹}É…Ñ¥¼°(€€€€€€€€µÙ…±Õ”¹‘¥…¹½ÍÑ¥Œ¹ÕÍ…‰±•}½‰Í•ÉÙ…Ñ¥½¹Ì°(€€€€€€€Ù…±Õ”¹½¹™¥ÕÉ…Ñ¥½¸¹™¥¹•ÉÁÉ¥¹Ð°(€€€€¤(()‘•˜}½Õ¹Ñ}É•©•Ñ¥½¹Ì (€€€Ù…±¥‘…Ñ¥½¸èÑÕÁ±•mY…±¥‘…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¹I•ÍÕ±Ð°€¸¸¹t°(€€€Ñ•ÍÑÌèÑÕÁ±•m%Í½±…Ñ•‘Q•ÍÑI•ÍÕ±Ð°€¸¸¹t°(¤€´ø‘¥ÑmÍÑÈ°¥¹Ñtè(€€€É•ÍÕ±Ðè‘¥ÑmÍÑÈ°¥¹Ñt€ôíô(€€€™½È¥Ñ•´¥¸Ù…±¥‘…Ñ¥½¸è(€€€€€€€™½ÈÉ•…Í½¸¥¸¥Ñ•´¹‘¥…¹½ÍÑ¥Œ¹™…¥±•‘}É•ÅÕ¥É•µ•¹ÑÌè(€€€€€€€€€€€É•ÍÕ±ÑmÉ•…Í½¸¹Ù…±Õ•t€ôÉ•ÍÕ±Ð¹•Ð¡É•…Í½¸¹Ù…±Õ”°€À¤€¬€Ä(€€€™½ÈÑ•ÍÑ}É•ÍÕ±Ð¥¸Ñ•ÍÑÌè(€€€€€€€¥˜Ñ•ÍÑ}É•ÍÕ±Ð¹É•©•Ñ¥½¹}É•…Í½¸¥Ì¹½Ð9½¹”è(€€€€€€€€€€€É•ÍÕ±ÑmÑ•ÍÑ}É•ÍÕ±Ð¹É•©•Ñ¥½¹}É•…Í½¸¹Ù…±Õ•t€ô€ (€€€€€€€€€€€€€€€É•ÍÕ±Ð¹•Ð¡Ñ•ÍÑ}É•ÍÕ±Ð¹É•©•Ñ¥½¹}É•…Í½¸¹Ù…±Õ”°€À¤€¬€Ä(€€€€€€€€€€€€¤(€€€É•ÑÕÉ¸É•ÍÕ±Ð(()‘•˜}É½ÕÁ}É•©•Ñ¥½¹Ì (€€€Ù…±¥‘…Ñ¥½¸èÑÕÁ±•mY…±¥‘…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¹I•ÍÕ±Ð°€¸¸¹t°(€€€­•äè…±±…‰±•mmY…±¥‘…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¹I•ÍÕ±Ñt°ÍÑÉt°(¤€´ø‘¥ÑmÍÑÈ°¥¹Ñtè(€€€É•ÍÕ±Ðè‘¥ÑmÍÑÈ°¥¹Ñt€ôíô(€€€™½È¥Ñ•´¥¸Ù…±¥‘…Ñ¥½¸è(€€€€€€€¥˜¥Ñ•´¹‘¥…¹½ÍÑ¥Œ¹™…¥±•‘}É•ÅÕ¥É•µ•¹ÑÌè(€€€€€€€€€€€¹…µ”€ô­•ä¡¥Ñ•´¤(€€€€€€€€€€€É•ÍÕ±Ñm¹…µ•t€ôÉ•ÍÕ±Ð¹•Ð¡¹…µ”°€À¤€¬€Ä(€€€É•ÑÕÉ¸É•ÍÕ±Ð(()‘•˜}‰½ÑÑ±•¹•¬ (€€€ÑÉ…¥¹¥¹}É•Ñ…¥¹•è¥¹Ð°(€€€Ù…±¥‘…Ñ¥½¸èÑÕÁ±•mY…±¥‘…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¹I•ÍÕ±Ð°€¸¸¹t°(€€€Ñ•ÍÑÌèÑÕÁ±•m%Í½±…Ñ•‘Q•ÍÑI•ÍÕ±Ð°€¸¸¹t°(¤€´øÍÑÈè(€€€¥˜¹½ÐÑÉ…¥¹¥¹}É•Ñ…¥¹•è(€€€€€€€É•ÑÕÉ¸€‰ÑÉ…¥¹¥¹œˆ(€€€¥˜¹½Ð…¹ä¡¥Ñ•´¹Í•±•Ñ•‘}™½É}Ñ•ÍÐ™½È¥Ñ•´¥¸Ù…±¥‘…Ñ¥½¸¤è(€€€€€€€É•ÑÕÉ¸€‰Ù…±¥‘…Ñ¥½¸ˆ(€€€¥˜¹½Ð…¹ä¡¥Ñ•´¹½¹™¥Éµ•™½È¥Ñ•´¥¸Ñ•ÍÑÌ¤è(€€€€€€€É•ÑÕÉ¸€‰¥Í½±…Ñ•‘}Ñ•ÍÐˆ(€€€É•ÑÕÉ¸€‰½¹™¥Éµ•ˆ(()‘•˜}½ÕÑ½µ•}•áÁ±…¹…Ñ¥½¸ (€€€½¹±ÕÍ¥½¸è¥…¹½ÍÑ¥½¹±ÕÍ¥½¸°½Õ¹ÑÌè‘¥ÑmÍÑÈ°¥¹Ñt°‰½ÑÑ±•¹•¬èÍÑÈ(¤€´øÍÑÈè(€€€‘½µ¥¹…¹Ð€ôµ…à (€€€€€€€½Õ¹ÑÌ¹¥Ñ•µÌ ¤°­•äõ±…µ‰‘„¥Ñ•´è€¡¥Ñ•µlÅt°¥Ñ•µlÁt¤°‘•™…Õ±Ðô ‰¹½¹”ˆ°€À¤(€€€€¤(€€€É•ÑÕÉ¸€ (€€€€€€€˜‰í½¹±ÕÍ¥½¸¹Ù…±Õ•ôì‰½ÑÑ±•¹•¬õí‰½ÑÑ±•¹•­ôì‘½µ¥¹…¹Ñ}É•©•Ñ¥½¸ôˆ(€€€€€€€˜‰í‘½µ¥¹…¹ÑlÁuô€¡í‘½µ¥¹…¹ÑlÅuô¤¸…¥±ÕÉ”Ñ¼‘•Ñ•Ð…¸•‘”¥Ì¹½ÐÁÉ½½˜€ˆ(€€€€€€€€‰Ñ¡…Ð¹½¹”•á¥ÍÑÌ°…¹¡¥ÍÑ½É¥…°•Ù¥‘•¹”‘½•Ì¹½ÐÕ…É…¹Ñ•”™ÕÑÕÉ”É•ÍÕ±ÑÌ¸ˆ(€€€€¤(()‘•˜}‰¥¹}½É‘¥¹…°¡Ù…±Õ”è•¥µ…°°‰½Õ¹‘ÌèÑÕÁ±•m•¥µ…°°€¸¸¹t¤€´ø¥¹Ðè(€€€É•ÑÕÉ¸ÍÕ´¡Ù…±Õ”€ø‰½Õ¹™½È‰½Õ¹¥¸‰½Õ¹‘Ì¤(()‘•˜}™¥¹•ÉÁÉ¥¹Ð ©Ù…±Õ•Ìè½‰©•Ð¤€´øÍÑÈè(€€€•¹½‘•€ô©Í½¸¹‘ÕµÁÌ (€€€€€€€€¡AI%Q%Y}}XÑ}=9QIQ}YIM%=8°Ù…±Õ•Ì¤°(€€€€€€€‘•™…Õ±ÐõÍÑÈ°(€€€€€€€Í½ÉÑ}­•åÌõQÉÕ”°(€€€€€€€Í•Á…É…Ñ½ÉÌô ˆ°ˆ°€ˆèˆ¤°(€€€€¤(€€€É•ÑÕÉ¸¡…Í¡±¥ˆ¹Í¡„ÈÔØ¡•¹½‘•¹•¹½‘” ¤¤¹¡•á‘¥•ÍÐ ¤(()}!}Q1MMLè‘¥ÑmÍÑÈ°…±±…‰±•l¸¸¸°½‰©•Ñut€ôì(€€€Ù…±Õ”¹}}¹…µ•}|èÙ…±Õ”(€€€™½ÈÙ…±Õ”¥¸€ (€€€€€€€AÉ•‘¥Ñ½É•™¥¹¥Ñ¥½¸°(€€€€€€€Ù¥‘•¹•Q¡É•Í¡½±‘Ì°(€€€€€€€¡•…ÁI•±…Ñ¥½¹Í¡¥À°(€€€€€€€Q¡É•Í¡½±‘…±¥‰É…Ñ¥½¸°(€€€€€€€É½é•¹½¹™¥ÕÉ…Ñ¥½¸°(€€€€€€€I•ÅÕ¥É•µ•¹Ñ5…É¥¸°(€€€€€€€‘•¥…¹½ÍÑ¥Œ°(€€€€€€€Y…±¥‘…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¹I•ÍÕ±Ð°(€€€€€€€%Í½±…Ñ•‘Q•ÍÑI•ÍÕ±Ð°(€€€€¤)ô)}!}9U5Lè‘¥ÑmÍÑÈ°…±±…‰±•mmÍÑÉt°½‰©•Ñut€ôì(€€€Ù…±Õ”¹}}¹…µ•}|èÙ…±Õ”(€€€™½ÈÙ…±Õ”¥¸€ (€€€€€€€AÉ•‘¥Ñ½ÉM•µ…¹Ñ¥-¥¹°(€€€€€€€¥É•Ñ¥½¹5…ÁÁ¥¹œ°(€€€€€€€½¹‘¥Ñ¥½¸°(€€€€€€€MÕ•ÍÑ•‘Ñ¥½¸°(€€€€€€€Ù¥‘•¹•AÉ½™¥±”°(€€€€€€€9•ÕÑÉ…±	…¹‘A½±¥ä°(€€€€€€€A…É…µ•Ñ•ÉM½ÕÉ”°(€€€€€€€I•©•Ñ¥½¹I•…Í½¸°(€€€€¤)ô(()‘•˜•¹½‘•}ØÑ}…¡•}Ù…±Õ”¡Ù…±Õ”è½‰©•Ð¤€´ø½‰©•Ðè(€€€€ˆˆ‰¹½‘”½¹”½µÁ±•Ñ•ÍÑ…”É•ÍÕ±Ð¥¹Ñ¼„)M=8µ½µÁ…Ñ¥‰±”ÑåÁ•Á…å±½…¸ˆˆˆ((€€€¥˜Ù…±Õ”¥Ì9½¹”½È¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°€¡ÍÑÈ°¥¹Ð°‰½½°¤¤è(€€€€€€€É•ÑÕÉ¸Ù…±Õ”(€€€¥˜¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°•¥µ…°¤è(€€€€€€€É•ÑÕÉ¸ìˆ‘‘•¥µ…°ˆèÍÑÈ¡Ù…±Õ”¥ô(€€€¥˜¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°Ñ¥µ•‘•±Ñ„¤è(€€€€€€€É•ÑÕÉ¸ìˆ‘Ñ¥µ•‘•±Ñ…}Í•½¹‘ÌˆèÍÑÈ¡Ù…±Õ”¹Ñ½Ñ…±}Í•½¹‘Ì ¤¥ô(€€€¥˜¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°¹Õ´¤è(€€€€€€€É•ÑÕÉ¸ìˆ‘•¹Õ´ˆèÑåÁ”¡Ù…±Õ”¤¹}}¹…µ•}|°€‰Ù…±Õ”ˆèÍÑÈ¡Ù…±Õ”¹Ù…±Õ”¥ô(€€€¥˜¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°ÑÕÁ±”¤è(€€€€€€€É•ÑÕÉ¸ìˆ‘ÑÕÁ±”ˆèm•¹½‘•}ØÑ}…¡•}Ù…±Õ”¡¥Ñ•´¤™½È¥Ñ•´¥¸Ù…±Õ•uô(€€€¥˜¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°±¥ÍÐ¤è(€€€€€€€É•ÑÕÉ¸m•¹½‘•}ØÑ}…¡•}Ù…±Õ”¡¥Ñ•´¤™½È¥Ñ•´¥¸Ù…±Õ•t(€€€¥˜¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°‘¥Ð¤è(€€€€€€€É•ÑÕÉ¸íÍÑÈ¡­•ä¤è•¹½‘•}ØÑ}…¡•}Ù…±Õ”¡¥Ñ•´¤™½È­•ä°¥Ñ•´¥¸Ù…±Õ”¹¥Ñ•µÌ ¥ô(€€€¥˜¥Í}‘…Ñ…±…ÍÌ¡Ù…±Õ”¤…¹¹½Ð¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°ÑåÁ”¤è(€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€€ˆ‘ÑåÁ”ˆèÑåÁ”¡Ù…±Õ”¤¹}}¹…µ•}|°(€€€€€€€€€€€€‰™¥•±‘Ìˆèì(€€€€€€€€€€€€€€€¥Ñ•´¹¹…µ”è•¹½‘•}ØÑ}…¡•}Ù…±Õ”¡•Ñ…ÑÑÈ¡Ù…±Õ”°¥Ñ•´¹¹…µ”¤¤(€€€€€€€€€€€€€€€™½È¥Ñ•´¥¸™¥•±‘Ì¡Ù…±Õ”¤(€€€€€€€€€€€ô°(€€€€€€€ô(€€€É…¥Í”QåÁ•ÉÉ½È¡˜‰Õ¹ÍÕÁÁ½ÉÑ•ØÐ…¡”Ù…±Õ”èíÑåÁ”¡Ù…±Õ”¤¹}}¹…µ•}}ôˆ¤(()‘•˜‘•½‘•}ØÑ}…¡•}Ù…±Õ”¡Ù…±Õ”è½‰©•Ð¤€´ø½‰©•Ðè(€€€€ˆˆ‰•½‘”½¹±äÑ¡”±½Í•Í•Ð½˜Ù•ÉÍ¥½¸´ÐÍÑ…”•Ù¥‘•¹”ÑåÁ•Ì¸ˆˆˆ((€€€¥˜Ù…±Õ”¥Ì9½¹”½È¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°€¡ÍÑÈ°¥¹Ð°‰½½°¤¤è(€€€€€€€É•ÑÕÉ¸Ù…±Õ”(€€€¥˜¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°±¥ÍÐ¤è(€€€€€€€É•ÑÕÉ¸m‘•½‘•}ØÑ}…¡•}Ù…±Õ”¡¥Ñ•´¤™½È¥Ñ•´¥¸Ù…±Õ•t(€€€¥˜¹½Ð¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°‘¥Ð¤è(€€€€€€€É…¥Í”QåÁ•ÉÉ½È ‰¥¹Ù…±¥ØÐ…¡”Á…å±½…ˆ¤(€€€¥˜€ˆ‘‘•¥µ…°ˆ¥¸Ù…±Õ”è(€€€€€€€É•ÑÕÉ¸•¥µ…°¡ÍÑÈ¡Ù…±Õ•lˆ‘‘•¥µ…°‰t¤¤(€€€¥˜€ˆ‘Ñ¥µ•‘•±Ñ…}Í•½¹‘Ìˆ¥¸Ù…±Õ”è(€€€€€€€Í•½¹‘Ì€ô•¥µ…°¡ÍÑÈ¡Ù…±Õ•lˆ‘Ñ¥µ•‘•±Ñ…}Í•½¹‘Ì‰t¤¤(€€€€€€€É•ÑÕÉ¸Ñ¥µ•‘•±Ñ„¡µ¥É½Í•½¹‘Ìõ¥¹Ð¡Í•½¹‘Ì€¨•¥µ…° Å|ÀÀÁ|ÀÀÀ¤¤¤(€€€¥˜€ˆ‘ÑÕÁ±”ˆ¥¸Ù…±Õ”è(€€€€€€€¥Ñ•µÌ€ôÙ…±Õ•lˆ‘ÑÕÁ±”‰t(€€€€€€€¥˜¹½Ð¥Í¥¹ÍÑ…¹”¡¥Ñ•µÌ°±¥ÍÐ¤è(€€€€€€€€€€€É…¥Í”QåÁ•ÉÉ½È ‰¥¹Ù…±¥…¡•ÑÕÁ±”ˆ¤(€€€€€€€É•ÑÕÉ¸ÑÕÁ±”¡‘•½‘•}ØÑ}…¡•}Ù…±Õ”¡¥Ñ•´¤™½È¥Ñ•´¥¸¥Ñ•µÌ¤(€€€¥˜€ˆ‘•¹Õ´ˆ¥¸Ù…±Õ”è(€€€€€€€¹…µ”€ôÍÑÈ¡Ù…±Õ•lˆ‘•¹Õ´‰t¤(€€€€€€€½¹ÍÑÉÕÑ½È€ô}!}9U5L¹•Ð¡¹…µ”¤(€€€€€€€¥˜½¹ÍÑÉÕÑ½È¥Ì9½¹”è(€€€€€€€€€€€É…¥Í”QåÁ•ÉÉ½È¡˜‰Õ¹­¹½Ý¸…¡••¹Õ´èí¹…µ•ôˆ¤(€€€€€€€É•ÑÕÉ¸½¹ÍÑÉÕÑ½È¡ÍÑÈ¡Ù…±Õ•l‰Ù…±Õ”‰t¤¤(€€€¥˜€ˆ‘ÑåÁ”ˆ¥¸Ù…±Õ”è(€€€€€€€¹…µ”€ôÍÑÈ¡Ù…±Õ•lˆ‘ÑåÁ”‰t¤(€€€€€€€½¹ÍÑÉÕÑ½È€ô}!}Q1MML¹•Ð¡¹…µ”¤(€€€€€€€É…Ý}™¥•±‘Ì€ôÙ…±Õ”¹•Ð ‰™¥•±‘Ìˆ¤(€€€€€€€¥˜½¹ÍÑÉÕÑ½È¥Ì9½¹”½È¹½Ð¥Í¥¹ÍÑ…¹”¡É…Ý}™¥•±‘Ì°‘¥Ð¤è(€€€€€€€€€€€É…¥Í”QåÁ•ÉÉ½È¡˜‰Õ¹­¹½Ý¸…¡••Ù¥‘•¹”ÑåÁ”èí¹…µ•ôˆ¤(€€€€€€€‘•½‘•€ôì(€€€€€€€€€€€ÍÑÈ¡­•ä¤è‘•½‘•}ØÑ}…¡•}Ù…±Õ”¡¥Ñ•´¤™½È­•ä°¥Ñ•´¥¸É…Ý}™¥•±‘Ì¹¥Ñ•µÌ ¤(€€€€€€€ô(€€€€€€€É•ÑÕÉ¸½¹ÍÑÉÕÑ½È ¨©‘•½‘•¤(€€€É•ÑÕÉ¸íÍÑÈ¡­•ä¤è‘•½‘•}ØÑ}…¡•}Ù…±Õ”¡¥Ñ•´¤™½È­•ä°¥Ñ•´¥¸Ù…±Õ”¹¥Ñ•µÌ ¥ô
+                for window in windows:
+                    training_rows = _phase_rows(
+                        matrix.rows, window.training_from, window.training_to
+                    )
+                    if not training_rows:
+                        continue
+                    values, _ = _observations(
+                        rows,
+                        phase_start=window.training_from,
+                        phase_end=window.training_to,
+                        predictor=predictor,
+                        horizon=horizon,
+                        condition=Condition.ALL,
+                        volatility_threshold=predictive_edge_volatility_threshold(
+                            training_rows
+                        ),
+                        friction=Decimal(2)
+                        * (simulation.fee_rate + simulation.slippage_rate),
+                        neutral=Decimal(0),
+                        cadence=cadence,
+                    )
+                    correlation = _correlation(
+                        tuple(item.predictor_value for item in values),
+                        tuple(item.forward_gross_return for item in values),
+                    )
+                    observations += len(values)
+                    if correlation is not None:
+                        correlations.append(abs(correlation))
+                mean_correlation = (
+                    sum(correlations, Decimal(0)) / Decimal(len(correlations))
+                    if correlations
+                    else Decimal(0)
+                )
+                score = mean_correlation * Decimal(str(sqrt(max(observations, 1))))
+                fingerprint = _fingerprint(
+                    predictor.name,
+                    predictor.version,
+                    cadence,
+                    horizon,
+                    matrix.dataset_fingerprint,
+                    "training",
+                )
+                relationship = CheapRelationship(
+                    predictor,
+                    cadence,
+                    horizon,
+                    observations,
+                    mean_correlation,
+                    score,
+                    group_by_predictor.get(predictor.name, predictor.name),
+                    fingerprint,
+                )
+                candidates.append(relationship)
+                cache_writes[cache_key] = relationship
+                computed += 1
+    return _diversified_cheap(tuple(candidates)), generated, computed, reused
+
+
+def _training_redundancy(
+    matrix: HistoricalFeatureMatrix, windows: tuple[WalkForwardWindow, ...]
+) -> tuple[RedundancyEvidence, ...]:
+    if not windows:
+        return ()
+    timestamps = {
+        row.candle_open_time
+        for window in windows
+        for row in matrix.rows
+        if window.training_from <= row.candle_open_time < window.training_to
+    }
+    rows = tuple(row for row in matrix.rows if row.candle_open_time in timestamps)
+    values = {
+        item.name: tuple(_predictors(row)[item.name] for row in rows)
+        for item in PREDICTORS
+    }
+    evidence: list[RedundancyEvidence] = []
+    for left_index, left in enumerate(PREDICTORS):
+        for right in PREDICTORS[left_index + 1 :]:
+            correlation = _correlation(values[left.name], values[right.name])
+            if correlation is None or abs(correlation) < Decimal("0.90"):
+                continue
+            group = min(left.name, right.name)
+            evidence.append(
+                RedundancyEvidence(left.name, right.name, correlation, group)
+            )
+    return tuple(evidence)
+
+
+def _redundancy_groups(evidence: tuple[RedundancyEvidence, ...]) -> dict[str, str]:
+    parent: dict[str, str] = {item.name: item.name for item in PREDICTORS}
+
+    def root(value: str) -> str:
+        while parent[value] != value:
+            value = parent[value]
+        return value
+
+    for item in evidence:
+        left, right = root(item.left_predictor), root(item.right_predictor)
+        parent[max(left, right)] = min(left, right)
+    return {name: root(name) for name in parent}
+
+
+def _diversified_cheap(
+    values: tuple[CheapRelationship, ...],
+) -> tuple[CheapRelationship, ...]:
+    buckets: dict[str, list[CheapRelationship]] = {}
+    for item in sorted(values, key=lambda value: (-value.score, value.fingerprint)):
+        buckets.setdefault(item.redundancy_group, []).append(item)
+    result: list[CheapRelationship] = []
+    while len(result) < CHEAP_RELATIONSHIP_LIMIT and any(buckets.values()):
+        for group in sorted(buckets):
+            if buckets[group] and len(result) < CHEAP_RELATIONSHIP_LIMIT:
+                result.append(buckets[group].pop(0))
+    return tuple(result)
+
+
+def _bounded_frozen_configurations(
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    simulation: SimulationConfiguration,
+    relationships: tuple[CheapRelationship, ...],
+) -> tuple[FrozenConfiguration, ...]:
+    proposals: list[FrozenConfiguration] = []
+    for index, relationship in enumerate(relationships):
+        bins = DISCOVERY_BIN_COUNTS[index % len(DISCOVERY_BIN_COUNTS)]
+        condition = tuple(Condition)[
+            (index // len(DISCOVERY_BIN_COUNTS)) % len(Condition)
+        ]
+        policy = tuple(NeutralBandPolicy)[
+            (index // (len(DISCOVERY_BIN_COUNTS) * len(Condition)))
+            % len(NeutralBandPolicy)
+        ]
+        profile = tuple(EvidenceProfile)[
+            (
+                index
+                // (len(DISCOVERY_BIN_COUNTS) * len(Condition) * len(NeutralBandPolicy))
+            )
+            % len(EvidenceProfile)
+        ]
+        if profile is EvidenceProfile.STRICT_V3_COMPATIBLE:
+            policy = NeutralBandPolicy.ECONOMIC_FRICTION
+        proposals.append(
+            _freeze_configuration(
+                matrix,
+                windows,
+                simulation,
+                relationship,
+                bins,
+                condition,
+                policy,
+                profile,
+            )
+        )
+    # One proposal per retained relationship avoids the full Cartesian product.
+    buckets: dict[tuple[str, str], list[FrozenConfiguration]] = {}
+    for item in proposals:
+        buckets.setdefault((item.profile.value, item.neutral_policy.value), []).append(
+            item
+        )
+    for values in buckets.values():
+        values.sort(
+            key=lambda item: (
+                item.condition.value,
+                item.bins,
+                item.predictor.name,
+                item.cadence,
+                item.horizon,
+                item.fingerprint,
+            )
+        )
+    selected: list[FrozenConfiguration] = []
+    while len(selected) < VALIDATION_CONFIGURATION_LIMIT and any(buckets.values()):
+        for key in sorted(buckets):
+            if buckets[key] and len(selected) < VALIDATION_CONFIGURATION_LIMIT:
+                selected.append(buckets[key].pop(0))
+    return tuple(selected)
+
+
+def _freeze_configuration(
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    simulation: SimulationConfiguration,
+    relationship: CheapRelationship,
+    bins: int,
+    condition: Condition,
+    policy: NeutralBandPolicy,
+    profile: EvidenceProfile,
+) -> FrozenConfiguration:
+    rows = {row.candle_open_time: row for row in matrix.rows}
+    gross_returns: list[Decimal] = []
+    training_observations: list[Observation] = []
+    volatility: list[tuple[int, Decimal]] = []
+    for window in windows:
+        phase = _phase_rows(matrix.rows, window.training_from, window.training_to)
+        threshold = predictive_edge_volatility_threshold(phase)
+        volatility.append((window.ordinal, threshold))
+        values, _ = _observations(
+            rows,
+            phase_start=window.training_from,
+            phase_end=window.training_to,
+            predictor=relationship.predictor,
+            horizon=relationship.horizon,
+            condition=condition,
+            volatility_threshold=threshold,
+            friction=Decimal(2) * (simulation.fee_rate + simulation.slippage_rate),
+            neutral=Decimal(0),
+            cadence=relationship.cadence,
+        )
+        training_observations.extend(values)
+        gross_returns.extend(item.forward_gross_return for item in values)
+    neutral = neutral_threshold_for_training(
+        policy=policy,
+        training_absolute_returns=tuple(abs(item) for item in gross_returns),
+        fee_rate=simulation.fee_rate,
+        slippage_rate=simulation.slippage_rate,
+    )
+    mapping = _learn_direction_mapping(
+        relationship.predictor, tuple(training_observations)
+    )
+    predictor_values = tuple(item.predictor_value for item in training_observations)
+    bounds = _quantile_bounds(predictor_values, bins)
+    thresholds, calibrations = _profile_thresholds(
+        profile, tuple(training_observations), relationship
+    )
+    ordinal, lower, upper, action = _training_bin_identity(
+        tuple(training_observations), bounds, mapping, relationship.predictor
+    )
+    fingerprint = _fingerprint(
+        relationship.fingerprint,
+        bins,
+        condition.value,
+        policy.value,
+        profile.value,
+        neutral,
+        thresholds,
+        bounds,
+        mapping.value,
+        simulation.fee_rate,
+        simulation.slippage_rate,
+    )
+    return FrozenConfiguration(
+        fingerprint,
+        relationship.predictor,
+        relationship.cadence,
+        relationship.horizon,
+        bins,
+        condition,
+        policy,
+        profile,
+        mapping,
+        bounds,
+        ordinal,
+        lower,
+        upper,
+        action,
+        neutral,
+        thresholds,
+        calibrations,
+        tuple(volatility),
+    )
+
+
+def _profile_thresholds(
+    profile: EvidenceProfile,
+    observations: tuple[Observation, ...],
+    relationship: CheapRelationship,
+) -> tuple[EvidenceThresholds, tuple[ThresholdCalibration, ...]]:
+    strict = EvidenceThresholds()
+    if profile is EvidenceProfile.STRICT_V3_COMPATIBLE:
+        values = (
+            ("minimum_observations", Decimal(strict.minimum_observations)),
+            ("minimum_absolute_correlation", strict.minimum_absolute_correlation),
+            ("minimum_directional_hit_rate", strict.minimum_directional_hit_rate),
+        )
+        return strict, tuple(
+            ThresholdCalibration(
+                name,
+                value,
+                value,
+                value,
+                value,
+                "v3 fixed default",
+                ParameterSource.FIXED_DEFAULT,
+            )
+            for name, value in values
+        )
+    count = Decimal(len(observations))
+    observed_correlation = relationship.mean_absolute_correlation
+    if profile is EvidenceProfile.BALANCED_V4:
+        minimum_observations = int(
+            max(Decimal(20), min(Decimal(60), count / Decimal(10)))
+        )
+        correlation = max(
+            Decimal("0.05"),
+            min(Decimal("0.12"), observed_correlation * Decimal("0.75")),
+        )
+        hit = max(
+            Decimal("0.52"),
+            min(Decimal("0.56"), Decimal("0.50") + observed_correlation / Decimal(2)),
+        )
+        stability = Decimal("0.55")
+    else:
+        minimum_observations = int(
+            max(Decimal(15), min(Decimal(30), count / Decimal(15)))
+        )
+        correlation = max(
+            Decimal("0.02"),
+            min(Decimal("0.08"), observed_correlation * Decimal("0.50")),
+        )
+        hit = max(
+            Decimal("0.50"),
+            min(Decimal("0.53"), Decimal("0.49") + observed_correlation / Decimal(2)),
+        )
+        stability = Decimal("0.50")
+    thresholds = EvidenceThresholds(
+        minimum_observations=minimum_observations,
+        minimum_windows=3,
+        minimum_stable_direction_ratio=stability,
+        minimum_absolute_correlation=correlation,
+        minimum_directional_hit_rate=hit,
+        minimum_hit_rate_improvement_over_benchmark=Decimal("0.01"),
+    )
+    calibrations = (
+        ThresholdCalibration(
+            "minimum_observations",
+            count / Decimal(10),
+            Decimal(minimum_observations),
+            Decimal(15 if profile is EvidenceProfile.EXPLORATORY_V4 else 20),
+            Decimal(30 if profile is EvidenceProfile.EXPLORATORY_V4 else 60),
+            "training observation count / divisor with floors and ceilings",
+            ParameterSource.TRAINING_CALIBRATED,
+        ),
+        ThresholdCalibration(
+            "minimum_absolute_correlation",
+            observed_correlation,
+            correlation,
+            Decimal("0.02" if profile is EvidenceProfile.EXPLORATORY_V4 else "0.05"),
+            Decimal("0.08" if profile is EvidenceProfile.EXPLORATORY_V4 else "0.12"),
+            "training correlation fraction with floors and ceilings",
+            ParameterSource.TRAINING_CALIBRATED,
+        ),
+        ThresholdCalibration(
+            "minimum_directional_hit_rate",
+            Decimal("0.50") + observed_correlation / Decimal(2),
+            hit,
+            Decimal("0.50" if profile is EvidenceProfile.EXPLORATORY_V4 else "0.52"),
+            Decimal("0.53" if profile is EvidenceProfile.EXPLORATORY_V4 else "0.56"),
+            "training correlation-derived hit floor",
+            ParameterSource.TRAINING_CALIBRATED,
+        ),
+    )
+    return thresholds, calibrations
+
+
+def _training_bin_identity(
+    observations: tuple[Observation, ...],
+    bounds: tuple[Decimal, ...],
+    mapping: DirectionMapping,
+    predictor: PredictorDefinition,
+) -> tuple[int, Decimal | None, Decimal | None, SuggestedAction]:
+    if not observations or mapping is DirectionMapping.NOT_APPLICABLE:
+        return 0, None, bounds[0] if bounds else None, SuggestedAction.DIAGNOSTIC_ONLY
+    bins = len(bounds) + 1
+    candidates: list[tuple[Decimal, int]] = []
+    for ordinal in range(bins):
+        values = [
+            item
+            for item in observations
+            if _bin_ordinal(item.predictor_value, bounds) == ordinal
+        ]
+        mean = (
+            sum((item.forward_gross_return for item in values), Decimal(0))
+            / Decimal(len(values))
+            if values
+            else Decimal(0)
+        )
+        candidates.append((abs(mean), ordinal))
+    ordinal = max(candidates)[1]
+    selected = [
+        item.forward_gross_return
+        for item in observations
+        if _bin_ordinal(item.predictor_value, bounds) == ordinal
+    ]
+    mean = (
+        sum(selected, Decimal(0)) / Decimal(len(selected)) if selected else Decimal(0)
+    )
+    action = SuggestedAction.LONG_ENTRY if mean > 0 else SuggestedAction.EXIT_OR_AVOID
+    return (
+        ordinal,
+        bounds[ordinal - 1] if ordinal else None,
+        bounds[ordinal] if ordinal < len(bounds) else None,
+        action,
+    )
+
+
+def _evaluate_validation(
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    simulation: SimulationConfiguration,
+    configuration: FrozenConfiguration,
+) -> ValidationConfigurationResult:
+    values, window_metrics = _phase_evidence(
+        matrix, windows, simulation, configuration, "validation"
+    )
+    diagnostic = _diagnostic(configuration, values, window_metrics, simulation)
+    failed = set(diagnostic.failed_requirements)
+    economics_pass = RejectionReason.MOVEMENT_DOES_NOT_COVER_COSTS not in failed
+    selected = not failed and economics_pass
+    if configuration.profile is EvidenceProfile.EXPLORATORY_V4 and not economics_pass:
+        selected = False
+    status = "selected_for_test" if selected else "near_miss" if values else "rejected"
+    return ValidationConfigurationResult(
+        configuration,
+        diagnostic,
+        status,
+        selected,
+        diagnostic.strongest_directional_benchmark,
+        diagnostic.standard_error,
+        diagnostic.gross_expected_movement,
+        diagnostic.net_expected_movement,
+    )
+
+
+def _evaluate_isolated_test(
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    simulation: SimulationConfiguration,
+    configuration: FrozenConfiguration,
+) -> IsolatedTestResult:
+    values, window_metrics = _phase_evidence(
+        matrix, windows, simulation, configuration, "test"
+    )
+    diagnostic = _diagnostic(configuration, values, window_metrics, simulation)
+    confirmed = not diagnostic.failed_requirements
+    return IsolatedTestResult(
+        configuration.fingerprint,
+        confirmed,
+        len(values),
+        diagnostic.directional_hit_rate,
+        diagnostic.strongest_directional_benchmark,
+        diagnostic.gross_expected_movement,
+        diagnostic.net_expected_movement,
+        diagnostic.primary_rejection_reason if not confirmed else None,
+    )
+
+
+def _phase_evidence(
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    simulation: SimulationConfiguration,
+    configuration: FrozenConfiguration,
+    phase: str,
+) -> tuple[tuple[Observation, ...], tuple[EdgeMetrics, ...]]:
+    rows = {row.candle_open_time: row for row in matrix.rows}
+    all_values: list[Observation] = []
+    metrics: list[EdgeMetrics] = []
+    volatility = dict(configuration.volatility_thresholds)
+    friction = Decimal(2) * (simulation.fee_rate + simulation.slippage_rate)
+    for window in windows:
+        start = getattr(window, f"{phase}_from")
+        end = getattr(window, f"{phase}_to")
+        observations, missing = _observations(
+            rows,
+            phase_start=start,
+            phase_end=end,
+            predictor=configuration.predictor,
+            horizon=configuration.horizon,
+            condition=configuration.condition,
+            volatility_threshold=volatility[window.ordinal],
+            friction=friction,
+            neutral=configuration.neutral_threshold,
+            cadence=configuration.cadence,
+        )
+        selected = tuple(
+            item
+            for item in observations
+            if _bin_ordinal(item.predictor_value, configuration.bin_bounds)
+            == configuration.selected_bin_ordinal
+        )
+        all_values.extend(selected)
+        metrics.append(
+            _metrics(
+                selected,
+                missing,
+                predictor=configuration.predictor,
+                center=Decimal(0),
+                mapping=configuration.direction_mapping,
+                friction=friction,
+                thresholds=configuration.thresholds,
+            )
+        )
+    return tuple(all_values), tuple(metrics)
+
+
+def _diagnostic(
+    configuration: FrozenConfiguration,
+    values: tuple[Observation, ...],
+    window_metrics: tuple[EdgeMetrics, ...],
+    simulation: SimulationConfiguration,
+) -> EdgeDiagnostic:
+    correlations = tuple(
+        item.correlation for item in window_metrics if item.correlation is not None
+    )
+    hits = tuple(
+        item.directional_hit_rate
+        for item in window_metrics
+        if item.directional_hit_rate is not None
+    )
+    benchmarks = tuple(
+        item.direction_benchmarks.strongest
+        for item in window_metrics
+        if item.direction_benchmarks is not None
+    )
+    usable = sum(item.usable_count for item in window_metrics)
+    correlation = (
+        sum((abs(item) for item in correlations), Decimal(0))
+        / Decimal(len(correlations))
+        if correlations
+        else Decimal(0)
+    )
+    hit = sum(hits, Decimal(0)) / Decimal(len(hits)) if hits else Decimal(0)
+    benchmark = max(benchmarks) if benchmarks else Decimal(0)
+    improvement = hit - benchmark
+    gross = (
+        sum((item.forward_gross_return for item in values), Decimal(0))
+        / Decimal(len(values))
+        if values
+        else Decimal(0)
+    )
+    net = abs(gross) - Decimal(2) * (simulation.fee_rate + simulation.slippage_rate)
+    standard_errors = tuple(
+        item.standard_error
+        for item in window_metrics
+        if item.standard_error is not None
+    )
+    standard_error = (
+        sum(standard_errors, Decimal(0)) / Decimal(len(standard_errors))
+        if standard_errors
+        else None
+    )
+    signs = tuple(1 if item > 0 else -1 if item < 0 else 0 for item in correlations)
+    dominant = max(signs.count(1), signs.count(-1)) if signs else 0
+    stability = Decimal(dominant) / Decimal(len(signs)) if signs else Decimal(0)
+    dispersion = (
+        max(correlations) - min(correlations) if len(correlations) > 1 else Decimal(0)
+    )
+    thresholds = configuration.thresholds
+    margins = (
+        requirement_margin(
+            RejectionReason.INSUFFICIENT_OBSERVATIONS,
+            Decimal(usable),
+            Decimal(thresholds.minimum_observations),
+        ),
+        requirement_margin(
+            RejectionReason.INSUFFICIENT_WINDOWS,
+            Decimal(len(window_metrics)),
+            Decimal(thresholds.minimum_windows),
+        ),
+        requirement_margin(
+            RejectionReason.UNSTABLE_DIRECTION,
+            stability,
+            thresholds.minimum_stable_direction_ratio,
+        ),
+        requirement_margin(
+            RejectionReason.CORRELATION_BELOW_THRESHOLD,
+            correlation,
+            thresholds.minimum_absolute_correlation,
+        ),
+        requirement_margin(
+            RejectionReason.HIT_RATE_BELOW_THRESHOLD,
+            hit,
+            thresholds.minimum_directional_hit_rate,
+        ),
+        requirement_margin(
+            RejectionReason.BENCHMARK_IMPROVEMENT_BELOW_THRESHOLD,
+            improvement,
+            thresholds.minimum_hit_rate_improvement_over_benchmark,
+        ),
+        requirement_margin(
+            RejectionReason.MOVEMENT_DOES_NOT_COVER_COSTS, net, ECONOMIC_EDGE_MARGIN
+        ),
+        requirement_margin(
+            RejectionReason.EXCESSIVE_DISPERSION,
+            Decimal("0.50") - dispersion,
+            Decimal(0),
+        ),
+        requirement_margin(
+            RejectionReason.INCONSISTENT_SIGN,
+            stability,
+            thresholds.minimum_stable_direction_ratio,
+        ),
+    )
+    failed = tuple(item.requirement for item in margins if not item.passed)
+    passed = tuple(item.requirement for item in margins if item.passed)
+    return EdgeDiagnostic(
+        configuration.fingerprint,
+        "promising" if not failed else "near_miss",
+        failed,
+        passed,
+        failed[0] if failed else None,
+        margins,
+        usable,
+        len(window_metrics),
+        dominant,
+        stability,
+        correlation if correlations else None,
+        median(correlations) if correlations else None,
+        min(correlations) if correlations else None,
+        hit if hits else None,
+        benchmark if benchmarks else None,
+        improvement if benchmarks and hits else None,
+        gross if values else None,
+        net if values else None,
+        standard_error,
+        dispersion if correlations else None,
+    )
+
+
+def _effective_parameters(
+    validation: tuple[ValidationConfigurationResult, ...],
+    simulation: SimulationConfiguration,
+) -> tuple[AuditedParameter, ...]:
+    values: list[AuditedParameter] = [
+        AuditedParameter(
+            "fee_rate",
+            str(simulation.fee_rate),
+            ParameterSource.FIXED_DEFAULT,
+            "simulation cost assumption",
+        ),
+        AuditedParameter(
+            "slippage_rate",
+            str(simulation.slippage_rate),
+            ParameterSource.FIXED_DEFAULT,
+            "simulation cost assumption",
+        ),
+        AuditedParameter(
+            "cheap_relationship_limit",
+            str(CHEAP_RELATIONSHIP_LIMIT),
+            ParameterSource.FIXED_DEFAULT,
+            "bounded training funnel",
+        ),
+        AuditedParameter(
+            "validation_configuration_limit",
+            str(VALIDATION_CONFIGURATION_LIMIT),
+            ParameterSource.FIXED_DEFAULT,
+            "bounded validation funnel",
+        ),
+        AuditedParameter(
+            "isolated_test_configuration_limit",
+            str(ISOLATED_TEST_CONFIGURATION_LIMIT),
+            ParameterSource.FIXED_DEFAULT,
+            "isolated test budget",
+        ),
+    ]
+    for result in validation:
+        configuration = result.configuration
+        prefix = configuration.fingerprint
+        for name, value, source, rationale in (
+            (
+                "cadence",
+                configuration.cadence,
+                ParameterSource.TRAINING_CALIBRATED,
+                "selected by training-only screening and frozen before validation",
+            ),
+            (
+                "horizon",
+                configuration.horizon,
+                ParameterSource.TRAINING_CALIBRATED,
+                "selected by training-only screening and frozen before validation",
+            ),
+            (
+                "bins",
+                configuration.bins,
+                ParameterSource.FIXED_DEFAULT,
+                "versioned bounded expansion",
+            ),
+            (
+                "condition",
+                configuration.condition.value,
+                ParameterSource.FIXED_DEFAULT,
+                "existing condition contract",
+            ),
+            (
+                "neutral_policy",
+                configuration.neutral_policy.value,
+                ParameterSource.FIXED_DEFAULT,
+                "versioned neutral policy",
+            ),
+            (
+                "neutral_threshold",
+                configuration.neutral_threshold,
+                ParameterSource.TRAINING_CALIBRATED
+                if configuration.neutral_policy is NeutralBandPolicy.TRAINING_NOISE
+                else ParameterSource.FIXED_DEFAULT,
+                "frozen before validation",
+            ),
+            (
+                "profile",
+                configuration.profile.value,
+                ParameterSource.FIXED_DEFAULT,
+                "versioned research profile",
+            ),
+        ):
+            values.append(
+                AuditedParameter(f"{prefix}:{name}", str(value), source, rationale)
+            )
+        for calibration in configuration.threshold_calibrations:
+            values.append(
+                AuditedParameter(
+                    f"{prefix}:{calibration.name}",
+                    str(calibration.final_value),
+                    calibration.source,
+                    calibration.method,
+                )
+            )
+    return tuple(values)
+
+
+def _hypothesis(value: ValidationConfigurationResult) -> StrategyHypothesis:
+    config = value.configuration
+    identifier = _fingerprint(
+        config.fingerprint, "hypothesis", HYPOTHESIS_CONTRACT_VERSION
+    )
+    return StrategyHypothesis(
+        identifier,
+        config.predictor.name,
+        config.predictor.version,
+        HYPOTHESIS_CONTRACT_VERSION,
+        config.direction_mapping,
+        config.selected_bin_ordinal,
+        config.lower_bound,
+        config.upper_bound,
+        config.suggested_action,
+        config.horizon,
+        config.condition,
+        (config.selected_bin_ordinal,),
+        value.gross_expected_movement,
+        value.net_expected_movement
+        if config.suggested_action is SuggestedAction.LONG_ENTRY
+        else None,
+        abs(value.net_expected_movement or Decimal(0))
+        if config.suggested_action is SuggestedAction.EXIT_OR_AVOID
+        else None,
+        value.diagnostic.directional_hit_rate,
+        value.diagnostic.stable_direction_ratio,
+        config.cadence,
+        config.horizon,
+        config.horizon,
+        tuple(range(value.diagnostic.windows_evaluated)),
+        EvidenceStatus.PROMISING_POSITIVE,
+        "v4 validation evidence was frozen before isolated test and confirmed "
+        "without parameter changes",
+        "historical evidence does not guarantee future results; no short selling "
+        "or automatic activation",
+    )
+
+
+def _validation_rank(value: ValidationConfigurationResult) -> tuple[object, ...]:
+    return (
+        len(value.diagnostic.failed_requirements),
+        -(value.net_expected_movement or Decimal(0)),
+        -value.diagnostic.stable_direction_ratio,
+        -value.diagnostic.usable_observations,
+        value.configuration.fingerprint,
+    )
+
+
+def _count_rejections(
+    validation: tuple[ValidationConfigurationResult, ...],
+    tests: tuple[IsolatedTestResult, ...],
+) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for item in validation:
+        for reason in item.diagnostic.failed_requirements:
+            result[reason.value] = result.get(reason.value, 0) + 1
+    for test_result in tests:
+        if test_result.rejection_reason is not None:
+            result[test_result.rejection_reason.value] = (
+                result.get(test_result.rejection_reason.value, 0) + 1
+            )
+    return result
+
+
+def _group_rejections(
+    validation: tuple[ValidationConfigurationResult, ...],
+    key: Callable[[ValidationConfigurationResult], str],
+) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for item in validation:
+        if item.diagnostic.failed_requirements:
+            name = key(item)
+            result[name] = result.get(name, 0) + 1
+    return result
+
+
+def _bottleneck(
+    training_retained: int,
+    validation: tuple[ValidationConfigurationResult, ...],
+    tests: tuple[IsolatedTestResult, ...],
+) -> str:
+    if not training_retained:
+        return "training"
+    if not any(item.selected_for_test for item in validation):
+        return "validation"
+    if not any(item.confirmed for item in tests):
+        return "isolated_test"
+    return "confirmed"
+
+
+def _outcome_explanation(
+    conclusion: DiagnosticConclusion, counts: dict[str, int], bottleneck: str
+) -> str:
+    dominant = max(
+        counts.items(), key=lambda item: (item[1], item[0]), default=("none", 0)
+    )
+    return (
+        f"{conclusion.value}; bottleneck={bottleneck}; dominant_rejection="
+        f"{dominant[0]} ({dominant[1]}). Failure to detect an edge is not proof "
+        "that none exists, and historical evidence does not guarantee future results."
+    )
+
+
+def _bin_ordinal(value: Decimal, bounds: tuple[Decimal, ...]) -> int:
+    return sum(value > bound for bound in bounds)
+
+
+def _fingerprint(*values: object) -> str:
+    encoded = json.dumps(
+        (PREDICTIVE_EDGE_V4_CONTRACT_VERSION, values),
+        default=str,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+_CACHE_DATACLASSES: dict[str, Callable[..., object]] = {
+    value.__name__: value
+    for value in (
+        PredictorDefinition,
+        EvidenceThresholds,
+        CheapRelationship,
+        ThresholdCalibration,
+        FrozenConfiguration,
+        RequirementMargin,
+        EdgeDiagnostic,
+        ValidationConfigurationResult,
+        IsolatedTestResult,
+    )
+}
+_CACHE_ENUMS: dict[str, Callable[[str], object]] = {
+    value.__name__: value
+    for value in (
+        PredictorSemanticKind,
+        DirectionMapping,
+        Condition,
+        SuggestedAction,
+        EvidenceProfile,
+        NeutralBandPolicy,
+        ParameterSource,
+        RejectionReason,
+    )
+}
+
+
+def encode_v4_cache_value(value: object) -> object:
+    """Encode one completed stage result into a JSON-compatible typed payload."""
+
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, Decimal):
+        return {"$decimal": str(value)}
+    if isinstance(value, timedelta):
+        return {"$timedelta_seconds": str(value.total_seconds())}
+    if isinstance(value, Enum):
+        return {"$enum": type(value).__name__, "value": str(value.value)}
+    if isinstance(value, tuple):
+        return {"$tuple": [encode_v4_cache_value(item) for item in value]}
+    if isinstance(value, list):
+        return [encode_v4_cache_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): encode_v4_cache_value(item) for key, item in value.items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            "$type": type(value).__name__,
+            "fields": {
+                item.name: encode_v4_cache_value(getattr(value, item.name))
+                for item in fields(value)
+            },
+        }
+    raise TypeError(f"unsupported v4 cache value: {type(value).__name__}")
+
+
+def decode_v4_cache_value(value: object) -> object:
+    """Decode only the closed set of version-4 stage evidence types."""
+
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, list):
+        return [decode_v4_cache_value(item) for item in value]
+    if not isinstance(value, dict):
+        raise TypeError("invalid v4 cache payload")
+    if "$decimal" in value:
+        return Decimal(str(value["$decimal"]))
+    if "$timedelta_seconds" in value:
+        seconds = Decimal(str(value["$timedelta_seconds"]))
+        return timedelta(microseconds=int(seconds * Decimal(1_000_000)))
+    if "$tuple" in value:
+        items = value["$tuple"]
+        if not isinstance(items, list):
+            raise TypeError("invalid cached tuple")
+        return tuple(decode_v4_cache_value(item) for item in items)
+    if "$enum" in value:
+        name = str(value["$enum"])
+        constructor = _CACHE_ENUMS.get(name)
+        if constructor is None:
+            raise TypeError(f"unknown cached enum: {name}")
+        return constructor(str(value["value"]))
+    if "$type" in value:
+        name = str(value["$type"])
+        constructor = _CACHE_DATACLASSES.get(name)
+        raw_fields = value.get("fields")
+        if constructor is None or not isinstance(raw_fields, dict):
+            raise TypeError(f"unknown cached evidence type: {name}")
+        decoded = {
+            str(key): decode_v4_cache_value(item) for key, item in raw_fields.items()
+        }
+        return constructor(**decoded)
+    return {str(key): decode_v4_cache_value(item) for key, item in value.items()}
