@@ -26,13 +26,19 @@ from app.optimization.edge_guided_schemas import (
 from app.optimization.predictive_edge_read import (
     MAX_PAGE_LIMIT,
     PredictiveEdgeNotFoundError,
+    get_predictive_edge_diagnostics,
+    get_predictive_edge_near_miss,
     get_predictive_edge_run,
+    list_predictive_edge_near_misses,
     list_predictive_edge_runs,
     list_predictive_edge_windows,
     list_predictive_edges,
     list_strategy_hypotheses,
 )
 from app.optimization.predictive_edge_schemas import (
+    PredictiveEdgeDiagnosticResponse,
+    PredictiveEdgeNearMissDetailResponse,
+    PredictiveEdgeNearMissPageResponse,
     PredictiveEdgePageResponse,
     PredictiveEdgeRunDetailResponse,
     PredictiveEdgeRunPageResponse,
@@ -254,6 +260,54 @@ async def predictive_edge_hypotheses(
     try:
         return await list_strategy_hypotheses(
             session, run_id=run_id, cursor=cursor, limit=limit
+        )
+    except PredictiveEdgeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/diagnostics",
+    response_model=PredictiveEdgeDiagnosticResponse,
+)
+async def predictive_edge_diagnostics(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> PredictiveEdgeDiagnosticResponse:
+    try:
+        return await get_predictive_edge_diagnostics(session, run_id)
+    except PredictiveEdgeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/near-misses",
+    response_model=PredictiveEdgeNearMissPageResponse,
+)
+async def predictive_edge_near_misses(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    cursor: Annotated[int | None, Query(ge=0)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = 50,
+) -> PredictiveEdgeNearMissPageResponse:
+    try:
+        return await list_predictive_edge_near_misses(
+            session, run_id=run_id, cursor=cursor, limit=limit
+        )
+    except PredictiveEdgeNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/near-misses/{near_miss_id}",
+    response_model=PredictiveEdgeNearMissDetailResponse,
+)
+async def predictive_edge_near_miss(
+    run_id: UUID,
+    near_miss_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> PredictiveEdgeNearMissDetailResponse:
+    try:
+        return await get_predictive_edge_near_miss(
+            session, run_id=run_id, near_miss_id=near_miss_id
         )
     except PredictiveEdgeNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

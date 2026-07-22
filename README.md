@@ -2,6 +2,11 @@
 
 Argos is a private, asset-agnostic quantitative research and predictive decision-support platform. It estimates probabilities from measurable evidence; it does not claim to predict the future with certainty or guarantee profitability.
 
+The current research phase includes Predictive Edge Discovery v4: a bounded
+training/validation funnel, isolated test confirmation, explicit rejection margins,
+near-miss and threshold-sensitivity diagnostics, and read-only evidence APIs. It does
+not activate Strategies or claim that historical relationships will persist.
+
 The platform will ingest market observations, calculate explicit and explainable component metrics, generate simulated decisions, execute paper trades, and evaluate results after fees and simulated slippage. Potential analytical components include technical analysis, momentum, volatility, market context, news, sentiment, and machine-learning outputs. These independent scores may later contribute to an aggregated Argos Score.
 
 Every generated signal must retain its component scores, supporting metrics, and reasoning. The initial MVP will study BTC/USDT and ETH/USDT on Binance Spot, while keeping the domain model suitable for other providers, instruments, and asset classes.

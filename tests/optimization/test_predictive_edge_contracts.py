@@ -75,7 +75,7 @@ def test_openapi_exposes_only_read_only_predictive_edge_routes() -> None:
         for path, methods in paths.items()
         if path.startswith("/optimization/predictive-edge-runs")
     }
-    assert len(selected) == 5
+    assert len(selected) == 8
     assert all(set(methods) == {"get"} for methods in selected.values())
 
 

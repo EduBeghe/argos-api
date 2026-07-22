@@ -1,5 +1,20 @@
 # Glossary
 
+**Statistical signal:** A measured historical relationship that clears statistical
+requirements; it may still be uneconomic.
+
+**Economic edge:** A statistical signal whose expected movement also covers simulated
+fees, slippage, and the versioned economic margin.
+
+**Near miss:** A training/validation relationship ranked by explicit requirement
+margins. It is diagnostic evidence, not a confirmed or activatable candidate.
+
+**Strategy hypothesis:** An immutable, non-executable interpretation of confirmed
+bin-level evidence with its condition, action, range, and limitations.
+
+**Confirmed Strategy:** A frozen research Strategy that passes validation and isolated
+test requirements. Confirmation is historical evidence, not a profitability promise.
+
 - **Asset:** the economic symbol being observed, such as BTC/USDT. It is only one part of instrument identity.
 - **Instrument:** asset plus provider, market type, and interval.
 - **Candle:** open/high/low/close/volume observation for a fixed interval; Argos analyzes only closed candles.

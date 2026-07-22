@@ -95,6 +95,6 @@ Plain-language definitions:
 
 ## Current state and next steps
 
-Implemented: live ingestion; bounded Features/Scores; Decisions; Paper execution; portfolio/performance and equity history; dashboard API; separate frontend; candle backfill; reproducible simulation; refinement persistence/reuse; Predictive Edge Map; complete edge-guided Strategy research; qualification v3; weekly research execution; and candidate APIs/UI.
+Implemented: live ingestion; bounded Features/Scores; Decisions; Paper execution; portfolio/performance and equity history; dashboard API; separate frontend; candle backfill; reproducible simulation; refinement persistence/reuse; Predictive Edge Discovery v4 diagnostics and bounded funnel contracts; complete edge-guided Strategy research; qualification v3; weekly research execution; and candidate APIs/UI.
 
 Not implemented: candidate correction/approval or activation; parallel wallets per Strategy; stopping individual Strategies; additional providers/assets; ML; news/sentiment; authentication; or real-money trading. These are possible next steps, not production commitments.

@@ -8,13 +8,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.optimization.predictive_edge_memory import (
     PredictiveEdgeAggregateRecord,
     PredictiveEdgeBinAggregateRecord,
+    PredictiveEdgeNearMissRecord,
+    PredictiveEdgeRunDiagnosticRecord,
     PredictiveEdgeRunRecord,
+    PredictiveEdgeSensitivityRecord,
     PredictiveEdgeWindowMetricRecord,
     PredictiveEdgeWindowRecord,
     StrategyHypothesisRecord,
 )
 from app.optimization.predictive_edge_schemas import (
     PredictiveEdgeBinSelectionResponse,
+    PredictiveEdgeDiagnosticResponse,
+    PredictiveEdgeNearMissDetailResponse,
+    PredictiveEdgeNearMissPageResponse,
+    PredictiveEdgeNearMissResponse,
     PredictiveEdgePageResponse,
     PredictiveEdgeResponse,
     PredictiveEdgeRunDetailResponse,
@@ -24,6 +31,7 @@ from app.optimization.predictive_edge_schemas import (
     PredictiveEdgeWindowPageResponse,
     StrategyHypothesisPageResponse,
     StrategyHypothesisResponse,
+    ThresholdSensitivityResponse,
 )
 from app.optimization.predictive_edges import (
     DirectionMapping,
@@ -378,3 +386,86 @@ async def _require_run(session: AsyncSession, run_id: UUID) -> None:
 
 def _run(value: PredictiveEdgeRunRecord) -> PredictiveEdgeRunResponse:
     return PredictiveEdgeRunResponse.model_validate(value, from_attributes=True)
+
+
+async def get_predictive_edge_diagnostics(
+    session: AsyncSession, run_id: UUID
+) -> PredictiveEdgeDiagnosticResponse:
+    await _require_run(session, run_id)
+    record = await session.scalar(
+        select(PredictiveEdgeRunDiagnosticRecord).where(
+            PredictiveEdgeRunDiagnosticRecord.run_id == run_id
+        )
+    )
+    if record is None:
+        raise PredictiveEdgeNotFoundError(
+            f"predictive-edge run {run_id} has no v4 diagnostics"
+        )
+    return PredictiveEdgeDiagnosticResponse.model_validate(record, from_attributes=True)
+
+
+def _near_miss(value: PredictiveEdgeNearMissRecord) -> PredictiveEdgeNearMissResponse:
+    return PredictiveEdgeNearMissResponse.model_validate(value, from_attributes=True)
+
+
+async def list_predictive_edge_near_misses(
+    session: AsyncSession,
+    *,
+    run_id: UUID,
+    cursor: int | None = None,
+    limit: int = DEFAULT_PAGE_LIMIT,
+) -> PredictiveEdgeNearMissPageResponse:
+    await _require_run(session, run_id)
+    statement = select(PredictiveEdgeNearMissRecord).where(
+        PredictiveEdgeNearMissRecord.run_id == run_id
+    )
+    if cursor is not None:
+        statement = statement.where(PredictiveEdgeNearMissRecord.rank > cursor)
+    rows = (
+        await session.scalars(
+            statement.order_by(PredictiveEdgeNearMissRecord.rank.asc()).limit(
+                _limit(limit) + 1
+            )
+        )
+    ).all()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    return PredictiveEdgeNearMissPageResponse(
+        items=tuple(_near_miss(item) for item in page),
+        next_cursor=page[-1].rank if has_more and page else None,
+        has_more=has_more,
+    )
+
+
+async def get_predictive_edge_near_miss(
+    session: AsyncSession, *, run_id: UUID, near_miss_id: UUID
+) -> PredictiveEdgeNearMissDetailResponse:
+    await _require_run(session, run_id)
+    record = await session.scalar(
+        select(PredictiveEdgeNearMissRecord).where(
+            PredictiveEdgeNearMissRecord.id == near_miss_id,
+            PredictiveEdgeNearMissRecord.run_id == run_id,
+        )
+    )
+    if record is None:
+        raise PredictiveEdgeNotFoundError(
+            f"predictive-edge near miss {near_miss_id} was not found"
+        )
+    sensitivity = (
+        await session.scalars(
+            select(PredictiveEdgeSensitivityRecord)
+            .where(
+                PredictiveEdgeSensitivityRecord.run_id == run_id,
+                PredictiveEdgeSensitivityRecord.edge_fingerprint
+                == record.edge_fingerprint,
+            )
+            .order_by(PredictiveEdgeSensitivityRecord.threshold_name.asc())
+        )
+    ).all()
+    return PredictiveEdgeNearMissDetailResponse(
+        near_miss=_near_miss(record),
+        sensitivity=tuple(
+            ThresholdSensitivityResponse.model_validate(item, from_attributes=True)
+            for item in sensitivity
+        ),
+    )

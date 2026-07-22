@@ -18,6 +18,15 @@ The research pipeline separates discovery, economic screening, complete-Strategy
 generation, training screening, validation, freezing, isolated test, qualification,
 and persistence. Test evidence cannot generate, tune, or rank a candidate.
 
+Predictive Edge Discovery v4 makes the discovery stage a bounded funnel: at most 120
+training relationships, 40 frozen validation configurations, and 12 isolated-test
+configurations. Its diagnostic output identifies the bottleneck, strongest observed
+signal, rejection counts and requirement margins rather than reducing a zero-candidate
+run to “no stable predictive edge”. Stage timings and computed/reused counts make a
+slow first execution auditable. The counters are incremented by the real v4 loops: generated/computed/reused/retained cheap relationships, validation configurations, and isolated-test configurations. They are not inferred from legacy collection sizes. Exact reuse remains keyed by data content, instrument,
+costs, configuration, profile, and contract versions; v3 evidence is readable but is
+not reusable as v4.
+
 ## Complete Strategy Contract
 
 Generation contract version 3 replaces the previous action-filter-only search. That

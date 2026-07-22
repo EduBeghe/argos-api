@@ -4,6 +4,10 @@
 
 Deploy `argos-api`, `argos-ingest`, and `argos-decide` from this repository, PostgreSQL as the shared datastore, and `argos-web` from its separate repository. Configure external cron schedules:
 
+The weekly Predictive Edge Discovery v4 cron remains intentionally pending until its
+first-run timing and diagnostics have been validated on Railway. Do not infer a
+profitable pattern from a successful job or enable a candidate automatically.
+
 - ingest: every five minutes;
 - decide: `2,32 * * * *` (UTC), allowing boundary candles and Scores to be persisted before the 30-minute cycle.
 

@@ -1,25 +1,43 @@
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.market.catalog import Instrument
+from app.optimization.predictive_edge_engine_v4 import (
+    PhaseWindowEvidence,
+    PredictiveEdgeV4Result,
+    TrainingWindowEvidence,
+    decode_v4_cache_value,
+    encode_v4_cache_value,
+)
 from app.optimization.predictive_edge_memory import (
     PredictiveEdgeAggregateRecord,
     PredictiveEdgeBenchmarkRecord,
     PredictiveEdgeBinAggregateRecord,
+    PredictiveEdgeNearMissRecord,
+    PredictiveEdgeRunDiagnosticRecord,
     PredictiveEdgeRunRecord,
+    PredictiveEdgeSensitivityRecord,
+    PredictiveEdgeV4CacheRecord,
     PredictiveEdgeWindowMetricRecord,
     PredictiveEdgeWindowRecord,
     StrategyHypothesisRecord,
 )
+from app.optimization.predictive_edge_v4 import (
+    DISCOVERY_BIN_COUNTS,
+    PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+    RejectionReason,
+)
 from app.optimization.predictive_edges import (
     PREDICTIVE_EDGE_ALGORITHM_VERSION,
+    PREDICTOR_VERSION,
     PredictiveEdgeConfiguration,
     PredictiveEdgeResult,
 )
@@ -392,3 +410,355 @@ async def persist_predictive_edge_result(
         )
     await session.commit()
     return PredictiveEdgeExecution(run_id, False, result, 0, 0)
+
+
+def predictive_edge_v4_experiment_key(
+    *,
+    dataset_fingerprint: str,
+    instrument: Instrument,
+    range_start: datetime,
+    range_end: datetime,
+    fee_rate: Decimal,
+    slippage_rate: Decimal,
+) -> str:
+    """Build an identity that can never alias a legacy v3 run."""
+
+    payload = {
+        "engine": "predictive_edge_discovery_v4",
+        "contract_version": PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+        "dataset_fingerprint": dataset_fingerprint,
+        "instrument": [
+            instrument.asset.value,
+            instrument.provider.value,
+            instrument.market_type.value,
+            instrument.interval.value,
+        ],
+        "range": [range_start.isoformat(), range_end.isoformat()],
+        "fee_rate": str(fee_rate),
+        "slippage_rate": str(slippage_rate),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def predictive_edge_v4_cache_namespace(
+    *, instrument: Instrument, fee_rate: Decimal, slippage_rate: Decimal
+) -> str:
+    """Identify reusable v4 evidence without binding it to a complete dataset."""
+
+    payload = {
+        "engine": "predictive_edge_discovery_v4_stage_cache",
+        "contract_version": PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+        "instrument": [
+            instrument.asset.value,
+            instrument.provider.value,
+            instrument.market_type.value,
+            instrument.interval.value,
+        ],
+        "predictor_version": PREDICTOR_VERSION,
+        "fee_rate": str(fee_rate),
+        "slippage_rate": str(slippage_rate),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+async def persist_predictive_edge_v4_result(
+    *,
+    session: AsyncSession,
+    experiment_key: str,
+    cache_namespace: str,
+    instrument: Instrument,
+    range_start: datetime,
+    range_end: datetime,
+    dataset_fingerprint: str,
+    windows: tuple[WalkForwardWindow, ...],
+    result: PredictiveEdgeV4Result,
+    fee_rate: Decimal,
+    slippage_rate: Decimal,
+    started_at: datetime,
+) -> PredictiveEdgeExecution:
+    """Persist the real v4 result without reconstructing synthetic configuration."""
+
+    run_id = uuid4()
+    training_days = max(1, (windows[0].training_to - windows[0].training_from).days)
+    validation_days = max(
+        1, (windows[0].validation_to - windows[0].validation_from).days
+    )
+    test_days = max(1, (windows[0].test_to - windows[0].test_from).days)
+    run = PredictiveEdgeRunRecord(
+        id=run_id,
+        experiment_key=experiment_key,
+        status="completed",
+        asset=instrument.asset.value,
+        provider=instrument.provider.value,
+        market_type=instrument.market_type.value,
+        interval=instrument.interval.value,
+        dataset_fingerprint=dataset_fingerprint,
+        range_start=range_start,
+        range_end=range_end,
+        algorithm_version=PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+        score_model_name=MODEL_NAME,
+        score_model_version=MODEL_VERSION,
+        fee_rate=fee_rate,
+        slippage_rate=slippage_rate,
+        neutral_threshold=Decimal(0),
+        decision_interval_seconds=0,
+        training_days=training_days,
+        validation_days=validation_days,
+        test_days=test_days,
+        step_days=max(1, (windows[1].training_from - windows[0].training_from).days)
+        if len(windows) > 1
+        else validation_days,
+        maximum_windows=len(windows),
+        bin_count=min(DISCOVERY_BIN_COUNTS),
+        minimum_observations=0,
+        minimum_windows=0,
+        minimum_stable_direction_ratio=Decimal(0),
+        minimum_absolute_correlation=Decimal(0),
+        minimum_directional_hit_rate=Decimal(0),
+        minimum_hit_rate_improvement_over_benchmark=Decimal(0),
+        windows_available=len(windows),
+        windows_required=0,
+        conclusion_reason=result.outcome_explanation,
+        windows_generated=len(windows),
+        aggregate_metrics_computed=(
+            result.training_counters.computed
+            + result.validation_counters.computed
+            + result.test_counters.computed
+        ),
+        metrics_reused=(
+            result.training_counters.reused
+            + result.validation_counters.reused
+            + result.test_counters.reused
+        ),
+        compute_avoided_estimate=(
+            result.training_counters.reused
+            + result.validation_counters.reused
+            + result.test_counters.reused
+        ),
+        reuse_count=0,
+        started_at=started_at,
+        completed_at=datetime.now(UTC),
+        failed_at=None,
+        failure_reason=None,
+    )
+    session.add(run)
+    await session.flush()
+    session.add(
+        PredictiveEdgeRunDiagnosticRecord(
+            id=uuid4(),
+            run_id=run_id,
+            contract_version=PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+            effective_parameters=[
+                {
+                    "name": item.name,
+                    "value": item.value,
+                    "source": item.source.value,
+                    "rationale": item.rationale,
+                    "contract_version": item.contract_version,
+                }
+                for item in result.effective_parameters
+            ],
+            rejection_counts_by_reason=result.rejection_counts,
+            rejection_counts_by_predictor=result.rejection_counts_by_predictor,
+            rejection_counts_by_horizon=result.rejection_counts_by_horizon,
+            rejection_counts_by_condition=result.rejection_counts_by_condition,
+            rejection_counts_by_neutral_policy=(
+                result.rejection_counts_by_neutral_policy
+            ),
+            rejection_counts_by_cadence=result.rejection_counts_by_cadence,
+            strongest_observed_signal=result.strongest_observed_signal,
+            bottleneck_stage=result.bottleneck_stage,
+            diagnostic_conclusion=result.conclusion.value,
+            outcome_explanation=result.outcome_explanation,
+            stage_timings={name: str(value) for name, value in result.timings.items()},
+            computed_counts={
+                "cheap_relationships": result.training_counters.computed,
+                "validation_configurations": result.validation_counters.computed,
+                "test_configurations": result.test_counters.computed,
+            },
+            reused_counts={
+                "cheap_relationships": result.training_counters.reused,
+                "validation_configurations": result.validation_counters.reused,
+                "test_configurations": result.test_counters.reused,
+            },
+        )
+    )
+    validation_by_fingerprint = {
+        item.configuration.fingerprint: item
+        for item in result.validation_configurations
+    }
+    for near_miss in result.near_misses:
+        validation = validation_by_fingerprint[near_miss.diagnostic.fingerprint]
+        configuration = validation.configuration
+        session.add(
+            PredictiveEdgeNearMissRecord(
+                id=uuid4(),
+                run_id=run_id,
+                rank=near_miss.rank,
+                edge_fingerprint=configuration.fingerprint,
+                predictor_name=configuration.predictor.name,
+                cadence_seconds=int(configuration.cadence.total_seconds()),
+                horizon_seconds=int(configuration.horizon.total_seconds()),
+                bin_count=configuration.bins,
+                condition=configuration.condition.value,
+                neutral_policy=configuration.neutral_policy.value,
+                profile=configuration.profile.value,
+                classification=near_miss.diagnostic.classification,
+                primary_rejection_reason=(
+                    near_miss.diagnostic.primary_rejection_reason.value
+                    if near_miss.diagnostic.primary_rejection_reason is not None
+                    else RejectionReason.VALIDATION_FAILED.value
+                ),
+                passed_requirements=[
+                    item.value for item in near_miss.diagnostic.passed_requirements
+                ],
+                failed_requirements=[
+                    item.value for item in near_miss.diagnostic.failed_requirements
+                ],
+                requirement_margins=[
+                    {
+                        "requirement": margin.requirement.value,
+                        "observed_value": str(margin.observed_value),
+                        "required_value": str(margin.required_value),
+                        "absolute_margin": str(margin.absolute_margin),
+                        "relative_margin": (
+                            str(margin.relative_margin)
+                            if margin.relative_margin is not None
+                            else None
+                        ),
+                        "passed": margin.passed,
+                    }
+                    for margin in near_miss.diagnostic.margins
+                ],
+                usable_observations=near_miss.diagnostic.usable_observations,
+                stable_direction_ratio=(near_miss.diagnostic.stable_direction_ratio),
+                expected_net_movement=(near_miss.diagnostic.net_expected_movement),
+                normalized_missing_distance=(near_miss.normalized_missing_distance),
+            )
+        )
+    for sensitivity in result.sensitivity:
+        session.add(
+            PredictiveEdgeSensitivityRecord(
+                id=uuid4(),
+                run_id=run_id,
+                edge_fingerprint=sensitivity.edge_fingerprint,
+                threshold_name=sensitivity.threshold_name.value,
+                current_value=sensitivity.current_value,
+                nearest_passing_value=sensitivity.nearest_passing_value,
+                candidate_would_advance=sensitivity.candidate_would_advance,
+                other_requirements_still_failed=[
+                    item.value for item in sensitivity.other_requirements_still_failed
+                ],
+            )
+        )
+    for hypothesis in result.hypotheses:
+        session.add(
+            StrategyHypothesisRecord(
+                id=uuid4(),
+                hypothesis_id=hypothesis.hypothesis_id,
+                run_id=run_id,
+                predictor_name=hypothesis.predictor_name,
+                predictor_version=hypothesis.predictor_version,
+                hypothesis_contract_version=hypothesis.hypothesis_contract_version,
+                direction_mapping=hypothesis.direction_mapping.value,
+                bin_ordinal=hypothesis.bin_ordinal,
+                lower_bound=hypothesis.lower_bound,
+                upper_bound=hypothesis.upper_bound,
+                suggested_action=hypothesis.suggested_action.value,
+                horizon_seconds=int(hypothesis.horizon.total_seconds()),
+                condition=hypothesis.condition.value,
+                supporting_bin_ordinals=list(hypothesis.supporting_bin_ordinals),
+                expected_gross_return=hypothesis.expected_gross_return,
+                expected_net_return=hypothesis.expected_net_return,
+                expected_avoided_loss=hypothesis.expected_avoided_loss,
+                directional_hit_rate=hypothesis.directional_hit_rate,
+                stability_ratio=hypothesis.stability_ratio,
+                evaluation_interval_seconds=int(
+                    hypothesis.minimum_evaluation_interval.total_seconds()
+                ),
+                holding_period_from_seconds=int(
+                    hypothesis.minimum_holding_period_from.total_seconds()
+                ),
+                holding_period_to_seconds=int(
+                    hypothesis.minimum_holding_period_to.total_seconds()
+                ),
+                evidence_status=hypothesis.evidence_status.value,
+                rationale=hypothesis.rationale,
+                limitations=hypothesis.limitations,
+            )
+        )
+    for cache_key, cache_value in result.cache_writes.items():
+        payload = encode_v4_cache_value(cache_value)
+        if not isinstance(payload, dict):
+            raise TypeError("v4 stage cache payload must be an object")
+        if isinstance(cache_value, TrainingWindowEvidence):
+            kind = "training"
+            cadence = timedelta(0)
+            horizon = timedelta(0)
+            bins = None
+            condition = None
+            neutral_policy = None
+            profile = None
+        elif isinstance(cache_value, PhaseWindowEvidence):
+            kind = cache_value.phase
+            cadence = timedelta(0)
+            horizon = timedelta(0)
+            bins = None
+            condition = None
+            neutral_policy = None
+            profile = None
+        else:
+            raise TypeError(f"unsupported v4 cache stage: {type(cache_value).__name__}")
+        statement = (
+            postgresql_insert(PredictiveEdgeV4CacheRecord)
+            .values(
+                id=uuid4(),
+                cache_key=cache_key,
+                cache_namespace=cache_namespace,
+                status="completed",
+                evidence_kind=kind,
+                contract_version=PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+                dataset_fingerprint=dataset_fingerprint,
+                cadence_seconds=int(cadence.total_seconds()),
+                horizon_seconds=int(horizon.total_seconds()),
+                bin_count=bins,
+                condition=condition,
+                neutral_policy=neutral_policy,
+                profile=profile,
+                fee_rate=fee_rate,
+                slippage_rate=slippage_rate,
+                payload=payload,
+                created_at=datetime.now(UTC),
+            )
+            .on_conflict_do_nothing(index_elements=["cache_key"])
+        )
+        await session.execute(statement)
+    await session.commit()
+    return PredictiveEdgeExecution(run_id, False, None, 0, 0)
+
+
+async def load_predictive_edge_v4_cache(
+    session: AsyncSession, *, cache_namespace: str
+) -> dict[str, object]:
+    """Load only completed evidence for one exact v4 experiment identity."""
+
+    rows = (
+        await session.scalars(
+            select(PredictiveEdgeV4CacheRecord).where(
+                PredictiveEdgeV4CacheRecord.cache_namespace == cache_namespace,
+                PredictiveEdgeV4CacheRecord.status == "completed",
+                PredictiveEdgeV4CacheRecord.contract_version
+                == PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+            )
+        )
+    ).all()
+    result: dict[str, object] = {}
+    for row in rows:
+        try:
+            result[row.cache_key] = decode_v4_cache_value(row.payload)
+        except (TypeError, ValueError):
+            # A malformed or incomplete cache row is never reusable.
+            continue
+    return result
