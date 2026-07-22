@@ -9,7 +9,7 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from math import sqrt
@@ -19,7 +19,6 @@ from time import perf_counter
 from app.optimization.feature_matrix import HistoricalFeatureMatrix
 from app.optimization.predictive_edge_v4 import (
     CHEAP_RELATIONSHIP_LIMIT,
-    DISCOVERY_BIN_COUNTS,
     DISCOVERY_CADENCES,
     DISCOVERY_HORIZONS,
     ECONOMIC_EDGE_MARGIN,
@@ -49,6 +48,8 @@ from app.optimization.predictive_edges import (
     HYPOTHESIS_CONTRACT_VERSION,
     PREDICTORS,
     Condition,
+    Direction,
+    DirectionBenchmarks,
     DirectionMapping,
     EdgeMetrics,
     EvidenceStatus,
@@ -82,6 +83,19 @@ class CheapRelationship:
     redundancy_group: str
     fingerprint: str
     reused: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingWindowEvidence:
+    observation_count: int
+    absolute_correlation: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseWindowEvidence:
+    phase: str
+    gross_returns: tuple[Decimal, ...]
+    metrics: EdgeMetrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,32 +231,19 @@ def analyze_predictive_edges_v4(
     validation_computed = 0
     validation_reused = 0
     for frozen_configuration in frozen:
-        cache_key = _fingerprint(
-            cache_namespace, "validation", frozen_configuration.fingerprint
+        validation_result, computed, reused = _evaluate_validation(
+            matrix,
+            windows,
+            simulation,
+            frozen_configuration,
+            cache_namespace,
+            cache,
+            cache_writes,
+            force_recompute,
         )
-        cached_validation = None if force_recompute else cache.get(cache_key)
-        if isinstance(cached_validation, ValidationConfigurationResult):
-            validation_values.append(
-                ValidationConfigurationResult(
-                    cached_validation.configuration,
-                    cached_validation.diagnostic,
-                    cached_validation.status,
-                    cached_validation.selected_for_test,
-                    cached_validation.benchmark,
-                    cached_validation.standard_error,
-                    cached_validation.gross_expected_movement,
-                    cached_validation.net_expected_movement,
-                    True,
-                )
-            )
-            validation_reused += 1
-        else:
-            validation_result = _evaluate_validation(
-                matrix, windows, simulation, frozen_configuration
-            )
-            validation_values.append(validation_result)
-            cache_writes[cache_key] = validation_result
-            validation_computed += 1
+        validation_values.append(validation_result)
+        validation_computed += computed
+        validation_reused += reused
     validation = tuple(validation_values)
     selected = tuple(
         sorted(
@@ -275,34 +276,19 @@ def analyze_predictive_edges_v4(
     test_computed = 0
     test_reused = 0
     for selected_validation in selected:
-        cache_key = _fingerprint(
+        test_result, computed, reused = _evaluate_isolated_test(
+            matrix,
+            windows,
+            simulation,
+            selected_validation.configuration,
             cache_namespace,
-            "isolated_test",
-            selected_validation.configuration.fingerprint,
+            cache,
+            cache_writes,
+            force_recompute,
         )
-        cached_test = None if force_recompute else cache.get(cache_key)
-        if isinstance(cached_test, IsolatedTestResult):
-            test_values.append(
-                IsolatedTestResult(
-                    cached_test.configuration_fingerprint,
-                    cached_test.confirmed,
-                    cached_test.observation_count,
-                    cached_test.directional_hit_rate,
-                    cached_test.benchmark,
-                    cached_test.gross_expected_movement,
-                    cached_test.net_expected_movement,
-                    cached_test.rejection_reason,
-                    True,
-                )
-            )
-            test_reused += 1
-        else:
-            test_result = _evaluate_isolated_test(
-                matrix, windows, simulation, selected_validation.configuration
-            )
-            test_values.append(test_result)
-            cache_writes[cache_key] = test_result
-            test_computed += 1
+        test_values.append(test_result)
+        test_computed += computed
+        test_reused += reused
     test_results = tuple(test_values)
     confirmed_ids = {
         item.configuration_fingerprint for item in test_results if item.confirmed
@@ -363,13 +349,19 @@ def analyze_predictive_edges_v4(
             len(relationships),
         ),
         StageCounters(
-            len(frozen),
+            validation_computed + validation_reused,
             validation_computed,
             validation_reused,
             len(frozen) - len(selected),
             len(selected),
         ),
-        StageCounters(len(selected), test_computed, test_reused, 0, len(confirmed)),
+        StageCounters(
+            test_computed + test_reused,
+            test_computed,
+            test_reused,
+            0,
+            len(confirmed),
+        ),
         {
             "training": Decimal(str(training_elapsed)),
             "validation": Decimal(str(validation_elapsed)),
@@ -403,35 +395,6 @@ def _cheap_training_relationships(
             for horizon in DISCOVERY_HORIZONS:
                 if horizon % cadence:
                     continue
-                generated += 1
-                cache_key = _fingerprint(
-                    cache_namespace,
-                    "training",
-                    predictor.name,
-                    predictor.version,
-                    cadence,
-                    horizon,
-                    matrix.dataset_fingerprint,
-                    simulation.fee_rate,
-                    simulation.slippage_rate,
-                )
-                cached = None if force_recompute else cache.get(cache_key)
-                if isinstance(cached, CheapRelationship):
-                    candidates.append(
-                        CheapRelationship(
-                            cached.predictor,
-                            cached.cadence,
-                            cached.horizon,
-                            cached.observation_count,
-                            cached.mean_absolute_correlation,
-                            cached.score,
-                            cached.redundancy_group,
-                            cached.fingerprint,
-                            True,
-                        )
-                    )
-                    reused += 1
-                    continue
                 correlations: list[Decimal] = []
                 observations = 0
                 for window in windows:
@@ -440,28 +403,55 @@ def _cheap_training_relationships(
                     )
                     if not training_rows:
                         continue
-                    values, _ = _observations(
-                        rows,
-                        phase_start=window.training_from,
-                        phase_end=window.training_to,
-                        predictor=predictor,
-                        horizon=horizon,
-                        condition=Condition.ALL,
-                        volatility_threshold=predictive_edge_volatility_threshold(
-                            training_rows
+                    generated += 1
+                    cache_key = _fingerprint(
+                        cache_namespace,
+                        "training",
+                        predictor.name,
+                        predictor.version,
+                        cadence,
+                        horizon,
+                        window.training_from,
+                        window.training_to,
+                        _slice_fingerprint(
+                            matrix, window.training_from, window.training_to
                         ),
-                        friction=Decimal(2)
-                        * (simulation.fee_rate + simulation.slippage_rate),
-                        neutral=Decimal(0),
-                        cadence=cadence,
+                        simulation.fee_rate,
+                        simulation.slippage_rate,
                     )
-                    correlation = _correlation(
-                        tuple(item.predictor_value for item in values),
-                        tuple(item.forward_gross_return for item in values),
-                    )
-                    observations += len(values)
-                    if correlation is not None:
-                        correlations.append(abs(correlation))
+                    cached = None if force_recompute else cache.get(cache_key)
+                    if isinstance(cached, TrainingWindowEvidence):
+                        evidence = cached
+                        reused += 1
+                    else:
+                        values, _ = _observations(
+                            rows,
+                            phase_start=window.training_from,
+                            phase_end=window.training_to,
+                            predictor=predictor,
+                            horizon=horizon,
+                            condition=Condition.ALL,
+                            volatility_threshold=predictive_edge_volatility_threshold(
+                                training_rows
+                            ),
+                            friction=Decimal(2)
+                            * (simulation.fee_rate + simulation.slippage_rate),
+                            neutral=Decimal(0),
+                            cadence=cadence,
+                        )
+                        correlation = _correlation(
+                            tuple(item.predictor_value for item in values),
+                            tuple(item.forward_gross_return for item in values),
+                        )
+                        evidence = TrainingWindowEvidence(
+                            len(values),
+                            abs(correlation) if correlation is not None else None,
+                        )
+                        cache_writes[cache_key] = evidence
+                        computed += 1
+                    observations += evidence.observation_count
+                    if evidence.absolute_correlation is not None:
+                        correlations.append(evidence.absolute_correlation)
                 mean_correlation = (
                     sum(correlations, Decimal(0)) / Decimal(len(correlations))
                     if correlations
@@ -473,7 +463,6 @@ def _cheap_training_relationships(
                     predictor.version,
                     cadence,
                     horizon,
-                    matrix.dataset_fingerprint,
                     "training",
                 )
                 relationship = CheapRelationship(
@@ -487,8 +476,6 @@ def _cheap_training_relationships(
                     fingerprint,
                 )
                 candidates.append(relationship)
-                cache_writes[cache_key] = relationship
-                computed += 1
     return _diversified_cheap(tuple(candidates)), generated, computed, reused
 
 
@@ -555,26 +542,64 @@ def _bounded_frozen_configurations(
     simulation: SimulationConfiguration,
     relationships: tuple[CheapRelationship, ...],
 ) -> tuple[FrozenConfiguration, ...]:
-    proposals: list[FrozenConfiguration] = []
-    for index, relationship in enumerate(relationships):
-        bins = DISCOVERY_BIN_COUNTS[index % len(DISCOVERY_BIN_COUNTS)]
-        condition = tuple(Condition)[
-            (index // len(DISCOVERY_BIN_COUNTS)) % len(Condition)
-        ]
-        policy = tuple(NeutralBandPolicy)[
-            (index // (len(DISCOVERY_BIN_COUNTS) * len(Condition)))
-            % len(NeutralBandPolicy)
-        ]
-        profile = tuple(EvidenceProfile)[
-            (
-                index
-                // (len(DISCOVERY_BIN_COUNTS) * len(Condition) * len(NeutralBandPolicy))
-            )
-            % len(EvidenceProfile)
-        ]
-        if profile is EvidenceProfile.STRICT_V3_COMPATIBLE:
-            policy = NeutralBandPolicy.ECONOMIC_FRICTION
-        proposals.append(
+    # This bounded design set is deliberate rather than an index-to-configuration
+    # mapping.  It exercises every dimension without constructing the full Cartesian
+    # product.  All variants are scored only from training evidence below.
+    variants = (
+        (
+            3,
+            Condition.ALL,
+            NeutralBandPolicy.ECONOMIC_FRICTION,
+            EvidenceProfile.STRICT_V3_COMPATIBLE,
+        ),
+        (
+            5,
+            Condition.ALL,
+            NeutralBandPolicy.ZERO_DIRECTION,
+            EvidenceProfile.BALANCED_V4,
+        ),
+        (
+            7,
+            Condition.ALL,
+            NeutralBandPolicy.TRAINING_NOISE,
+            EvidenceProfile.EXPLORATORY_V4,
+        ),
+        (
+            5,
+            Condition.EMA_ABOVE,
+            NeutralBandPolicy.ECONOMIC_FRICTION,
+            EvidenceProfile.BALANCED_V4,
+        ),
+        (
+            5,
+            Condition.EMA_BELOW,
+            NeutralBandPolicy.TRAINING_NOISE,
+            EvidenceProfile.EXPLORATORY_V4,
+        ),
+        (
+            7,
+            Condition.HIGH_VOLATILITY,
+            NeutralBandPolicy.ZERO_DIRECTION,
+            EvidenceProfile.BALANCED_V4,
+        ),
+        (
+            3,
+            Condition.NORMAL_VOLATILITY,
+            NeutralBandPolicy.TRAINING_NOISE,
+            EvidenceProfile.EXPLORATORY_V4,
+        ),
+    )
+    # Reserve half the budget for relationship breadth.  The remaining capacity goes
+    # to additional training-ranked variants of the strongest relationships.
+    ranked_relationships = sorted(
+        relationships,
+        key=lambda item: (-item.score, -item.observation_count, item.fingerprint),
+    )[: VALIDATION_CONFIGURATION_LIMIT // 2]
+    ranked_by_relationship: list[
+        tuple[CheapRelationship, tuple[FrozenConfiguration, ...]]
+    ] = []
+    for relationship in ranked_relationships:
+        candidates = tuple(
             _freeze_configuration(
                 matrix,
                 windows,
@@ -585,47 +610,72 @@ def _bounded_frozen_configurations(
                 policy,
                 profile,
             )
+            for bins, condition, policy, profile in variants
         )
-    # One proposal per retained relationship avoids the full Cartesian product.
-    selected: list[FrozenConfiguration] = []
-    selected_ids: set[str] = set()
-
-    def retain(value: FrozenConfiguration) -> None:
-        if value.fingerprint not in selected_ids:
-            selected.append(value)
-            selected_ids.add(value.fingerprint)
-
-    dimensions: tuple[Callable[[FrozenConfiguration], object], ...] = (
-        lambda item: item.profile.value,
-        lambda item: item.neutral_policy.value,
-        lambda item: item.condition.value,
-        lambda item: item.bins,
-    )
-    for dimension in dimensions:
-        for value in sorted({dimension(item) for item in proposals}, key=str):
-            retain(
-                min(
-                    (item for item in proposals if dimension(item) == value),
-                    key=lambda item: item.fingerprint,
-                )
+        ranked_by_relationship.append(
+            (
+                relationship,
+                tuple(
+                    sorted(
+                        candidates,
+                        key=lambda item: (
+                            -_training_configuration_proxy(matrix, windows, item),
+                            item.fingerprint,
+                        ),
+                    )
+                ),
             )
-    for item in sorted(
-        proposals,
-        key=lambda value: (
-            value.predictor.name,
-            value.cadence,
-            value.horizon,
-            value.profile.value,
-            value.neutral_policy.value,
-            value.condition.value,
-            value.bins,
-            value.fingerprint,
+        )
+    selected = [items[0] for _, items in ranked_by_relationship if items]
+    extras = sorted(
+        (
+            (relationship.score, rank, item)
+            for relationship, items in ranked_by_relationship
+            for rank, item in enumerate(items[1:], start=1)
         ),
-    ):
-        if len(selected) >= VALIDATION_CONFIGURATION_LIMIT:
-            break
-        retain(item)
+        key=lambda value: (-value[0], value[1], value[2].fingerprint),
+    )
+    selected.extend(
+        item for _, _, item in extras[: VALIDATION_CONFIGURATION_LIMIT - len(selected)]
+    )
     return tuple(selected)
+
+
+def _training_configuration_proxy(
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    configuration: FrozenConfiguration,
+) -> Decimal:
+    """Rank bounded alternatives using only selected-bin training evidence."""
+
+    rows = {row.candle_open_time: row for row in matrix.rows}
+    selected_returns: list[Decimal] = []
+    for window in windows:
+        observations, _ = _observations(
+            rows,
+            phase_start=window.training_from,
+            phase_end=window.training_to,
+            predictor=configuration.predictor,
+            horizon=configuration.horizon,
+            condition=configuration.condition,
+            volatility_threshold=dict(configuration.volatility_thresholds)[
+                window.ordinal
+            ],
+            friction=Decimal(0),
+            neutral=configuration.neutral_threshold,
+            cadence=configuration.cadence,
+        )
+        selected_returns.extend(
+            item.forward_gross_return
+            for item in observations
+            if _bin_ordinal(item.predictor_value, configuration.bin_bounds)
+            == configuration.selected_bin_ordinal
+        )
+    if not selected_returns:
+        return Decimal(0)
+    gross = sum(selected_returns, Decimal(0)) / Decimal(len(selected_returns))
+    aligned = _action_aligned_gross(gross, configuration.suggested_action)
+    return aligned * Decimal(str(sqrt(len(selected_returns))))
 
 
 def _freeze_configuration(
@@ -850,26 +900,46 @@ def _evaluate_validation(
     windows: tuple[WalkForwardWindow, ...],
     simulation: SimulationConfiguration,
     configuration: FrozenConfiguration,
-) -> ValidationConfigurationResult:
-    values, window_metrics = _phase_evidence(
-        matrix, windows, simulation, configuration, "validation"
+    cache_namespace: str,
+    cache: Mapping[str, object],
+    cache_writes: dict[str, object],
+    force_recompute: bool,
+) -> tuple[ValidationConfigurationResult, int, int]:
+    values, window_metrics, computed, reused = _phase_evidence(
+        matrix,
+        windows,
+        simulation,
+        configuration,
+        "validation",
+        cache_namespace,
+        cache,
+        cache_writes,
+        force_recompute,
     )
     diagnostic = _diagnostic(configuration, values, window_metrics, simulation)
     failed = set(diagnostic.failed_requirements)
     economics_pass = RejectionReason.MOVEMENT_DOES_NOT_COVER_COSTS not in failed
-    selected = not failed and economics_pass
+    selected = (
+        not failed
+        and economics_pass
+        and configuration.suggested_action is not SuggestedAction.DIAGNOSTIC_ONLY
+    )
     if configuration.profile is EvidenceProfile.EXPLORATORY_V4 and not economics_pass:
         selected = False
     status = "selected_for_test" if selected else "near_miss" if values else "rejected"
-    return ValidationConfigurationResult(
-        configuration,
-        diagnostic,
-        status,
-        selected,
-        diagnostic.strongest_directional_benchmark,
-        diagnostic.standard_error,
-        diagnostic.gross_expected_movement,
-        diagnostic.net_expected_movement,
+    return (
+        ValidationConfigurationResult(
+            configuration,
+            diagnostic,
+            status,
+            selected,
+            diagnostic.strongest_directional_benchmark,
+            diagnostic.standard_error,
+            diagnostic.gross_expected_movement,
+            diagnostic.net_expected_movement,
+        ),
+        computed,
+        reused,
     )
 
 
@@ -878,21 +948,40 @@ def _evaluate_isolated_test(
     windows: tuple[WalkForwardWindow, ...],
     simulation: SimulationConfiguration,
     configuration: FrozenConfiguration,
-) -> IsolatedTestResult:
-    values, window_metrics = _phase_evidence(
-        matrix, windows, simulation, configuration, "test"
+    cache_namespace: str,
+    cache: Mapping[str, object],
+    cache_writes: dict[str, object],
+    force_recompute: bool,
+) -> tuple[IsolatedTestResult, int, int]:
+    values, window_metrics, computed, reused = _phase_evidence(
+        matrix,
+        windows,
+        simulation,
+        configuration,
+        "test",
+        cache_namespace,
+        cache,
+        cache_writes,
+        force_recompute,
     )
     diagnostic = _diagnostic(configuration, values, window_metrics, simulation)
-    confirmed = not diagnostic.failed_requirements
-    return IsolatedTestResult(
-        configuration.fingerprint,
-        confirmed,
-        len(values),
-        diagnostic.directional_hit_rate,
-        diagnostic.strongest_directional_benchmark,
-        diagnostic.gross_expected_movement,
-        diagnostic.net_expected_movement,
-        diagnostic.primary_rejection_reason if not confirmed else None,
+    confirmed = (
+        not diagnostic.failed_requirements
+        and configuration.suggested_action is not SuggestedAction.DIAGNOSTIC_ONLY
+    )
+    return (
+        IsolatedTestResult(
+            configuration.fingerprint,
+            confirmed,
+            len(values),
+            diagnostic.directional_hit_rate,
+            diagnostic.strongest_directional_benchmark,
+            diagnostic.gross_expected_movement,
+            diagnostic.net_expected_movement,
+            diagnostic.primary_rejection_reason if not confirmed else None,
+        ),
+        computed,
+        reused,
     )
 
 
@@ -902,46 +991,99 @@ def _phase_evidence(
     simulation: SimulationConfiguration,
     configuration: FrozenConfiguration,
     phase: str,
-) -> tuple[tuple[Observation, ...], tuple[EdgeMetrics, ...]]:
+    cache_namespace: str,
+    cache: Mapping[str, object],
+    cache_writes: dict[str, object],
+    force_recompute: bool,
+) -> tuple[tuple[Observation, ...], tuple[EdgeMetrics, ...], int, int]:
     rows = {row.candle_open_time: row for row in matrix.rows}
     all_values: list[Observation] = []
     metrics: list[EdgeMetrics] = []
+    computed = 0
+    reused = 0
     volatility = dict(configuration.volatility_thresholds)
     friction = Decimal(2) * (simulation.fee_rate + simulation.slippage_rate)
     for window in windows:
         start = getattr(window, f"{phase}_from")
         end = getattr(window, f"{phase}_to")
-        observations, missing = _observations(
-            rows,
-            phase_start=start,
-            phase_end=end,
-            predictor=configuration.predictor,
-            horizon=configuration.horizon,
-            condition=configuration.condition,
-            volatility_threshold=volatility[window.ordinal],
-            friction=friction,
-            neutral=configuration.neutral_threshold,
-            cadence=configuration.cadence,
+        cache_key = _fingerprint(
+            cache_namespace,
+            phase,
+            configuration.fingerprint,
+            start,
+            end,
+            _slice_fingerprint(matrix, start, end),
+            simulation.fee_rate,
+            simulation.slippage_rate,
         )
-        selected = tuple(
-            item
-            for item in observations
-            if _bin_ordinal(item.predictor_value, configuration.bin_bounds)
-            == configuration.selected_bin_ordinal
-        )
-        all_values.extend(selected)
-        metrics.append(
-            _metrics(
-                selected,
-                missing,
+        cached = None if force_recompute else cache.get(cache_key)
+        if isinstance(cached, PhaseWindowEvidence):
+            evidence = cached
+            reused += 1
+        else:
+            observations, missing = _observations(
+                rows,
+                phase_start=start,
+                phase_end=end,
                 predictor=configuration.predictor,
-                center=Decimal(0),
-                mapping=configuration.direction_mapping,
+                horizon=configuration.horizon,
+                condition=configuration.condition,
+                volatility_threshold=volatility[window.ordinal],
                 friction=friction,
-                thresholds=configuration.thresholds,
+                neutral=configuration.neutral_threshold,
+                cadence=configuration.cadence,
             )
+            selected = tuple(
+                item
+                for item in observations
+                if _bin_ordinal(item.predictor_value, configuration.bin_bounds)
+                == configuration.selected_bin_ordinal
+            )
+            evidence = PhaseWindowEvidence(
+                phase,
+                tuple(item.forward_gross_return for item in selected),
+                _metrics(
+                    selected,
+                    missing,
+                    predictor=configuration.predictor,
+                    center=Decimal(0),
+                    mapping=configuration.direction_mapping,
+                    friction=friction,
+                    thresholds=configuration.thresholds,
+                ),
+            )
+            cache_writes[cache_key] = evidence
+            computed += 1
+        # Diagnostics need only the selected forward returns and the fully calculated
+        # window metric. Reconstruct minimal immutable observations without provider
+        # I/O.
+        all_values.extend(
+            Observation(
+                start,
+                Decimal(0),
+                gross,
+                abs(gross),
+                abs(gross) - friction,
+                Direction.UP
+                if gross > 0
+                else Direction.DOWN
+                if gross < 0
+                else Direction.NEUTRAL,
+            )
+            for gross in evidence.gross_returns
         )
-    return tuple(all_values), tuple(metrics)
+        metrics.append(evidence.metrics)
+    return tuple(all_values), tuple(metrics), computed, reused
+
+
+def _slice_fingerprint(
+    matrix: HistoricalFeatureMatrix, start: datetime, end: datetime
+) -> str:
+    """Fingerprint exactly the immutable feature rows consumed by one phase slice."""
+
+    return _fingerprint(
+        tuple(row for row in matrix.rows if start <= row.candle_open_time < end)
+    )
 
 
 def _diagnostic(
@@ -979,7 +1121,8 @@ def _diagnostic(
         if values
         else Decimal(0)
     )
-    net = abs(gross) - Decimal(2) * (simulation.fee_rate + simulation.slippage_rate)
+    aligned_gross = _action_aligned_gross(gross, configuration.suggested_action)
+    net = aligned_gross - Decimal(2) * (simulation.fee_rate + simulation.slippage_rate)
     standard_errors = tuple(
         item.standard_error
         for item in window_metrics
@@ -1061,11 +1204,23 @@ def _diagnostic(
         hit if hits else None,
         benchmark if benchmarks else None,
         improvement if benchmarks and hits else None,
-        gross if values else None,
+        aligned_gross if values else None,
         net if values else None,
         standard_error,
         dispersion if correlations else None,
     )
+
+
+def _action_aligned_gross(
+    gross_expected_movement: Decimal, action: SuggestedAction
+) -> Decimal:
+    """Align economic value with the frozen long-only action, never magnitude."""
+
+    if action is SuggestedAction.LONG_ENTRY:
+        return gross_expected_movement
+    if action is SuggestedAction.EXIT_OR_AVOID:
+        return -gross_expected_movement
+    return Decimal(0)
 
 
 def _effective_parameters(
@@ -1291,6 +1446,10 @@ _CACHE_DATACLASSES: dict[str, Callable[..., object]] = {
     for value in (
         PredictorDefinition,
         EvidenceThresholds,
+        DirectionBenchmarks,
+        EdgeMetrics,
+        TrainingWindowEvidence,
+        PhaseWindowEvidence,
         CheapRelationship,
         ThresholdCalibration,
         FrozenConfiguration,
@@ -1304,6 +1463,8 @@ _CACHE_ENUMS: dict[str, Callable[[str], object]] = {
     value.__name__: value
     for value in (
         PredictorSemanticKind,
+        Direction,
+        EvidenceStatus,
         DirectionMapping,
         Condition,
         SuggestedAction,

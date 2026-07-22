@@ -20,6 +20,10 @@ candidate. None is activated automatically.
 The bounded funnel screens cadence/horizon relationships using training only, retains
 at most 120 diversified relationships, expands bins, the five existing conditions,
 and versioned neutral policies, and freezes at most 40 configurations for validation.
+The 40 configurations are not assigned by relationship index: a bounded design set is
+ranked with selected-bin training evidence, reserves breadth across relationships, and
+allocates additional variants to the strongest training relationships. It does not
+construct the complete Cartesian product.
 Validation can retain at most 12 configurations for isolated test. Test confirms or
 rejects; it cannot select cadence, horizon, bins, neutral policy, profile, thresholds,
 bounds, or direction mapping.
@@ -31,6 +35,12 @@ cost-based `economic_friction`. `strict_v3_compatible`, `balanced_v4`, and
 `exploratory_v4` remain distinct, fingerprinted profiles. Exploratory evidence may
 produce diagnostics but cannot become executable without the same economic and
 validation/test requirements.
+
+Economic evidence is aligned to the proposed long-only action. For `long_entry`, gross
+expected movement is the observed gross return; for `exit_or_avoid`, it is the negated
+gross return. Round-trip cost is subtracted from that signed value. Absolute movement
+is never substituted for action-aligned economics, and `diagnostic_only` evidence can
+never be confirmed.
 
 Each effective parameter records its value, source, rationale, and contract version.
 Every rejected aggregate records passed and failed requirements plus signed absolute
@@ -46,15 +56,15 @@ Three read-only resources expose v4 evidence:
 - `GET /optimization/predictive-edge-runs/{run_id}/near-misses`;
 - `GET /optimization/predictive-edge-runs/{run_id}/near-misses/{near_miss_id}`.
 
-`analyze_predictive_edges` remains the legacy v3 engine. Weekly research calls the separate
-`analyze_predictive_edges_v4` runtime. Its stage cache stores only completed typed
-training, validation, or isolated-test evidence; keys include the instrument experiment
-namespace, exact dataset content, cadence, horizon, frozen configuration, costs, and v4
-contract. `--force-recompute` bypasses all stage reads.
-
 Existing v3 rows remain readable. Their contract version prevents reuse as v4 evidence.
 Failure to detect an edge is not proof that none exists, and historical evidence does
 not guarantee future results.
+
+Completed v4 stage evidence is cached by instrument, predictor/version, cadence,
+horizon, frozen configuration, phase boundaries, an exact fingerprint of the consumed
+slice, costs, and contract version. The namespace deliberately excludes the complete
+dataset fingerprint, so extending a weekly range can reuse unchanged slices while
+computing new or modified slices. `--force-recompute` bypasses all cache reads.
 
 ## Temporal and statistical contract
 
@@ -113,34 +123,55 @@ suggestions. It has no entry/exit threshold or position size and is not executab
 Different bins of one predictor may create independent long-entry and exit/avoid
 hypotheses when each has independently selected and confirmed evidence.
 
-## Complete edge-guided Strategy candidates
+## Edge-guided strategy candidates
 
-Generation contract version 3 converts confirmed actionable evidence into bounded,
-complete long-only Strategies rather than only filtering production actions. A
-`long_entry` can open a Position from its own frozen bin and condition while flat;
-it never buys repeatedly while open, exceeds its target allocation, creates short
-exposure, or ignores fees and slippage.
+The optional edge-guided stage converts each confirmed actionable hypothesis into at
+most one deterministic candidate. A `long_entry` candidate gates an entry already
+requested by production to its frozen bin and original condition. An `exit_or_avoid`
+candidate suppresses an entry when flat or applies the existing full-exit action when a
+position is open only while both its bin and condition match. Condition evaluation
+reuses the Predictive Edge Map semantics; each window freezes its volatility boundary
+from training before validation or test is observed. Outside the bin or condition, the
+candidate makes no edge-guided entry or exit and the baseline action remains unchanged.
+Neither action opens a short position or changes production configuration.
 
-The candidate families are `edge_entry_timed_exit`,
-`edge_entry_signal_exit`, `edge_entry_baseline_exit`, and the legacy-compatible
-`exit_or_avoid_overlay`. Each candidate freezes its entry and exit rules, source
-hypotheses, cadence, holding bounds, cooldown, target allocation, costs, Score and
-Strategy versions, and generation/qualification contracts. Candidate generation and
-ranking use training/validation evidence only. Test can confirm or reject a frozen
-candidate but cannot modify it.
+Candidates reuse the existing historical simulator, fees, slippage, initial cash,
+30-minute cadence, score model, Strategy version, and existing walk-forward windows.
+Every window keeps isolated training, validation, and test phases. Parameters come only
+from the frozen hypothesis and the training-frozen condition boundary; validation
+selects and test only confirms. Qualification contract v2 distinguishes detecting an
+edge, generating a frozen candidate, and confirming economic viability. Every counted
+validation or test window must contain at least one Trade, have strictly positive net
+return after configured fees and slippage, strictly beat production for the same
+window, and remain within the existing 10% drawdown limit. Aggregate training,
+validation, and test evidence must also contain Trades and have strictly positive
+returns; aggregate validation and test must strictly beat production. Existing
+minimum-window and stability criteria still apply. Zero Trades or return less than or
+equal to zero can therefore never produce `confirmed_candidate`.
 
-A multiplicative round-trip cost screen removes hypotheses whose expected gross and
-net movement cannot cover fees, slippage, and the versioned margin. Deterministic
-budgets cap retained entry/exit hypotheses and complete simulations. Qualification v3
-requires activity, strictly positive net return, acceptable drawdown, sufficient
-walk-forward evidence, and strict production outperformance in validation and isolated
-test. Buy and hold remains an informational independent benchmark.
+Buy-and-hold remains an independent outcome and risk reference rather than an absolute
+rejection rule. Structured segment evidence reports whether the candidate beats
+production, beats buy-and-hold, has positive net return, has sufficient Trades, and has
+acceptable risk. Deterministic rejection reasons explain every failed qualification
+without implying that both benchmarks were beaten. Results are `rejected_validation`,
+`rejected_test`, or `confirmed_candidate`. The stage is bounded and opt-in. Without
+`--persist`, it remains strictly in memory. With both flags, one transaction stores the
+evaluation run, each candidate, and each valid walk-forward window. A deterministic
+experiment key includes the source analysis, dataset and range, window configuration,
+capital, costs, cadence, candidate limit, persistence- and qualification-contract
+versions, and input hypotheses. An identical completed run is reconstructed without
+reevaluation; partial data is never reusable. Qualification-v1 records remain readable
+legacy evidence, are never reused for v2, and are explicitly ineligible under the
+current contract. Persistence does not activate a Strategy, mutate Paper Trading, or
+guarantee future results.
 
-If validation fails, test is not executed: `test_metrics` is null and no test-specific
-rejection reason is fabricated. Legacy zero-filled records remain readable but are not
-eligible under the current contract. See
-[`014-weekly-strategy-research.md`](014-weekly-strategy-research.md) for reuse,
-outcomes, budgets, and Railway operations.
+```text
+Predictive Edge Map
+-> Evidence-Guided Candidate Generator
+-> Historical Validation
+-> Manual Promotion
+-> Parallel Paper Wallet
+```
 
 ## Persistence and API
 
@@ -179,3 +210,10 @@ python -m app.jobs.analyze_predictive_edges \
   --fee-rate 0.001 --slippage-rate 0.0005 --initial-cash 10000 \
   --edge-guided-candidates --max-edge-guided-candidates 12
 ```
+
+The current generation contract turns confirmed evidence into complete long-only
+Strategies rather than only filtering production actions. Candidate test metrics are
+nullable when validation fails. Exact completed runs use a lightweight immutable-candle
+revision to short-circuit before dataset and Feature-matrix loading. The weekly runbook
+and candidate families are documented in
+[`014-weekly-strategy-research.md`](014-weekly-strategy-research.md).

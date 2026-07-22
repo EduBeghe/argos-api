@@ -11,10 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.market.catalog import Instrument
 from app.optimization.predictive_edge_engine_v4 import (
-    CheapRelationship,
-    IsolatedTestResult,
+    PhaseWindowEvidence,
     PredictiveEdgeV4Result,
-    ValidationConfigurationResult,
+    TrainingWindowEvidence,
     decode_v4_cache_value,
     encode_v4_cache_value,
 )
@@ -38,6 +37,7 @@ from app.optimization.predictive_edge_v4 import (
 )
 from app.optimization.predictive_edges import (
     PREDICTIVE_EDGE_ALGORITHM_VERSION,
+    PREDICTOR_VERSION,
     PredictiveEdgeConfiguration,
     PredictiveEdgeResult,
 )
@@ -441,10 +441,33 @@ def predictive_edge_v4_experiment_key(
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+def predictive_edge_v4_cache_namespace(
+    *, instrument: Instrument, fee_rate: Decimal, slippage_rate: Decimal
+) -> str:
+    """Identify reusable v4 evidence without binding it to a complete dataset."""
+
+    payload = {
+        "engine": "predictive_edge_discovery_v4_stage_cache",
+        "contract_version": PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+        "instrument": [
+            instrument.asset.value,
+            instrument.provider.value,
+            instrument.market_type.value,
+            instrument.interval.value,
+        ],
+        "predictor_version": PREDICTOR_VERSION,
+        "fee_rate": str(fee_rate),
+        "slippage_rate": str(slippage_rate),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 async def persist_predictive_edge_v4_result(
     *,
     session: AsyncSession,
     experiment_key: str,
+    cache_namespace: str,
     instrument: Instrument,
     range_start: datetime,
     range_end: datetime,
@@ -670,25 +693,16 @@ async def persist_predictive_edge_v4_result(
         payload = encode_v4_cache_value(cache_value)
         if not isinstance(payload, dict):
             raise TypeError("v4 stage cache payload must be an object")
-        if isinstance(cache_value, CheapRelationship):
+        if isinstance(cache_value, TrainingWindowEvidence):
             kind = "training"
-            cadence = cache_value.cadence
-            horizon = cache_value.horizon
+            cadence = timedelta(0)
+            horizon = timedelta(0)
             bins = None
             condition = None
             neutral_policy = None
             profile = None
-        elif isinstance(cache_value, ValidationConfigurationResult):
-            kind = "validation"
-            configuration = cache_value.configuration
-            cadence = configuration.cadence
-            horizon = configuration.horizon
-            bins = configuration.bins
-            condition = configuration.condition.value
-            neutral_policy = configuration.neutral_policy.value
-            profile = configuration.profile.value
-        elif isinstance(cache_value, IsolatedTestResult):
-            kind = "isolated_test"
+        elif isinstance(cache_value, PhaseWindowEvidence):
+            kind = cache_value.phase
             cadence = timedelta(0)
             horizon = timedelta(0)
             bins = None
@@ -702,7 +716,7 @@ async def persist_predictive_edge_v4_result(
             .values(
                 id=uuid4(),
                 cache_key=cache_key,
-                cache_namespace=experiment_key,
+                cache_namespace=cache_namespace,
                 status="completed",
                 evidence_kind=kind,
                 contract_version=PREDICTIVE_EDGE_V4_CONTRACT_VERSION,

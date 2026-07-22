@@ -36,6 +36,7 @@ from app.optimization.predictive_edge_service import (
     find_reusable_predictive_edge_run,
     load_predictive_edge_v4_cache,
     persist_predictive_edge_v4_result,
+    predictive_edge_v4_cache_namespace,
     predictive_edge_v4_experiment_key,
 )
 from app.optimization.predictive_edge_v4 import (
@@ -210,6 +211,11 @@ async def execute_weekly_instrument_research(
         fee_rate=simulation.fee_rate,
         slippage_rate=simulation.slippage_rate,
     )
+    edge_cache_namespace = predictive_edge_v4_cache_namespace(
+        instrument=identity.instrument,
+        fee_rate=simulation.fee_rate,
+        slippage_rate=simulation.slippage_rate,
+    )
     edge_started = perf_counter()
     edge_execution = (
         await find_reusable_predictive_edge_run(session, edge_key)
@@ -217,7 +223,9 @@ async def execute_weekly_instrument_research(
         else None
     )
     stage_cache = (
-        await load_predictive_edge_v4_cache(session, cache_namespace=edge_key)
+        await load_predictive_edge_v4_cache(
+            session, cache_namespace=edge_cache_namespace
+        )
         if persist and not force_recompute
         else {}
     )
@@ -225,7 +233,7 @@ async def execute_weekly_instrument_research(
         matrix=matrix,
         windows=windows,
         simulation=simulation,
-        cache_namespace=edge_key,
+        cache_namespace=edge_cache_namespace,
         stage_cache=stage_cache,
         force_recompute=force_recompute,
     )
@@ -235,6 +243,7 @@ async def execute_weekly_instrument_research(
         edge_execution = await persist_predictive_edge_v4_result(
             session=session,
             experiment_key=edge_key,
+            cache_namespace=edge_cache_namespace,
             instrument=identity.instrument,
             range_start=identity.range.start,
             range_end=identity.range.end,
