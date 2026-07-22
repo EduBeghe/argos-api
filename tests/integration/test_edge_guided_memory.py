@@ -310,9 +310,7 @@ async def test_validation_rejection_round_trip_preserves_nullable_test(
     assert response.candidate_family is not None
     assert response.entry_rule is not None
     assert response.exit_rule is not None
-    assert (
-        response.generation_contract_version == EDGE_GUIDED_STRATEGY_CONTRACT_VERSION
-    )
+    assert response.generation_contract_version == EDGE_GUIDED_STRATEGY_CONTRACT_VERSION
     assert (
         await session.scalar(
             select(func.count()).select_from(EdgeGuidedCandidateRecord)
