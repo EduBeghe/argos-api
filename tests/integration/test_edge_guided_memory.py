@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.market.catalog import MARKET_INSTRUMENTS
 from app.optimization.edge_guided import (
     EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
+    EDGE_GUIDED_STRATEGY_CONTRACT_VERSION,
     EdgeGuidedCandidate,
     EdgeGuidedCandidateEvaluation,
     EdgeGuidedCandidateStatus,
@@ -309,7 +310,9 @@ async def test_validation_rejection_round_trip_preserves_nullable_test(
     assert response.candidate_family is not None
     assert response.entry_rule is not None
     assert response.exit_rule is not None
-    assert response.generation_contract_version == 3
+    assert (
+        response.generation_contract_version == EDGE_GUIDED_STRATEGY_CONTRACT_VERSION
+    )
     assert (
         await session.scalar(
             select(func.count()).select_from(EdgeGuidedCandidateRecord)
