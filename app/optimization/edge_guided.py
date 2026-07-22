@@ -49,12 +49,17 @@ MAX_VALIDATION_RETAINED = 12
 MAX_TEST_EVALUATED = 5
 EDGE_GUIDED_STRATEGY_CONTRACT_VERSION = 4
 EDGE_GUIDED_RANKING_CONTRACT_VERSION = 1
-EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION = 3
+EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION = 4
 MINIMUM_TRADES_PER_SEGMENT = 1
 ECONOMIC_EDGE_MARGIN = Decimal("0.0005")
 TARGET_ALLOCATIONS = (Decimal("10"), Decimal("15"), Decimal("20"))
 CANDIDATE_CADENCES = tuple(
     timedelta(minutes=value) for value in (30, 60, 120, 240, 360)
+)
+EDGE_GUIDED_STAGES = (
+    RefinementSegmentName.TRAINING,
+    RefinementSegmentName.VALIDATION,
+    RefinementSegmentName.TEST,
 )
 
 
@@ -229,6 +234,7 @@ class EdgeGuidedEvaluationResult:
     funnel: dict[str, int] = field(default_factory=dict)
     timings: dict[str, Decimal] = field(default_factory=dict)
     qualification_contract_version: int = EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+    stage_evidence: tuple["EdgeGuidedStageEvidence", ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +248,18 @@ class EdgeGuidedWindowEvaluation:
     test_confirmed: bool
     rejection_reasons: tuple[EdgeGuidedRejectionReason, ...] = ()
     cache_key: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class EdgeGuidedStageEvidence:
+    cache_key: str
+    candidate_fingerprint: str
+    stage: RefinementSegmentName
+    window_ordinal: int
+    segment_from: datetime
+    segment_to: datetime
+    content_fingerprint: str
+    metrics: EdgeGuidedSegmentEvaluation
 
 
 def generate_edge_guided_candidates(
@@ -433,11 +451,64 @@ def generate_edge_guided_candidates(
             )
         )
     unique = {item.candidate_fingerprint: item for item in candidates}
-    # Generate and economically pre-screen broadly first. maximum_candidates is
-    # intentionally applied by the staged evaluator, not candidate generation.
-    return tuple(sorted(unique.values(), key=_candidate_rank))[
-        :MAX_GENERATED_STRATEGIES
-    ]
+    # Generate and economically pre-screen broadly first. Stratification prevents
+    # family ordering or one prolific hypothesis from consuming the whole budget.
+    # maximum_candidates is intentionally applied by the staged evaluator.
+    return _stratified_generated_candidates(tuple(unique.values()))
+
+
+def _stratified_generated_candidates(
+    candidates: tuple[EdgeGuidedCandidate, ...],
+) -> tuple[EdgeGuidedCandidate, ...]:
+    family_order = tuple(CandidateFamily)
+    family_queues = {
+        family: list(
+            _round_robin_hypotheses(
+                tuple(item for item in candidates if item.candidate_family is family)
+            )
+        )
+        for family in family_order
+    }
+    selected: list[EdgeGuidedCandidate] = []
+    while len(selected) < MAX_GENERATED_STRATEGIES and any(family_queues.values()):
+        for family in family_order:
+            queue = family_queues[family]
+            if queue and len(selected) < MAX_GENERATED_STRATEGIES:
+                selected.append(queue.pop(0))
+    return tuple(selected)
+
+
+def _round_robin_hypotheses(
+    candidates: tuple[EdgeGuidedCandidate, ...],
+) -> tuple[EdgeGuidedCandidate, ...]:
+    grouped: dict[str, list[EdgeGuidedCandidate]] = {}
+    for candidate in candidates:
+        grouped.setdefault(candidate.source_hypothesis_id, []).append(candidate)
+    for hypothesis_index, hypothesis_id in enumerate(sorted(grouped)):
+        values = grouped[hypothesis_id]
+        values.sort(
+            key=lambda item: (
+                (
+                    TARGET_ALLOCATIONS.index(item.target_allocation_percentage)
+                    - CANDIDATE_CADENCES.index(item.cadence)
+                )
+                % len(TARGET_ALLOCATIONS),
+                CANDIDATE_CADENCES.index(item.cadence),
+                item.exit_predictor_name or "",
+                item.candidate_fingerprint,
+            )
+        )
+        if values:
+            offset = hypothesis_index % min(len(values), len(CANDIDATE_CADENCES))
+            grouped[hypothesis_id] = values[offset:] + values[:offset]
+    ordered: list[EdgeGuidedCandidate] = []
+    hypothesis_ids = sorted(grouped)
+    while any(grouped.values()):
+        for hypothesis_id in hypothesis_ids:
+            values = grouped[hypothesis_id]
+            if values:
+                ordered.append(values.pop(0))
+    return tuple(ordered)
 
 
 def apply_edge_guided_action(
@@ -568,7 +639,7 @@ def evaluate_edge_guided_candidates(
     maximum_candidates: int = DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
     windows: tuple[WalkForwardWindow, ...],
     thresholds: EvidenceThresholds,
-    reusable_windows: dict[str, EdgeGuidedWindowEvaluation] | None = None,
+    reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence] | None = None,
 ) -> EdgeGuidedEvaluationResult:
     """Evaluate frozen candidates through the existing isolated walk-forward windows."""
 
@@ -578,7 +649,8 @@ def evaluate_edge_guided_candidates(
         decision_interval=decision_interval,
         maximum_candidates=maximum_candidates,
     )
-    cache = reusable_windows or {}
+    cache = dict(reusable_stage_evidence or {})
+    evidence: dict[str, EdgeGuidedStageEvidence] = dict(cache)
     reused_keys: set[str] = set()
     computed_keys: set[str] = set()
     training_results = tuple(
@@ -593,7 +665,8 @@ def evaluate_edge_guided_candidates(
                 simulation=simulation,
                 decision_interval=decision_interval,
                 segment=RefinementSegmentName.TRAINING,
-                reusable_windows=cache,
+                reusable_stage_evidence=cache,
+                stage_evidence=evidence,
                 reused_keys=reused_keys,
                 computed_keys=computed_keys,
             ),
@@ -602,7 +675,11 @@ def evaluate_edge_guided_candidates(
     )
     training_retained = tuple(
         sorted(
-            training_results,
+            (
+                item
+                for item in training_results
+                if _stage_qualifies(item[1], RefinementSegmentName.TRAINING)
+            ),
             key=lambda item: _segment_rank(item[1], item[0].candidate_fingerprint),
         )[:MAX_TRAINING_RETAINED]
     )
@@ -619,7 +696,8 @@ def evaluate_edge_guided_candidates(
                 simulation=simulation,
                 decision_interval=decision_interval,
                 segment=RefinementSegmentName.VALIDATION,
-                reusable_windows=cache,
+                reusable_stage_evidence=cache,
+                stage_evidence=evidence,
                 reused_keys=reused_keys,
                 computed_keys=computed_keys,
             ),
@@ -629,7 +707,8 @@ def evaluate_edge_guided_candidates(
     validation_qualified = tuple(
         item
         for item in validation_results
-        if _stage_qualifies(item[1]) and _stage_qualifies(item[2])
+        if _stage_qualifies(item[1], RefinementSegmentName.TRAINING)
+        and _stage_qualifies(item[2], RefinementSegmentName.VALIDATION)
     )
     validation_retained = tuple(
         sorted(
@@ -649,7 +728,8 @@ def evaluate_edge_guided_candidates(
             simulation=simulation,
             decision_interval=decision_interval,
             thresholds=thresholds,
-            reusable_windows=cache,
+            reusable_stage_evidence=cache,
+            stage_evidence=evidence,
             reused_keys=reused_keys,
             computed_keys=computed_keys,
         )
@@ -728,7 +808,9 @@ def evaluate_edge_guided_candidates(
     for candidate, training, validation in validation_results:
         if candidate.candidate_fingerprint in tested_fingerprints:
             continue
-        if _stage_qualifies(training) and _stage_qualifies(validation):
+        if _stage_qualifies(
+            training, RefinementSegmentName.TRAINING
+        ) and _stage_qualifies(validation, RefinementSegmentName.VALIDATION):
             # Qualified candidates below the isolated-test budget are intentionally
             # represented only by funnel counters; they are not test rejections.
             continue
@@ -781,17 +863,36 @@ def evaluate_edge_guided_candidates(
             "training_retained_count": len(training_retained),
             "validation_evaluated_count": len(validation_results),
             "validation_retained_count": len(validation_retained),
-            "test_evaluated_count": len(evaluations),
+            "test_evaluated_count": sum(item.test is not None for item in evaluations),
             "training_screened": len(training_results),
             "validation_evaluated": len(validation_results),
-            "test_evaluated": len(evaluations),
+            "test_evaluated": sum(item.test is not None for item in evaluations),
             "confirmed_candidates": sum(
                 item.status is EdgeGuidedCandidateStatus.CONFIRMED
                 for item in evaluations
             ),
             "windows_reused": len(reused_keys),
             "windows_computed": len(computed_keys),
+            **{
+                f"{stage.value}_windows_reused": sum(
+                    item.stage is stage and key in reused_keys
+                    for key, item in evidence.items()
+                )
+                for stage in EDGE_GUIDED_STAGES
+            },
+            **{
+                f"{stage.value}_windows_computed": sum(
+                    item.stage is stage and key in computed_keys
+                    for key, item in evidence.items()
+                )
+                for stage in EDGE_GUIDED_STAGES
+            },
         },
+        stage_evidence=tuple(
+            evidence[key]
+            for key in sorted(evidence)
+            if key in computed_keys or key in reused_keys
+        ),
     )
 
 
@@ -805,23 +906,13 @@ def _evaluate_candidate_stage(
     simulation: SimulationConfiguration,
     decision_interval: timedelta,
     segment: RefinementSegmentName,
-    reusable_windows: dict[str, EdgeGuidedWindowEvaluation],
+    reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    stage_evidence: dict[str, EdgeGuidedStageEvidence],
     reused_keys: set[str],
     computed_keys: set[str],
 ) -> EdgeGuidedSegmentEvaluation:
     values: list[EdgeGuidedSegmentEvaluation] = []
     for window in windows:
-        cache_key = edge_guided_window_cache_key(candidate, window)
-        cached = reusable_windows.get(cache_key)
-        if cached is not None:
-            reused_keys.add(cache_key)
-            values.append(
-                cached.training
-                if segment is RefinementSegmentName.TRAINING
-                else cached.validation
-            )
-            continue
-        computed_keys.add(cache_key)
         matrices = build_window_matrices(
             feature_matrix, window, decision_interval=decision_interval
         )
@@ -836,14 +927,19 @@ def _evaluate_candidate_stage(
             matrices.training.rows
         )
         values.append(
-            _evaluate_segment(
-                dataset,
-                matrix,
-                segment,
-                candidate,
-                initial_cash,
-                simulation,
-                _candidate_action_filter(candidate, volatility_threshold),
+            _evaluate_or_reuse_stage(
+                dataset=dataset,
+                matrix=matrix,
+                window=window,
+                segment=segment,
+                candidate=candidate,
+                initial_cash=initial_cash,
+                simulation=simulation,
+                volatility_threshold=volatility_threshold,
+                reusable_stage_evidence=reusable_stage_evidence,
+                stage_evidence=stage_evidence,
+                reused_keys=reused_keys,
+                computed_keys=computed_keys,
             )
         )
     return _aggregate_values(tuple(values), segment)
@@ -871,9 +967,14 @@ def _aggregate_values(
     )
 
 
-def _stage_qualifies(value: EdgeGuidedSegmentEvaluation) -> bool:
-    return (
+def _stage_qualifies(
+    value: EdgeGuidedSegmentEvaluation, stage: RefinementSegmentName
+) -> bool:
+    qualifies = (
         value.sufficient_trades and value.positive_net_return and value.risk_acceptable
+    )
+    return qualifies and (
+        stage is not RefinementSegmentName.VALIDATION or value.beats_production
     )
 
 
@@ -893,7 +994,8 @@ def _evaluate_candidate_windows(
     simulation: SimulationConfiguration,
     decision_interval: timedelta,
     thresholds: EvidenceThresholds,
-    reusable_windows: dict[str, EdgeGuidedWindowEvaluation],
+    reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    stage_evidence: dict[str, EdgeGuidedStageEvidence],
     reused_keys: set[str],
     computed_keys: set[str],
 ) -> tuple[EdgeGuidedWindowEvaluation, ...]:
@@ -908,26 +1010,6 @@ def _evaluate_candidate_windows(
         ]
     ] = []
     for window in windows:
-        cache_key = edge_guided_window_cache_key(candidate, window)
-        cached = reusable_windows.get(cache_key)
-        if cached is not None:
-            reused_keys.add(cache_key)
-            # Reused evidence is immutable and already contains isolated test
-            # semantics for this exact candidate, window data, and contracts.
-            prepared.append(
-                (
-                    window,
-                    None,
-                    cached.volatility_threshold,
-                    cached.training,
-                    cached.validation,
-                    _window_segment_rejection_reasons(
-                        cached.validation, RefinementSegmentName.VALIDATION
-                    ),
-                )
-            )
-            continue
-        computed_keys.add(cache_key)
         matrices = build_window_matrices(
             feature_matrix, window, decision_interval=decision_interval
         )
@@ -939,23 +1021,33 @@ def _evaluate_candidate_windows(
         volatility_threshold = predictive_edge_volatility_threshold(
             matrices.training.rows
         )
-        training = _evaluate_segment(
-            dataset,
-            matrices.training,
-            RefinementSegmentName.TRAINING,
-            candidate,
-            initial_cash,
-            simulation,
-            _candidate_action_filter(candidate, volatility_threshold),
+        training = _evaluate_or_reuse_stage(
+            dataset=dataset,
+            matrix=matrices.training,
+            window=window,
+            segment=RefinementSegmentName.TRAINING,
+            candidate=candidate,
+            initial_cash=initial_cash,
+            simulation=simulation,
+            volatility_threshold=volatility_threshold,
+            reusable_stage_evidence=reusable_stage_evidence,
+            stage_evidence=stage_evidence,
+            reused_keys=reused_keys,
+            computed_keys=computed_keys,
         )
-        validation = _evaluate_segment(
-            dataset,
-            matrices.validation,
-            RefinementSegmentName.VALIDATION,
-            candidate,
-            initial_cash,
-            simulation,
-            _candidate_action_filter(candidate, volatility_threshold),
+        validation = _evaluate_or_reuse_stage(
+            dataset=dataset,
+            matrix=matrices.validation,
+            window=window,
+            segment=RefinementSegmentName.VALIDATION,
+            candidate=candidate,
+            initial_cash=initial_cash,
+            simulation=simulation,
+            volatility_threshold=volatility_threshold,
+            reusable_stage_evidence=reusable_stage_evidence,
+            stage_evidence=stage_evidence,
+            reused_keys=reused_keys,
+            computed_keys=computed_keys,
         )
         validation_reasons = _window_segment_rejection_reasons(
             validation, RefinementSegmentName.VALIDATION
@@ -982,20 +1074,20 @@ def _evaluate_candidate_windows(
         validation_reasons,
     ) in prepared:
         validation_passed = not validation_reasons
-        cached = reusable_windows.get(edge_guided_window_cache_key(candidate, window))
-        if cached is not None:
-            results.append(replace(cached, window_ordinal=window.ordinal))
-            continue
-        action_filter = _candidate_action_filter(candidate, volatility_threshold)
         test = (
-            _evaluate_segment(
-                dataset,
-                test_matrix,
-                RefinementSegmentName.TEST,
-                candidate,
-                initial_cash,
-                simulation,
-                action_filter,
+            _evaluate_or_reuse_stage(
+                dataset=dataset,
+                matrix=test_matrix,
+                window=window,
+                segment=RefinementSegmentName.TEST,
+                candidate=candidate,
+                initial_cash=initial_cash,
+                simulation=simulation,
+                volatility_threshold=volatility_threshold,
+                reusable_stage_evidence=reusable_stage_evidence,
+                stage_evidence=stage_evidence,
+                reused_keys=reused_keys,
+                computed_keys=computed_keys,
             )
             if validation_passed and allow_test and test_matrix is not None
             else None
@@ -1023,25 +1115,35 @@ def _evaluate_candidate_windows(
                 validation_passed,
                 test_confirmed,
                 window_reasons,
-                edge_guided_window_cache_key(candidate, window),
+                "",
             )
         )
     return tuple(results)
 
 
-def edge_guided_window_cache_key(
-    candidate: EdgeGuidedCandidate, window: WalkForwardWindow
+def edge_guided_stage_cache_key(
+    candidate: EdgeGuidedCandidate,
+    window: WalkForwardWindow,
+    stage: RefinementSegmentName,
+    content_fingerprint: str,
 ) -> str:
-    """Identify immutable candidate evidence for one stable data window."""
+    """Identify immutable candidate evidence for one exact stage segment."""
+
+    bounds = {
+        RefinementSegmentName.TRAINING: (window.training_from, window.training_to),
+        RefinementSegmentName.VALIDATION: (
+            window.validation_from,
+            window.validation_to,
+        ),
+        RefinementSegmentName.TEST: (window.test_from, window.test_to),
+    }[stage]
 
     return _fingerprint(
         {
             "candidate_fingerprint": candidate.candidate_fingerprint,
-            "training": [window.training_from, window.training_to],
-            "validation": [window.validation_from, window.validation_to],
-            "test": [window.test_from, window.test_to],
-            "window_dataset_fingerprint": window.dataset_fingerprint,
-            "window_selection_fingerprint": window.selection_fingerprint,
+            "stage": stage.value,
+            "segment": bounds,
+            "content_fingerprint": content_fingerprint,
             "ranking_contract_version": EDGE_GUIDED_RANKING_CONTRACT_VERSION,
             "qualification_contract_version": (
                 EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
@@ -1092,6 +1194,65 @@ def _evaluate_segment(
         result.total_return - production.total_return,
         result.total_return - buy_and_hold.total_return,
     )
+
+
+def _evaluate_or_reuse_stage(
+    *,
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    window: WalkForwardWindow,
+    segment: RefinementSegmentName,
+    candidate: EdgeGuidedCandidate,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    volatility_threshold: Decimal,
+    reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    reused_keys: set[str],
+    computed_keys: set[str],
+) -> EdgeGuidedSegmentEvaluation:
+    content_fingerprint = _stage_content_fingerprint(matrix)
+    cache_key = edge_guided_stage_cache_key(
+        candidate, window, segment, content_fingerprint
+    )
+    cached = reusable_stage_evidence.get(cache_key)
+    if cached is not None:
+        reused_keys.add(cache_key)
+        stage_evidence[cache_key] = replace(cached, window_ordinal=window.ordinal)
+        return cached.metrics
+    metrics = _evaluate_segment(
+        dataset,
+        matrix,
+        segment,
+        candidate,
+        initial_cash,
+        simulation,
+        _candidate_action_filter(candidate, volatility_threshold),
+    )
+    bounds = {
+        RefinementSegmentName.TRAINING: (window.training_from, window.training_to),
+        RefinementSegmentName.VALIDATION: (
+            window.validation_from,
+            window.validation_to,
+        ),
+        RefinementSegmentName.TEST: (window.test_from, window.test_to),
+    }[segment]
+    stage_evidence[cache_key] = EdgeGuidedStageEvidence(
+        cache_key,
+        candidate.candidate_fingerprint,
+        segment,
+        window.ordinal,
+        bounds[0],
+        bounds[1],
+        content_fingerprint,
+        metrics,
+    )
+    computed_keys.add(cache_key)
+    return metrics
+
+
+def _stage_content_fingerprint(matrix: HistoricalFeatureMatrix) -> str:
+    return _fingerprint({"rows": tuple(asdict(row) for row in matrix.rows)})
 
 
 def _aggregate_segment(
@@ -1175,6 +1336,7 @@ def edge_guided_summary(result: EdgeGuidedEvaluationResult) -> dict[str, object]
     value = json.loads(json.dumps(asdict(result), default=str))
     if not isinstance(value, dict):
         raise EdgeGuidedCandidateError("edge-guided summary must be an object")
+    value.pop("stage_evidence", None)
     return value
 
 

@@ -19,6 +19,7 @@ from app.optimization.edge_guided import (
     EdgeGuidedCandidateStatus,
     EdgeGuidedEvaluationResult,
     EdgeGuidedSegmentEvaluation,
+    EdgeGuidedStageEvidence,
     EdgeGuidedWindowEvaluation,
 )
 from app.optimization.edge_guided_memory import (
@@ -149,7 +150,21 @@ def result() -> EdgeGuidedEvaluationResult:
         EdgeGuidedCandidateStatus.CONFIRMED,
         "confirmed",
     )
-    return EdgeGuidedEvaluationResult("f" * 64, 1, 1, 12, 1, (evaluation,))
+    stage_evidence = (
+        EdgeGuidedStageEvidence(
+            "9" * 64,
+            candidate.candidate_fingerprint,
+            RefinementSegmentName.TRAINING,
+            1,
+            START,
+            START + timedelta(hours=1),
+            "8" * 64,
+            training,
+        ),
+    )
+    return EdgeGuidedEvaluationResult(
+        "f" * 64, 1, 1, 12, 1, (evaluation,), stage_evidence=stage_evidence
+    )
 
 
 async def parent_run(session: AsyncSession) -> PredictiveEdgeExecution:
@@ -216,6 +231,7 @@ async def test_complete_round_trip_and_reuse_are_atomic(session: AsyncSession) -
     assert reused.evaluations_computed == 0
     assert reused.evaluations_reused == 1
     assert reused.result == original
+    assert reused.result.stage_evidence == original.stage_evidence
     weekly_reused = await find_reusable_weekly_research_run(
         session, "weekly-" + "f" * 57
     )

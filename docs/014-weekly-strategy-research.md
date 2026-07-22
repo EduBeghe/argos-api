@@ -45,6 +45,10 @@ The generator considers at most 12 entry hypotheses and 6 exit hypotheses. It ex
 each viable entry across compatible timed, signal, and production-baseline exits,
 30-minute through six-hour cadences, and 10%, 15%, and 20% allocations. After complete
 fingerprint deduplication, the economic pre-screen retains at most 60 Strategies.
+Selection is deterministic and stratified across every available family, then across
+hypotheses, cadences, and allocations. Missing families donate capacity to the
+remaining families; no available family or single prolific hypothesis can monopolize
+the 60-candidate generation budget solely because of sort order.
 
 The staged funnel evaluates at most 60 candidates on training, retains 24 using only
 training evidence, evaluates those on validation, retains at most 12 qualified
@@ -52,6 +56,11 @@ candidates using only validation evidence, and executes isolated test once for a
 most the best 5. The configured candidate budget limits that final test set. Test data
 never participates in generation or earlier ranking. Ranking is deterministic and a
 complete candidate fingerprint is the final tie breaker.
+
+Training qualification requires sufficient trades, positive net return, and acceptable
+drawdown. Validation additionally must strictly beat the production Strategy before a
+candidate can consume isolated-test budget. Buy-and-hold remains an informative
+benchmark rather than an additional qualification gate.
 
 Every run persists a funnel and one explicit outcome, including confirmed candidates,
 validation rejection, isolated-test rejection, no predictive edge, or edges that were
@@ -76,11 +85,14 @@ and structurally valid graph short-circuits candle loading, Feature matrix const
 edge analysis, and candidate simulation. Running, failed, incomplete, or legacy graphs
 are not reusable.
 
-Weekly runs also cache immutable evidence by candidate fingerprint and exact stable
-training, validation, and test boundaries plus the data fingerprint inside that
-window. The identity includes costs and generation, ranking, and qualification
-versions. A later week reuses only unchanged windows and computes new or changed
-windows; `--force-recompute` bypasses both exact-run and window reuse.
+Weekly runs cache immutable evidence separately for training, validation, and test.
+Each record identifies the complete candidate, stage, exact segment boundaries,
+fingerprint of the rows inside that segment, costs, and generation, ranking, and
+qualification versions. Complete training and validation evidence is persisted even
+when the candidate does not advance, while test remains absent unless it actually ran.
+A later week therefore reuses unchanged stages and computes only new or changed
+segments; `--force-recompute` bypasses both exact-run and stage reuse. Funnel counters
+report computed and reused windows for each stage as well as their totals.
 
 ## Railway Runbook
 

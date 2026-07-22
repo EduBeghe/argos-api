@@ -13,7 +13,6 @@ from app.optimization.edge_guided import (
     EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
     EDGE_GUIDED_RANKING_CONTRACT_VERSION,
     EDGE_GUIDED_STRATEGY_CONTRACT_VERSION,
-    edge_guided_window_cache_key,
     evaluate_edge_guided_candidates,
     generate_edge_guided_candidates,
 )
@@ -22,7 +21,7 @@ from app.optimization.edge_guided_memory import (
     EdgeGuidedExecution,
     edge_guided_experiment_key,
     find_reusable_weekly_research_run,
-    load_reusable_edge_guided_windows,
+    load_reusable_edge_guided_stages,
     persist_edge_guided_result,
 )
 from app.optimization.feature_matrix import build_historical_feature_matrix
@@ -244,15 +243,14 @@ async def execute_weekly_instrument_research(
         decision_interval=configuration.decision_interval,
         maximum_candidates=maximum_candidates,
     )
-    cache_keys = tuple(
-        edge_guided_window_cache_key(candidate, window)
-        for candidate in generated_candidates
-        for window in windows
-    )
-    reusable_windows = (
+    reusable_stages = (
         {}
         if force_recompute
-        else await load_reusable_edge_guided_windows(session, cache_keys)
+        else await load_reusable_edge_guided_stages(
+            session,
+            tuple(item.candidate_fingerprint for item in generated_candidates),
+            windows,
+        )
     )
     result = evaluate_edge_guided_candidates(
         dataset=dataset,
@@ -264,7 +262,7 @@ async def execute_weekly_instrument_research(
         maximum_candidates=maximum_candidates,
         windows=windows,
         thresholds=configuration.thresholds,
-        reusable_windows=reusable_windows,
+        reusable_stage_evidence=reusable_stages,
     )
     candidate_elapsed = perf_counter() - candidate_started
     classifications = edge_result.stability_edges

@@ -46,8 +46,8 @@ def key(
 
 
 def test_experiment_key_is_deterministic_and_hypothesis_order_independent() -> None:
-    assert EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION == 1
-    assert EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION == 3
+    assert EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION == 2
+    assert EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION == 4
     assert key(hypotheses=("b" * 64, "c" * 64)) == key(hypotheses=("c" * 64, "b" * 64))
 
 

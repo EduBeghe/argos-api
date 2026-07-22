@@ -18,6 +18,34 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.create_table(
+        "edge_guided_stage_evidence",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("run_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("cache_key", sa.String(length=64), nullable=False),
+        sa.Column("candidate_fingerprint", sa.String(length=64), nullable=False),
+        sa.Column("stage", sa.String(length=16), nullable=False),
+        sa.Column("window_ordinal", sa.Integer(), nullable=False),
+        sa.Column("segment_from", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("segment_to", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("content_fingerprint", sa.String(length=64), nullable=False),
+        sa.Column("metrics", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["run_id"], ["edge_guided_evaluation_runs.id"], ondelete="CASCADE"
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("run_id", "cache_key", name="uq_edge_guided_stage_run_key"),
+    )
+    op.create_index(
+        "ix_edge_guided_stage_cache_key",
+        "edge_guided_stage_evidence",
+        ["cache_key"],
+    )
+    op.create_index(
+        "ix_edge_guided_stage_candidate",
+        "edge_guided_stage_evidence",
+        ["candidate_fingerprint", "stage"],
+    )
     _add_column_if_missing(
         "edge_guided_evaluation_runs",
         sa.Column("reuse_key", sa.String(length=64), nullable=True),
@@ -99,6 +127,15 @@ def downgrade() -> None:
         table_name="edge_guided_window_evidence",
     )
     op.drop_column("edge_guided_window_evidence", "cache_key")
+    op.drop_index(
+        "ix_edge_guided_stage_candidate",
+        table_name="edge_guided_stage_evidence",
+    )
+    op.drop_index(
+        "ix_edge_guided_stage_cache_key",
+        table_name="edge_guided_stage_evidence",
+    )
+    op.drop_table("edge_guided_stage_evidence")
     for name in (
         "timings",
         "funnel",

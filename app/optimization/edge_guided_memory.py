@@ -36,6 +36,7 @@ from app.optimization.edge_guided import (
     EdgeGuidedRanking,
     EdgeGuidedRejectionReason,
     EdgeGuidedSegmentEvaluation,
+    EdgeGuidedStageEvidence,
     EdgeGuidedWindowEvaluation,
     EntryRule,
     ExitRule,
@@ -47,10 +48,10 @@ from app.optimization.predictive_edges import (
     SuggestedAction,
 )
 from app.optimization.refinement import RefinementSegmentName
-from app.optimization.walk_forward import WalkForwardConfiguration
+from app.optimization.walk_forward import WalkForwardConfiguration, WalkForwardWindow
 from app.paper.config import SimulationConfiguration
 
-EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION = 1
+EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION = 2
 
 
 class EdgeGuidedRunRecord(Base):
@@ -182,6 +183,33 @@ class EdgeGuidedWindowRecord(Base):
     )
 
 
+class EdgeGuidedStageEvidenceRecord(Base):
+    __tablename__ = "edge_guided_stage_evidence"
+    __table_args__ = (
+        UniqueConstraint("run_id", "cache_key", name="uq_edge_guided_stage_run_key"),
+        Index("ix_edge_guided_stage_cache_key", "cache_key"),
+        Index("ix_edge_guided_stage_candidate", "candidate_fingerprint", "stage"),
+    )
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("edge_guided_evaluation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    cache_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    candidate_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    stage: Mapped[str] = mapped_column(String(16), nullable=False)
+    window_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    segment_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    segment_to: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    content_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    metrics: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+
+
 @dataclass(frozen=True, slots=True)
 class EdgeGuidedExecution:
     run_id: UUID | None
@@ -271,27 +299,38 @@ async def find_reusable_weekly_research_run(
     return _reused_execution(run, result) if result is not None else None
 
 
-async def load_reusable_edge_guided_windows(
-    session: AsyncSession, cache_keys: tuple[str, ...]
-) -> dict[str, EdgeGuidedWindowEvaluation]:
-    """Load only complete immutable evidence matching exact stable window keys."""
+async def load_reusable_edge_guided_stages(
+    session: AsyncSession,
+    candidate_fingerprints: tuple[str, ...],
+    windows: tuple[WalkForwardWindow, ...],
+) -> dict[str, EdgeGuidedStageEvidence]:
+    """Load complete stage evidence only from completed compatible runs."""
 
-    if not cache_keys:
+    if not candidate_fingerprints or not windows:
         return {}
+    starts = tuple(
+        value
+        for window in windows
+        for value in (window.training_from, window.validation_from, window.test_from)
+    )
+    ends = tuple(
+        value
+        for window in windows
+        for value in (window.training_to, window.validation_to, window.test_to)
+    )
     records = (
         await session.scalars(
-            select(EdgeGuidedWindowRecord)
-            .join(
-                EdgeGuidedCandidateRecord,
-                EdgeGuidedCandidateRecord.id
-                == EdgeGuidedWindowRecord.candidate_evaluation_id,
-            )
+            select(EdgeGuidedStageEvidenceRecord)
             .join(
                 EdgeGuidedRunRecord,
-                EdgeGuidedRunRecord.id == EdgeGuidedCandidateRecord.run_id,
+                EdgeGuidedRunRecord.id == EdgeGuidedStageEvidenceRecord.run_id,
             )
             .where(
-                EdgeGuidedWindowRecord.cache_key.in_(cache_keys),
+                EdgeGuidedStageEvidenceRecord.candidate_fingerprint.in_(
+                    candidate_fingerprints
+                ),
+                EdgeGuidedStageEvidenceRecord.segment_from.in_(starts),
+                EdgeGuidedStageEvidenceRecord.segment_to.in_(ends),
                 EdgeGuidedRunRecord.status == "completed",
                 EdgeGuidedRunRecord.qualification_contract_version
                 == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
@@ -299,20 +338,19 @@ async def load_reusable_edge_guided_windows(
             .order_by(EdgeGuidedRunRecord.completed_at.desc())
         )
     ).all()
-    reusable: dict[str, EdgeGuidedWindowEvaluation] = {}
+    reusable: dict[str, EdgeGuidedStageEvidence] = {}
     for item in records:
-        if item.cache_key is None or item.cache_key in reusable:
+        if item.cache_key in reusable:
             continue
-        reusable[item.cache_key] = EdgeGuidedWindowEvaluation(
-            item.window_ordinal,
-            item.volatility_threshold,
-            _read_metric(item.training_metrics),
-            _read_metric(item.validation_metrics),
-            _read_metric(item.test_metrics) if item.test_metrics else None,
-            item.validation_passed,
-            item.test_confirmed,
-            tuple(EdgeGuidedRejectionReason(value) for value in item.rejection_reasons),
+        reusable[item.cache_key] = EdgeGuidedStageEvidence(
             item.cache_key,
+            item.candidate_fingerprint,
+            RefinementSegmentName(item.stage),
+            item.window_ordinal,
+            item.segment_from,
+            item.segment_to,
+            item.content_fingerprint,
+            _read_metric(item.metrics),
         )
     return reusable
 
@@ -419,6 +457,21 @@ async def persist_edge_guided_result(
     except Exception:
         await session.rollback()
         raise
+    for evidence in result.stage_evidence:
+        session.add(
+            EdgeGuidedStageEvidenceRecord(
+                id=uuid4(),
+                run_id=run_id,
+                cache_key=evidence.cache_key,
+                candidate_fingerprint=evidence.candidate_fingerprint,
+                stage=evidence.stage.value,
+                window_ordinal=evidence.window_ordinal,
+                segment_from=evidence.segment_from,
+                segment_to=evidence.segment_to,
+                content_fingerprint=evidence.content_fingerprint,
+                metrics=_metric(evidence.metrics),
+            )
+        )
     for evaluation in result.evaluations:
         candidate_id = uuid4()
         session.add(
@@ -510,6 +563,13 @@ async def _load_result(
             .order_by(EdgeGuidedCandidateRecord.candidate_fingerprint)
         )
     ).all()
+    stage_records = (
+        await session.scalars(
+            select(EdgeGuidedStageEvidenceRecord)
+            .where(EdgeGuidedStageEvidenceRecord.run_id == run.id)
+            .order_by(EdgeGuidedStageEvidenceRecord.cache_key)
+        )
+    ).all()
     candidate_ids = tuple(record.id for record in records)
     window_records = (
         (
@@ -590,6 +650,19 @@ async def _load_result(
             key: Decimal(str(value)) for key, value in (run.timings or {}).items()
         },
         qualification_contract_version=run.qualification_contract_version,
+        stage_evidence=tuple(
+            EdgeGuidedStageEvidence(
+                item.cache_key,
+                item.candidate_fingerprint,
+                RefinementSegmentName(item.stage),
+                item.window_ordinal,
+                item.segment_from,
+                item.segment_to,
+                item.content_fingerprint,
+                _read_metric(item.metrics),
+            )
+            for item in stage_records
+        ),
     )
 
 
