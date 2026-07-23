@@ -121,6 +121,7 @@ async def test_v41_diagnostics_and_near_misses_survive_session_restart(
     }
     async with factory() as session:
         session.add(_run(run_id))
+        await session.flush()
         session.add(
             PredictiveEdgeRunDiagnosticRecord(
                 id=uuid4(),
