@@ -76,11 +76,37 @@ evaluates at most 192 training interactions, retains 60, validates 40, and sends
 most 12 frozen actionable configurations to isolated test. Actionable and diagnostic
 near misses are ranked separately. No result guarantees a pattern or profitability.
 
+Completed runs persist the complete v4.1 conclusion, funnel counters, frozen
+direction/context identity, economic evidence, rejection reason, and distance from the
+requirements. The existing near-miss collection exposes both engines without treating
+either as a deployable Strategy:
+
+```text
+GET /optimization/predictive-edge-runs/{run_id}/near-misses?kind=actionable
+GET /optimization/predictive-edge-runs/{run_id}/near-misses?kind=diagnostic
+```
+
+Every item identifies `engine`, contract version, and deterministic category rank.
+Actionable v4.1 items carry the training baseline, conditioned training, validation,
+and available isolated-test evidence. Diagnostic items are typed context-only evidence;
+they cannot trigger a long-only action by themselves.
+
+Window counters are distinct from observation counts. `usable_window_count` counts
+validation windows with usable evidence; `confirmed_window_count` counts isolated-test
+windows that confirmed the frozen relationship. Each actionable near miss persists all
+applicable observation, window, stability, aligned-direction, economic, and benchmark
+gates with their observed/required values and margins. Its normalized missing distance
+is derived only from failed gates and is used for deterministic category ranking.
+
 Completed v4 stage evidence is cached by instrument, predictor/version, cadence,
 horizon, frozen configuration, phase boundaries, an exact fingerprint of the consumed
 slice, costs, and contract version. The namespace deliberately excludes the complete
 dataset fingerprint, so extending a weekly range can reuse unchanged slices while
 computing new or modified slices. `--force-recompute` bypasses all cache reads.
+Within one fresh execution, bounded price, sampled-pair, phase-slice, and fingerprint
+indexes reuse identical deterministic primitives across A1/A2/A3/validation/test. The
+result records request/build/reuse counters so performance regression is tested without
+fragile wall-clock assertions.
 
 ## Temporal and statistical contract
 

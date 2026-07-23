@@ -142,6 +142,26 @@ reports `predictive_edge_v4_conclusion`, `regime_conditioned_v41_conclusion`, an
 `strategy_research_outcome`. Exact reuse returns both persisted conclusions, the
 original v4.1 stage counters, and current reuse-work counters.
 
+Original counters describe the immutable work that produced the stored evidence;
+current counters describe only this invocation. Exact reuse performs no dataset load,
+Feature build, edge analysis, or Strategy simulation. Its `compute_avoided_estimate`
+sums persisted v4 work, v4.1 A1/A2/A3/validation/test work, and complete Strategy work,
+so a costly no-Strategy result still reports positive avoided computation.
+
+Production verification:
+
+```sh
+python -m app.jobs.run_weekly_strategy_research --asset BTC/USDT --persist --force-recompute
+python -m app.jobs.run_weekly_strategy_research --asset BTC/USDT --persist
+curl "$API_BASE_URL/optimization/predictive-edge-runs/$RUN_ID/diagnostics"
+curl "$API_BASE_URL/optimization/predictive-edge-runs/$RUN_ID/near-misses?kind=actionable"
+curl "$API_BASE_URL/optimization/predictive-edge-runs/$RUN_ID/near-misses?kind=diagnostic"
+```
+
+Compare persisted run IDs, conclusions, original counters, and near-miss counts between
+the forced and exact-reuse runs. Only current computed/reused/avoided work and elapsed
+time should differ.
+
 Useful flags:
 
 - repeat `--asset` to restrict catalog instruments;

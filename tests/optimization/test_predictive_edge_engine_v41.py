@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -25,7 +26,9 @@ from app.optimization.predictive_edge_engine_v41 import (
     INTERACTION_RETENTION_LIMIT,
     ISOLATED_TEST_LIMIT,
     VALIDATION_LIMIT,
+    PhaseEvidence,
     PredictorRole,
+    _combine_phase_evidence,
     _evaluate,
     _sampled_pairs,
     analyze_predictive_edges_v41,
@@ -579,3 +582,62 @@ def test_horizon_uses_t_plus_horizon_and_cadence_samples_boundaries() -> None:
     assert four_hours.gross_movement is not None
     assert four_hours.gross_movement > 0
     assert len(four_hour_samples) > len(eight_hour_samples)
+
+
+def test_execution_indexes_reuse_expensive_deterministic_primitives() -> None:
+    matrix = _matrix()
+    first = analyze_predictive_edges_v41(
+        matrix=matrix,
+        windows=_windows(),
+        simulation=SimulationConfiguration(),
+        force_recompute=True,
+    )
+    second = analyze_predictive_edges_v41(
+        matrix=matrix,
+        windows=_windows(),
+        simulation=SimulationConfiguration(),
+        force_recompute=True,
+    )
+
+    counters = first.primitive_counters
+    assert counters.price_index_builds == 1
+    assert counters.sampled_pair_requests > counters.sampled_pair_builds
+    assert counters.sampled_pair_reuses > 0
+    assert counters.slice_fingerprint_requests > counters.slice_fingerprint_builds
+    assert counters.slice_fingerprint_reuses > 0
+    assert replace(first, primitive_counters=second.primitive_counters) == second
+
+
+def test_phase_aggregation_counts_windows_independently_from_observations() -> None:
+    def evidence(*, observations: int, stable: bool, passes: bool) -> PhaseEvidence:
+        return PhaseEvidence(
+            observations,
+            Decimal("0.01"),
+            Decimal("0.01"),
+            Decimal("0.007"),
+            Decimal("0.60"),
+            Decimal("0.52"),
+            Decimal("0.08"),
+            Decimal("0.001"),
+            stable,
+            True,
+            passes,
+            1,
+            int(stable),
+            1,
+            int(passes),
+        )
+
+    combined = _combine_phase_evidence(
+        (
+            evidence(observations=100, stable=True, passes=True),
+            evidence(observations=7, stable=True, passes=True),
+            evidence(observations=31, stable=False, passes=False),
+        )
+    )
+
+    assert combined.observations == 138
+    assert combined.usable_window_count == 3
+    assert combined.stable_window_count == 2
+    assert combined.positive_aligned_window_count == 3
+    assert combined.confirmed_window_count == 2

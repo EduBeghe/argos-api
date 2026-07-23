@@ -6,8 +6,6 @@ from pydantic import BaseModel
 
 from app.optimization.predictive_edge_v4 import (
     DiagnosticConclusion,
-    EvidenceProfile,
-    NeutralBandPolicy,
     ParameterSource,
     RejectionReason,
 )
@@ -229,32 +227,95 @@ class PredictiveEdgeDiagnosticResponse(BaseModel):
     reused_counts: dict[str, int]
     regime_conditioned_conclusion: str | None = None
     regime_conditioned_stage_counters: dict[str, object] | None = None
+    regime_conditioned_summary: "RegimeConditionedSummaryResponse | None" = None
+
+
+class RegimeConditionedPrimitiveCountersResponse(BaseModel):
+    price_index_builds: int
+    sampled_pair_requests: int
+    sampled_pair_builds: int
+    sampled_pair_reuses: int
+    slice_fingerprint_requests: int
+    slice_fingerprint_builds: int
+    slice_fingerprint_reuses: int
+
+
+class RegimeConditionedSummaryResponse(BaseModel):
+    contract_version: int
+    confirmed_interaction_count: int
+    actionable_near_miss_count: int
+    diagnostic_near_miss_count: int
+    hypotheses_generated: int
+    primitive_counters: RegimeConditionedPrimitiveCountersResponse | None = None
+
+
+class RegimeConditionedEvidenceResponse(BaseModel):
+    observations: int
+    gross_movement: Decimal | None
+    aligned_gross_movement: Decimal | None
+    net_movement: Decimal | None
+    directional_hit_rate: Decimal | None
+    benchmark: Decimal | None
+    benchmark_improvement: Decimal | None
+    standard_error: Decimal | None
+    stable: bool
+    economic: bool
+    passes: bool
+    usable_window_count: int
+    stable_window_count: int
+    positive_aligned_window_count: int
+    confirmed_window_count: int
 
 
 class PredictiveEdgeNearMissResponse(BaseModel):
     id: UUID
     rank: int
+    category_rank: int = 1
+    engine: str = "v4"
+    engine_contract_version: int = 4
     kind: str = "actionable"
     edge_fingerprint: str
     predictor_name: str
     directional_predictor: str | None = None
     context_predictor: str | None = None
     context_regime: str | None = None
+    directional_predictor_version: int | None = None
+    context_predictor_version: int | None = None
+    selected_bin: int | None = None
+    directional_lower_bound: Decimal | None = None
+    directional_upper_bound: Decimal | None = None
+    context_lower_bound: Decimal | None = None
+    context_upper_bound: Decimal | None = None
+    direction_mapping: str | None = None
+    suggested_action: str | None = None
     cadence_seconds: int
     horizon_seconds: int
     bin_count: int
     condition: str
-    neutral_policy: NeutralBandPolicy
-    profile: EvidenceProfile
+    neutral_policy: str
+    profile: str
     classification: str
-    primary_rejection_reason: RejectionReason
-    passed_requirements: tuple[RejectionReason, ...]
-    failed_requirements: tuple[RejectionReason, ...]
+    primary_rejection_reason: str
+    passed_requirements: tuple[str, ...]
+    failed_requirements: tuple[str, ...]
     requirement_margins: tuple[RequirementMarginResponse, ...]
     usable_observations: int
     stable_direction_ratio: Decimal
     expected_net_movement: Decimal | None
+    expected_gross_movement: Decimal | None = None
+    expected_aligned_movement: Decimal | None = None
+    directional_hit_rate: Decimal | None = None
+    benchmark: Decimal | None = None
+    benchmark_improvement: Decimal | None = None
+    observations: int | None = None
     normalized_missing_distance: Decimal
+    training_evidence: RegimeConditionedEvidenceResponse | None = None
+    directional_baseline_evidence: RegimeConditionedEvidenceResponse | None = None
+    validation_evidence: RegimeConditionedEvidenceResponse | None = None
+    test_evidence: RegimeConditionedEvidenceResponse | None = None
+    context_improvement: Decimal | None = None
+    usable_window_count: int | None = None
+    confirmed_window_count: int | None = None
 
 
 class PredictiveEdgeNearMissPageResponse(BaseModel):

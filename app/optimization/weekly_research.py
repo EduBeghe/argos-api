@@ -43,6 +43,7 @@ from app.optimization.predictive_edge_service import (
     load_predictive_edge_v4_cache,
     load_predictive_edge_v41_cache,
     persist_predictive_edge_v4_result,
+    persist_predictive_edge_v41_addendum,
     predictive_edge_v4_cache_namespace,
     predictive_edge_v4_experiment_key,
     predictive_edge_v41_cache_namespace,
@@ -86,6 +87,20 @@ class WeeklyInstrumentResearch:
     @property
     def predictive_edge_run_id(self) -> UUID | None:
         return self.execution.predictive_edge_run_id
+
+
+def _persisted_compute_avoided(
+    computed_counts: dict[str, int],
+    regime_counters: dict[str, object] | None,
+    complete_strategy_work: int,
+) -> int:
+    total = sum(computed_counts.values()) + complete_strategy_work
+    for value in (regime_counters or {}).values():
+        if isinstance(value, dict):
+            computed = value.get("computed", 0)
+            if isinstance(computed, int):
+                total += computed
+    return total
 
 
 def weekly_boundary(now: datetime) -> datetime:
@@ -185,11 +200,25 @@ async def execute_weekly_instrument_research(
         reused = await find_reusable_weekly_research_run(session, reuse_key)
         if reused is not None:
             diagnostics: dict[str, object] = {}
+            avoided = reused.compute_avoided_estimate
             if reused.predictive_edge_run_id is not None:
                 persisted = await get_predictive_edge_diagnostics(
                     session, reused.predictive_edge_run_id
                 )
                 persisted_values = persisted.model_dump(mode="json")
+                avoided = _persisted_compute_avoided(
+                    persisted.computed_counts,
+                    persisted.regime_conditioned_stage_counters,
+                    reused.compute_avoided_estimate,
+                )
+                persisted_summary = persisted.regime_conditioned_summary
+                summary = (
+                    persisted_summary
+                    if isinstance(persisted_summary, dict)
+                    else persisted_summary.model_dump()
+                    if persisted_summary is not None
+                    else {}
+                )
                 diagnostics = {
                     **persisted_values,
                     "predictive_edge_v4_conclusion": (
@@ -201,10 +230,16 @@ async def execute_weekly_instrument_research(
                     "strategy_research_outcome": reused.result.outcome.value,
                     "current_work": {
                         "evaluations_reused": reused.result.evaluated_count,
-                        "simulations_avoided": reused.compute_avoided_estimate,
+                        "simulations_avoided": avoided,
                     },
                     "original_stage_counters": (
                         persisted.regime_conditioned_stage_counters
+                    ),
+                    "actionable_near_misses": summary.get(
+                        "actionable_near_miss_count", 0
+                    ),
+                    "diagnostic_near_misses": summary.get(
+                        "diagnostic_near_miss_count", 0
                     ),
                 }
             elapsed = perf_counter() - total_started
@@ -214,7 +249,7 @@ async def execute_weekly_instrument_research(
                 reused,
                 WeeklyResearchWork(
                     evaluations_reused=reused.result.evaluated_count,
-                    simulations_avoided=reused.compute_avoided_estimate,
+                    simulations_avoided=avoided,
                 ),
                 {
                     "identity_lookup": Decimal(str(revision_elapsed)),
@@ -294,6 +329,12 @@ async def execute_weekly_instrument_research(
     )
     if persist and force_recompute:
         edge_execution = await find_reusable_predictive_edge_run(session, edge_key)
+    if persist and edge_execution is not None and edge_execution.run_id is not None:
+        await persist_predictive_edge_v41_addendum(
+            session=session,
+            run_id=edge_execution.run_id,
+            result=regime_result,
+        )
     if persist and (edge_execution is None or edge_execution.run_id is None):
         edge_execution = await persist_predictive_edge_v4_result(
             session=session,
@@ -465,6 +506,13 @@ async def execute_weekly_instrument_research(
             "actionable_near_misses": len(regime_result.actionable_near_misses),
             "diagnostic_near_misses": len(regime_result.diagnostic_near_misses),
             "regime_conditioned_stage_counters": {
+                "a1": asdict(regime_result.stage_a1),
+                "a2": asdict(regime_result.stage_a2),
+                "a3": asdict(regime_result.stage_a3),
+                "validation": asdict(regime_result.stage_b),
+                "test": asdict(regime_result.stage_c),
+            },
+            "original_stage_counters": {
                 "a1": asdict(regime_result.stage_a1),
                 "a2": asdict(regime_result.stage_a2),
                 "a3": asdict(regime_result.stage_a3),

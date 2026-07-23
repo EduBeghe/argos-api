@@ -96,12 +96,18 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     dataset_loader = AsyncMock(side_effect=AssertionError("dataset loaded"))
     matrix_builder = Mock(side_effect=AssertionError("matrix built"))
     edge_analyzer = Mock(side_effect=AssertionError("edge analysis executed"))
+    regime_analyzer = Mock(side_effect=AssertionError("v4.1 analysis executed"))
     candidate_evaluator = Mock(side_effect=AssertionError("candidate simulated"))
     diagnostics = AsyncMock(
         return_value=SimpleNamespace(
             diagnostic_conclusion=SimpleNamespace(value="completed"),
             regime_conditioned_conclusion="no_regime_conditioned_edge",
             regime_conditioned_stage_counters={"a1": {"computed": 24}},
+            regime_conditioned_summary={
+                "actionable_near_miss_count": 3,
+                "diagnostic_near_miss_count": 5,
+            },
+            computed_counts={"training": 100},
             model_dump=lambda **_: {
                 "diagnostic_conclusion": "no_regime_conditioned_edge",
                 "computed_counts": {"training": 100},
@@ -116,6 +122,9 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
         research_module, "build_historical_feature_matrix", matrix_builder
     )
     monkeypatch.setattr(research_module, "analyze_predictive_edges_v4", edge_analyzer)
+    monkeypatch.setattr(
+        research_module, "analyze_predictive_edges_v41", regime_analyzer
+    )
     monkeypatch.setattr(
         research_module, "evaluate_edge_guided_candidates", candidate_evaluator
     )
@@ -136,7 +145,9 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     assert completed.execution.result.funnel["unstable_edges"] == 19
     assert completed.work.evaluations_computed == 0
     assert completed.work.evaluations_reused == 1
-    assert completed.work.simulations_avoided == 22
+    assert completed.work.simulations_avoided == 146
+    assert completed.diagnostics["actionable_near_misses"] == 3
+    assert completed.diagnostics["diagnostic_near_misses"] == 5
     assert completed.predictive_edge_run_id == predictive_run_id
     assert completed.diagnostics["computed_counts"] == {"training": 100}
     assert completed.diagnostics["predictive_edge_v4_conclusion"] == "completed"

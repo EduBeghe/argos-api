@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,8 +18,13 @@ from app.optimization.predictive_edge_engine_v4 import (
     encode_v4_cache_value,
 )
 from app.optimization.predictive_edge_engine_v41 import (
+    ECONOMIC_MARGIN,
+    MINIMUM_CONFIRMATION_WINDOWS,
+    MINIMUM_HIT_IMPROVEMENT,
+    MINIMUM_OBSERVATIONS,
     PREDICTIVE_EDGE_V41_CONTRACT_VERSION,
     PredictiveEdgeV41Result,
+    V41Candidate,
 )
 from app.optimization.predictive_edge_engine_v41 import (
     PhaseEvidence as V41PhaseEvidence,
@@ -59,6 +64,243 @@ class PredictiveEdgeExecution:
     result: PredictiveEdgeResult | None
     metrics_reused: int
     compute_avoided_estimate: int
+
+
+def _v41_evidence(value: V41PhaseEvidence | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    return {
+        "observations": value.observations,
+        "gross_movement": _decimal_text(value.gross_movement),
+        "aligned_gross_movement": _decimal_text(value.aligned_gross_movement),
+        "net_movement": _decimal_text(value.net_movement),
+        "directional_hit_rate": _decimal_text(value.directional_hit_rate),
+        "benchmark": _decimal_text(value.benchmark),
+        "benchmark_improvement": _decimal_text(value.benchmark_improvement),
+        "standard_error": _decimal_text(value.standard_error),
+        "stable": value.stable,
+        "economic": value.economic,
+        "passes": value.passes,
+        "usable_window_count": value.usable_window_count,
+        "stable_window_count": value.stable_window_count,
+        "positive_aligned_window_count": value.positive_aligned_window_count,
+        "confirmed_window_count": value.confirmed_window_count,
+    }
+
+
+def _v41_requirement_margins(value: V41PhaseEvidence) -> list[dict[str, object]]:
+    usable = Decimal(value.usable_window_count)
+    stable_ratio = Decimal(value.stable_window_count) / usable if usable else Decimal(0)
+    positive_ratio = (
+        Decimal(value.positive_aligned_window_count) / usable if usable else Decimal(0)
+    )
+    requirements = (
+        (
+            "insufficient_observations",
+            Decimal(value.observations),
+            Decimal(MINIMUM_OBSERVATIONS),
+        ),
+        ("insufficient_windows", usable, Decimal(MINIMUM_CONFIRMATION_WINDOWS)),
+        ("unstable_direction", stable_ratio, Decimal(1)),
+        ("inconsistent_sign", positive_ratio, Decimal(1)),
+        (
+            "movement_does_not_cover_costs",
+            value.net_movement or Decimal(0),
+            ECONOMIC_MARGIN,
+        ),
+        (
+            "benchmark_improvement_below_threshold",
+            value.benchmark_improvement or Decimal(0),
+            MINIMUM_HIT_IMPROVEMENT,
+        ),
+    )
+    result: list[dict[str, object]] = []
+    for name, observed, required in requirements:
+        absolute = observed - required
+        result.append(
+            {
+                "requirement": name,
+                "observed_value": str(observed),
+                "required_value": str(required),
+                "absolute_margin": str(absolute),
+                "relative_margin": str(absolute / abs(required)),
+                "passed": observed >= required,
+            }
+        )
+    return result
+
+
+def _v41_missing_distance(value: V41PhaseEvidence) -> Decimal:
+    return sum(
+        (
+            max(Decimal(0), -Decimal(str(item["relative_margin"])))
+            for item in _v41_requirement_margins(value)
+            if not bool(item["passed"])
+        ),
+        Decimal(0),
+    )
+
+
+def _v41_summary(result: PredictiveEdgeV41Result) -> dict[str, object]:
+    return {
+        "contract_version": PREDICTIVE_EDGE_V41_CONTRACT_VERSION,
+        "confirmed_interaction_count": len(result.confirmed_candidates),
+        "actionable_near_miss_count": len(result.actionable_near_misses),
+        "diagnostic_near_miss_count": len(result.diagnostic_near_misses),
+        "hypotheses_generated": len(result.hypotheses),
+        "primitive_counters": asdict(result.primitive_counters),
+    }
+
+
+def _v41_rejection_evidence(candidate: V41Candidate) -> V41PhaseEvidence:
+    return candidate.test if candidate.test is not None else candidate.validation
+
+
+def _v41_counters(result: PredictiveEdgeV41Result) -> dict[str, object]:
+    return {
+        "a1": asdict(result.stage_a1),
+        "a2": asdict(result.stage_a2),
+        "a3": asdict(result.stage_a3),
+        "validation": asdict(result.stage_b),
+        "test": asdict(result.stage_c),
+    }
+
+
+def _add_v41_near_misses(
+    *,
+    session: AsyncSession,
+    run_id: UUID,
+    result: PredictiveEdgeV41Result,
+    next_rank: int,
+) -> None:
+    """Map every persisted v4.1 near miss through one canonical path."""
+
+    for category_rank, candidate in enumerate(
+        sorted(
+            result.actionable_near_misses,
+            key=lambda item: (
+                _v41_missing_distance(_v41_rejection_evidence(item)),
+                item.relationship.fingerprint,
+            ),
+        ),
+        start=1,
+    ):
+        relationship = candidate.relationship
+        rejection_evidence = _v41_rejection_evidence(candidate)
+        margins = _v41_requirement_margins(rejection_evidence)
+        session.add(
+            PredictiveEdgeNearMissRecord(
+                id=uuid4(),
+                run_id=run_id,
+                rank=next_rank,
+                category_rank=category_rank,
+                engine="v4.1",
+                engine_contract_version=PREDICTIVE_EDGE_V41_CONTRACT_VERSION,
+                kind="actionable",
+                edge_fingerprint=relationship.fingerprint,
+                predictor_name=relationship.directional_predictor,
+                directional_predictor=relationship.directional_predictor,
+                directional_predictor_version=relationship.directional_version,
+                context_predictor=relationship.context_predictor,
+                context_predictor_version=relationship.context_version,
+                context_regime=relationship.regime.value,
+                selected_bin=relationship.selected_bin,
+                directional_lower_bound=relationship.directional_lower_bound,
+                directional_upper_bound=relationship.directional_upper_bound,
+                context_lower_bound=relationship.frozen_regime.lower_bound,
+                context_upper_bound=relationship.frozen_regime.upper_bound,
+                direction_mapping=relationship.direction_mapping.value,
+                suggested_action=relationship.action.value,
+                cadence_seconds=int(relationship.cadence.total_seconds()),
+                horizon_seconds=int(relationship.horizon.total_seconds()),
+                bin_count=3,
+                condition="all",
+                neutral_policy="training_noise",
+                profile=relationship.profile,
+                classification="regime_conditioned_near_miss",
+                primary_rejection_reason=(
+                    candidate.rejection_reason or "validation_failed"
+                ),
+                passed_requirements=[
+                    str(item["requirement"]) for item in margins if item["passed"]
+                ],
+                failed_requirements=[
+                    str(item["requirement"]) for item in margins if not item["passed"]
+                ],
+                requirement_margins=margins,
+                usable_observations=candidate.validation.observations,
+                stable_direction_ratio=(
+                    Decimal(candidate.validation.stable_window_count)
+                    / Decimal(candidate.validation.usable_window_count)
+                    if candidate.validation.usable_window_count
+                    else Decimal(0)
+                ),
+                expected_net_movement=candidate.validation.net_movement,
+                expected_gross_movement=candidate.validation.gross_movement,
+                expected_aligned_movement=(candidate.validation.aligned_gross_movement),
+                directional_hit_rate=candidate.validation.directional_hit_rate,
+                benchmark=candidate.validation.benchmark,
+                benchmark_improvement=candidate.validation.benchmark_improvement,
+                observations=candidate.validation.observations,
+                normalized_missing_distance=_v41_missing_distance(rejection_evidence),
+                training_evidence=_v41_evidence(relationship.training),
+                directional_baseline_evidence=_v41_evidence(
+                    relationship.directional_baseline
+                ),
+                validation_evidence=_v41_evidence(candidate.validation),
+                test_evidence=_v41_evidence(candidate.test),
+                context_improvement=relationship.context_improvement,
+                usable_window_count=candidate.validation.usable_window_count,
+                confirmed_window_count=(
+                    candidate.test.confirmed_window_count if candidate.test else 0
+                ),
+            )
+        )
+        next_rank += 1
+    for category_rank, context_predictor in enumerate(
+        result.diagnostic_near_misses, start=1
+    ):
+        context_version = next(
+            (
+                item.context_version
+                for item in result.interactions
+                if item.context_predictor == context_predictor
+            ),
+            1,
+        )
+        session.add(
+            PredictiveEdgeNearMissRecord(
+                id=uuid4(),
+                run_id=run_id,
+                rank=next_rank,
+                category_rank=category_rank,
+                engine="v4.1",
+                engine_contract_version=PREDICTIVE_EDGE_V41_CONTRACT_VERSION,
+                kind="diagnostic",
+                edge_fingerprint=hashlib.sha256(
+                    f"v4.1:diagnostic:{context_predictor}".encode()
+                ).hexdigest(),
+                predictor_name=context_predictor,
+                context_predictor=context_predictor,
+                context_predictor_version=context_version,
+                cadence_seconds=0,
+                horizon_seconds=0,
+                bin_count=0,
+                condition="all",
+                neutral_policy="training_noise",
+                profile="regime_conditioned_v41",
+                classification="diagnostic_context_predictor",
+                primary_rejection_reason="non_directional_predictor",
+                passed_requirements=[],
+                failed_requirements=["non_directional_predictor"],
+                requirement_margins=[],
+                usable_observations=0,
+                stable_direction_ratio=Decimal(0),
+                expected_net_movement=None,
+                normalized_missing_distance=Decimal(0),
+            )
+        )
+        next_rank += 1
 
 
 def predictive_edge_experiment_key(
@@ -615,15 +857,10 @@ async def persist_predictive_edge_v4_result(
                 regime_result.conclusion.value if regime_result is not None else None
             ),
             regime_conditioned_stage_counters=(
-                {
-                    "a1": asdict(regime_result.stage_a1),
-                    "a2": asdict(regime_result.stage_a2),
-                    "a3": asdict(regime_result.stage_a3),
-                    "validation": asdict(regime_result.stage_b),
-                    "test": asdict(regime_result.stage_c),
-                }
-                if regime_result is not None
-                else None
+                _v41_counters(regime_result) if regime_result is not None else None
+            ),
+            regime_conditioned_summary=(
+                _v41_summary(regime_result) if regime_result is not None else None
             ),
         )
     )
@@ -639,6 +876,9 @@ async def persist_predictive_edge_v4_result(
                 id=uuid4(),
                 run_id=run_id,
                 rank=near_miss.rank,
+                category_rank=near_miss.rank,
+                engine="v4",
+                engine_contract_version=PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
                 edge_fingerprint=configuration.fingerprint,
                 predictor_name=configuration.predictor.name,
                 cadence_seconds=int(configuration.cadence.total_seconds()),
@@ -679,6 +919,13 @@ async def persist_predictive_edge_v4_result(
                 expected_net_movement=(near_miss.diagnostic.net_expected_movement),
                 normalized_missing_distance=(near_miss.normalized_missing_distance),
             )
+        )
+    if regime_result is not None:
+        _add_v41_near_misses(
+            session=session,
+            run_id=run_id,
+            result=regime_result,
+            next_rank=len(result.near_misses) + 1,
         )
     for sensitivity in result.sensitivity:
         session.add(
@@ -805,6 +1052,12 @@ async def persist_predictive_edge_v4_result(
                 "stable": evidence.stable,
                 "economic": evidence.economic,
                 "passes": evidence.passes,
+                "usable_window_count": evidence.usable_window_count,
+                "stable_window_count": evidence.stable_window_count,
+                "positive_aligned_window_count": (
+                    evidence.positive_aligned_window_count
+                ),
+                "confirmed_window_count": evidence.confirmed_window_count,
             }
             await session.execute(
                 postgresql_insert(PredictiveEdgeV4CacheRecord)
@@ -858,6 +1111,44 @@ async def load_predictive_edge_v4_cache(
     return result
 
 
+async def persist_predictive_edge_v41_addendum(
+    *,
+    session: AsyncSession,
+    run_id: UUID,
+    result: PredictiveEdgeV41Result,
+) -> None:
+    """Attach immutable v4.1 observability to a reusable pre-v4.1 v4 run."""
+
+    await session.execute(
+        update(PredictiveEdgeRunDiagnosticRecord)
+        .where(PredictiveEdgeRunDiagnosticRecord.run_id == run_id)
+        .values(
+            regime_conditioned_conclusion=result.conclusion.value,
+            regime_conditioned_stage_counters=_v41_counters(result),
+            regime_conditioned_summary=_v41_summary(result),
+        )
+    )
+    await session.execute(
+        delete(PredictiveEdgeNearMissRecord).where(
+            PredictiveEdgeNearMissRecord.run_id == run_id,
+            PredictiveEdgeNearMissRecord.engine == "v4.1",
+        )
+    )
+    maximum_rank = await session.scalar(
+        select(PredictiveEdgeNearMissRecord.rank)
+        .where(PredictiveEdgeNearMissRecord.run_id == run_id)
+        .order_by(PredictiveEdgeNearMissRecord.rank.desc())
+        .limit(1)
+    )
+    _add_v41_near_misses(
+        session=session,
+        run_id=run_id,
+        result=result,
+        next_rank=(maximum_rank or 0) + 1,
+    )
+    await session.commit()
+
+
 async def load_predictive_edge_v41_cache(
     session: AsyncSession, *, cache_namespace: str
 ) -> dict[str, V41PhaseEvidence]:
@@ -887,6 +1178,12 @@ async def load_predictive_edge_v41_cache(
                 stable=bool(payload["stable"]),
                 economic=bool(payload["economic"]),
                 passes=bool(payload["passes"]),
+                usable_window_count=int(str(payload["usable_window_count"])),
+                stable_window_count=int(str(payload["stable_window_count"])),
+                positive_aligned_window_count=int(
+                    str(payload["positive_aligned_window_count"])
+                ),
+                confirmed_window_count=int(str(payload["confirmed_window_count"])),
             )
         except (KeyError, TypeError, ValueError):
             continue
