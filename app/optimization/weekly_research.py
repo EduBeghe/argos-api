@@ -262,8 +262,12 @@ async def execute_weekly_instrument_research(
                     targeted_avoided = targeted_summary.get("evaluations_computed", 0)
                     if isinstance(targeted_avoided, int):
                         avoided += targeted_avoided
+                    current_work = diagnostics.get("current_work")
+                    if isinstance(current_work, dict):
+                        current_work["simulations_avoided"] = avoided
                     diagnostics.update(
                         {
+                            "targeted_refinement_run_id": str(targeted.id),
                             "targeted_refinement_conclusion": (
                                 targeted.conclusion.value
                             ),
@@ -271,6 +275,18 @@ async def execute_weekly_instrument_research(
                             "targeted_confirmed_candidates": targeted_summary.get(
                                 "confirmed_candidates", 0
                             ),
+                            "best_targeted_candidate": (
+                                targeted.best_targeted_candidate
+                            ),
+                            "best_targeted_candidate_id": (
+                                str(targeted.best_targeted_candidate_id)
+                                if targeted.best_targeted_candidate_id is not None
+                                else None
+                            ),
+                            "targeted_current_work": {
+                                "evaluations_computed": 0,
+                                "evaluations_reused": 0,
+                            },
                             "targeted_candidates_url": (
                                 f"/optimization/predictive-edge-runs/"
                                 f"{reused.predictive_edge_run_id}/"
@@ -397,6 +413,7 @@ async def execute_weekly_instrument_research(
         simulation=simulation,
         thresholds=configuration.thresholds,
     )
+    targeted_persisted = None
     if persist:
         if edge_execution is None or edge_execution.run_id is None:
             raise WeeklyResearchError("predictive evidence was not persisted")
@@ -405,6 +422,9 @@ async def execute_weekly_instrument_research(
             predictive_edge_run_id=edge_execution.run_id,
             experiment_key=reuse_key,
             result=targeted_result,
+        )
+        targeted_persisted = await get_targeted_refinement(
+            session, edge_execution.run_id
         )
     edge_elapsed = perf_counter() - edge_started
     candidate_started = perf_counter()
@@ -561,6 +581,9 @@ async def execute_weekly_instrument_research(
             "diagnostic_near_misses": len(regime_result.diagnostic_near_misses),
             "targeted_refinement_conclusion": targeted_result.conclusion.value,
             "targeted_refinement_summary": asdict(targeted_result.summary),
+            "targeted_refinement_run_id": (
+                str(targeted_persisted.id) if targeted_persisted is not None else None
+            ),
             "targeted_confirmed_candidates": (
                 targeted_result.summary.confirmed_candidates
             ),
@@ -570,14 +593,28 @@ async def execute_weekly_instrument_research(
                 if edge_execution is not None and edge_execution.run_id is not None
                 else None
             ),
-            "best_targeted_candidate": next(
-                (
-                    item.candidate.candidate_fingerprint
-                    for item in targeted_result.candidates
-                    if item.status.value == "confirmed_candidate"
-                ),
-                None,
+            "best_targeted_candidate": (
+                targeted_persisted.best_targeted_candidate
+                if targeted_persisted is not None
+                else next(
+                    (
+                        item.candidate.candidate_fingerprint
+                        for item in targeted_result.candidates
+                        if item.status.value == "confirmed_candidate"
+                    ),
+                    None,
+                )
             ),
+            "best_targeted_candidate_id": (
+                str(targeted_persisted.best_targeted_candidate_id)
+                if targeted_persisted is not None
+                and targeted_persisted.best_targeted_candidate_id is not None
+                else None
+            ),
+            "targeted_current_work": {
+                "evaluations_computed": targeted_result.summary.evaluations_computed,
+                "evaluations_reused": targeted_result.summary.evaluations_reused,
+            },
             "regime_conditioned_stage_counters": {
                 "a1": asdict(regime_result.stage_a1),
                 "a2": asdict(regime_result.stage_a2),

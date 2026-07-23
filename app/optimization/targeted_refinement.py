@@ -1,6 +1,7 @@
 import hashlib
 import json
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -12,13 +13,16 @@ from app.optimization.edge_guided import (
     EdgeGuidedCandidateEvaluation,
     EdgeGuidedCandidateStatus,
     EdgeGuidedEvaluationResult,
+    EdgeGuidedSegmentEvaluation,
     EntryRule,
     ExitRule,
+    _aggregate_values,
     evaluate_edge_guided_candidates,
 )
 from app.optimization.feature_matrix import HistoricalFeatureMatrix
 from app.optimization.historical_data import HistoricalDataset
 from app.optimization.predictive_edge_engine_v41 import (
+    DIRECTIONAL_BIN_COUNT,
     PredictiveEdgeV41Result,
     V41Candidate,
     _sampled_pairs,
@@ -29,6 +33,7 @@ from app.optimization.predictive_edges import (
     EvidenceThresholds,
     SuggestedAction,
 )
+from app.optimization.refinement import MAX_VALIDATION_DRAWDOWN, RefinementSegmentName
 from app.optimization.walk_forward import WalkForwardWindow
 from app.paper.config import SimulationConfiguration
 from app.scores.calculation import MODEL_NAME, MODEL_VERSION
@@ -85,10 +90,24 @@ class TargetedCandidateResult:
     candidate: EdgeGuidedCandidate
     status: TargetedCandidateStatus
     evaluation: EdgeGuidedCandidateEvaluation | None
+    training: EdgeGuidedSegmentEvaluation | None
+    validation: EdgeGuidedSegmentEvaluation | None
+    test: EdgeGuidedSegmentEvaluation | None
     passed_requirements: tuple[str, ...]
     failed_requirements: tuple[str, ...]
+    requirement_margins: tuple["TargetedRequirementMargin", ...]
     rejection_reason: str | None
     normalized_distance_to_pass: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class TargetedRequirementMargin:
+    requirement: str
+    observed_value: Decimal
+    required_value: Decimal
+    absolute_margin: Decimal
+    relative_margin: Decimal | None
+    passed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +238,7 @@ def generate_targeted_configurations(
 
     generated: list[TargetedConfiguration] = []
     seen: set[str] = set()
+    effective_seen: set[tuple[object, ...]] = set()
     duplicates = 0
     for seed in sorted(
         seeds,
@@ -237,18 +257,11 @@ def generate_targeted_configurations(
             for value in range(
                 relationship.selected_bin - 1, relationship.selected_bin + 2
             )
-            if value >= 1
+            if 1 <= value <= DIRECTIONAL_BIN_COUNT
         )
         for cadence in cadences:
             for horizon in horizons:
                 for bin_ordinal in bins:
-                    fingerprint = _configuration_fingerprint(
-                        seed.candidate, cadence, horizon, bin_ordinal
-                    )
-                    if fingerprint in seen:
-                        duplicates += 1
-                        continue
-                    seen.add(fingerprint)
                     lower = relationship.directional_lower_bound
                     upper = relationship.directional_upper_bound
                     if training_matrix is not None and windows:
@@ -260,6 +273,27 @@ def generate_targeted_configurations(
                             horizon,
                             bin_ordinal,
                         )
+                    effective_identity = (
+                        relationship.fingerprint,
+                        cadence,
+                        horizon,
+                        bin_ordinal if training_matrix is None else None,
+                        lower,
+                        upper,
+                        relationship.direction_mapping,
+                        relationship.action,
+                    )
+                    if effective_identity in effective_seen:
+                        duplicates += 1
+                        continue
+                    effective_seen.add(effective_identity)
+                    fingerprint = _configuration_fingerprint(
+                        seed.candidate, cadence, horizon, bin_ordinal
+                    )
+                    if fingerprint in seen:
+                        duplicates += 1
+                        continue
+                    seen.add(fingerprint)
                     generated.append(
                         TargetedConfiguration(
                             fingerprint,
@@ -376,6 +410,139 @@ def _status(
     return TargetedCandidateStatus.REJECTED_VALIDATION
 
 
+def _minimum_requirement(
+    name: str, observed: Decimal, required: Decimal, *, strict: bool = False
+) -> TargetedRequirementMargin:
+    passed = observed > required if strict else observed >= required
+    margin = observed - required
+    relative = margin / abs(required) if required != 0 else None
+    return TargetedRequirementMargin(name, observed, required, margin, relative, passed)
+
+
+def _maximum_requirement(
+    name: str, observed: Decimal, required: Decimal
+) -> TargetedRequirementMargin:
+    margin = required - observed
+    relative = margin / abs(required) if required != 0 else None
+    return TargetedRequirementMargin(
+        name, observed, required, margin, relative, observed <= required
+    )
+
+
+def _stage_requirements(
+    *,
+    training: EdgeGuidedSegmentEvaluation | None,
+    validation: EdgeGuidedSegmentEvaluation | None,
+    test: EdgeGuidedSegmentEvaluation | None,
+    validation_window_count: int,
+    confirmed_window_count: int,
+    confirmation_ratio: Decimal,
+    thresholds: EvidenceThresholds,
+) -> tuple[TargetedRequirementMargin, ...]:
+    requirements: list[TargetedRequirementMargin] = []
+    for phase, metrics in (
+        ("training", training),
+        ("validation", validation),
+        ("isolated_test", test),
+    ):
+        if metrics is None:
+            continue
+        requirements.extend(
+            (
+                _minimum_requirement(
+                    f"{phase}.sufficient_trades",
+                    Decimal(metrics.trade_count),
+                    Decimal(1),
+                ),
+                _minimum_requirement(
+                    f"{phase}.positive_net_return",
+                    metrics.total_return,
+                    Decimal(0),
+                    strict=True,
+                ),
+                _maximum_requirement(
+                    f"{phase}.acceptable_drawdown",
+                    metrics.max_drawdown,
+                    MAX_VALIDATION_DRAWDOWN,
+                ),
+            )
+        )
+        if phase != "training":
+            requirements.append(
+                _minimum_requirement(
+                    f"{phase}.beats_production_benchmark",
+                    metrics.return_difference_from_production,
+                    Decimal(0),
+                    strict=True,
+                )
+            )
+    if validation is not None:
+        requirements.append(
+            _minimum_requirement(
+                "validation.minimum_windows",
+                Decimal(validation_window_count),
+                Decimal(thresholds.minimum_windows),
+            )
+        )
+    if test is not None:
+        requirements.extend(
+            (
+                _minimum_requirement(
+                    "isolated_test.minimum_confirmed_windows",
+                    Decimal(confirmed_window_count),
+                    Decimal(thresholds.minimum_windows),
+                ),
+                _minimum_requirement(
+                    "isolated_test.stable_confirmation_ratio",
+                    confirmation_ratio,
+                    thresholds.minimum_stable_direction_ratio,
+                ),
+            )
+        )
+    return tuple(requirements)
+
+
+def _normalized_distance(
+    requirements: tuple[TargetedRequirementMargin, ...],
+) -> Decimal:
+    distance = Decimal(0)
+    for requirement in requirements:
+        if requirement.passed:
+            continue
+        deficit = max(-requirement.absolute_margin, Decimal("0.000000000000000001"))
+        distance += (
+            deficit / abs(requirement.required_value)
+            if requirement.required_value != 0
+            else deficit
+        )
+    return distance
+
+
+def _merge_evaluations(
+    groups: tuple[EdgeGuidedEvaluationResult, ...],
+    generated_count: int,
+    windows_available: int,
+) -> EdgeGuidedEvaluationResult:
+    if not groups:
+        raise ValueError("at least one cadence group is required")
+    evaluations = tuple(item for group in groups for item in group.evaluations)
+    stage_evidence = tuple(item for group in groups for item in group.stage_evidence)
+    funnel_keys = {key for group in groups for key in group.funnel}
+    funnel = {
+        key: sum(group.funnel.get(key, 0) for group in groups) for key in funnel_keys
+    }
+    return replace(
+        groups[0],
+        generated_count=generated_count,
+        evaluated_count=len(evaluations),
+        maximum_candidates=MAX_TARGETED_CONFIGURATIONS,
+        windows_available=windows_available,
+        evaluations=evaluations,
+        funnel=funnel,
+        stage_evidence=stage_evidence,
+    )
+
+
 def evaluate_targeted_refinement(
     *,
     regime_result: PredictiveEdgeV41Result,
@@ -422,19 +589,26 @@ def evaluate_targeted_refinement(
         _edge_candidate(item, seed_by_fingerprint[item.seed_fingerprint], simulation)
         for item in configurations
     )
-    evaluated = evaluate_edge_guided_candidates(
-        dataset=dataset,
-        feature_matrix=feature_matrix,
-        hypotheses=(),
-        frozen_candidates=frozen,
-        initial_cash=initial_cash,
-        simulation=simulation,
-        decision_interval=frozen[0].decision_interval,
-        maximum_candidates=MAX_TARGETED_CONFIGURATIONS,
-        maximum_test_candidates=MAX_TARGETED_CONFIGURATIONS,
-        windows=windows,
-        thresholds=thresholds,
+    cadence_groups: dict[timedelta, list[EdgeGuidedCandidate]] = defaultdict(list)
+    for candidate in frozen:
+        cadence_groups[candidate.decision_interval].append(candidate)
+    grouped_results = tuple(
+        evaluate_edge_guided_candidates(
+            dataset=dataset,
+            feature_matrix=feature_matrix,
+            hypotheses=(),
+            frozen_candidates=tuple(cadence_groups[cadence]),
+            initial_cash=initial_cash,
+            simulation=simulation,
+            decision_interval=cadence,
+            maximum_candidates=len(cadence_groups[cadence]),
+            maximum_test_candidates=len(cadence_groups[cadence]),
+            windows=windows,
+            thresholds=thresholds,
+        )
+        for cadence in sorted(cadence_groups, key=timedelta.total_seconds)
     )
+    evaluated = _merge_evaluations(grouped_results, len(configurations), len(windows))
     complete = {
         item.candidate.candidate_fingerprint: item for item in evaluated.evaluations
     }
@@ -443,34 +617,70 @@ def evaluate_targeted_refinement(
         for item in evaluated.stage_evidence
         if item.stage.value == "validation"
     }
+    evidence_by_candidate: dict[
+        tuple[str, RefinementSegmentName], list[EdgeGuidedSegmentEvaluation]
+    ] = defaultdict(list)
+    for evidence in evaluated.stage_evidence:
+        evidence_by_candidate[(evidence.candidate_fingerprint, evidence.stage)].append(
+            evidence.metrics
+        )
     results: list[TargetedCandidateResult] = []
     for configuration, candidate in zip(configurations, frozen, strict=True):
         evaluation = complete.get(candidate.candidate_fingerprint)
         status = _status(evaluation, candidate.candidate_fingerprint in validation_ids)
-        failed = (
-            tuple(item.value for item in evaluation.rejection_reasons)
-            if evaluation
-            else (
-                ("training_qualification",)
-                if status is TargetedCandidateStatus.REJECTED_TRAINING
-                else ("validation_qualification",)
+        stages = {
+            stage: _aggregate_values(
+                tuple(evidence_by_candidate[(candidate.candidate_fingerprint, stage)]),
+                stage,
+            )
+            for stage in RefinementSegmentName
+            if evidence_by_candidate[(candidate.candidate_fingerprint, stage)]
+        }
+        training = stages.get(RefinementSegmentName.TRAINING)
+        validation = stages.get(RefinementSegmentName.VALIDATION)
+        test = stages.get(RefinementSegmentName.TEST)
+        valid_windows = (
+            evaluation.valid_window_count
+            if evaluation is not None
+            else len(
+                evidence_by_candidate[
+                    (candidate.candidate_fingerprint, RefinementSegmentName.VALIDATION)
+                ]
             )
         )
-        passed = tuple(
-            name
-            for name in ("training", "validation", "isolated_test")
-            if name not in " ".join(failed)
+        confirmed_windows = (
+            evaluation.confirmed_window_count if evaluation is not None else 0
         )
+        confirmation_ratio = (
+            Decimal(confirmed_windows) / Decimal(valid_windows)
+            if valid_windows
+            else Decimal(0)
+        )
+        margins = _stage_requirements(
+            training=training,
+            validation=validation,
+            test=test,
+            validation_window_count=valid_windows,
+            confirmed_window_count=confirmed_windows,
+            confirmation_ratio=confirmation_ratio,
+            thresholds=thresholds,
+        )
+        passed = tuple(item.requirement for item in margins if item.passed)
+        failed = tuple(item.requirement for item in margins if not item.passed)
         results.append(
             TargetedCandidateResult(
                 configuration,
                 candidate,
                 status,
                 evaluation,
+                training,
+                validation,
+                test,
                 passed,
                 failed,
+                margins,
                 failed[0] if failed else None,
-                Decimal(len(failed)),
+                _normalized_distance(margins),
             )
         )
     statuses = {item.status for item in results}

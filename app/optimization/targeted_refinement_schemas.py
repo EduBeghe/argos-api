@@ -14,6 +14,9 @@ class TargetedRefinementSummaryResponse(BaseModel):
     predictive_edge_run_id: UUID
     conclusion: TargetedRefinementConclusion
     summary: dict[str, object]
+    confirmed_candidate_count: int
+    best_targeted_candidate_id: UUID | None
+    best_targeted_candidate: str | None
 
 
 class TargetedCandidateResponse(BaseModel):
@@ -28,6 +31,7 @@ class TargetedCandidateResponse(BaseModel):
     test_metrics: dict[str, object] | None
     passed_requirements: tuple[str, ...]
     failed_requirements: tuple[str, ...]
+    requirement_margins: tuple[dict[str, object], ...]
     rejection_reason: str | None
 
 

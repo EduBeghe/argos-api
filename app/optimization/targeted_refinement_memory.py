@@ -79,6 +79,9 @@ class TargetedRefinementCandidateRecord(Base):
     test_metrics: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     passed_requirements: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     failed_requirements: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    requirement_margins: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, nullable=False
+    )
     rejection_reason: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -104,9 +107,7 @@ def _json(value: object) -> object:
 
 
 def _metrics(item: TargetedCandidateResult, name: str) -> dict[str, object] | None:
-    if item.evaluation is None:
-        return None
-    value = getattr(item.evaluation, name)
+    value = getattr(item, name)
     return cast(dict[str, object], _json(asdict(value))) if value is not None else None
 
 
@@ -159,6 +160,9 @@ async def persist_targeted_refinement_result(
                 test_metrics=_metrics(item, "test"),
                 passed_requirements=list(item.passed_requirements),
                 failed_requirements=list(item.failed_requirements),
+                requirement_margins=_json(
+                    [asdict(value) for value in item.requirement_margins]
+                ),
                 rejection_reason=item.rejection_reason,
                 created_at=now,
             )

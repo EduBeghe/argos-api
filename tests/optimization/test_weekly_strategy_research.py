@@ -24,6 +24,10 @@ from app.optimization.historical_data import (
 )
 from app.optimization.predictive_edge_engine_v41 import V41StageCounters
 from app.optimization.predictive_edges import PredictiveEdgeConfiguration
+from app.optimization.targeted_refinement import TargetedRefinementConclusion
+from app.optimization.targeted_refinement_schemas import (
+    TargetedRefinementSummaryResponse,
+)
 from app.optimization.weekly_research import (
     execute_weekly_instrument_research,
     weekly_boundary,
@@ -115,7 +119,22 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
             },
         )
     )
-    targeted_reader = AsyncMock(side_effect=LookupError("not persisted"))
+    targeted_run_id = uuid4()
+    targeted_candidate_id = uuid4()
+    targeted_reader = AsyncMock(
+        return_value=TargetedRefinementSummaryResponse(
+            id=targeted_run_id,
+            predictive_edge_run_id=predictive_run_id,
+            conclusion=TargetedRefinementConclusion.CONFIRMED,
+            summary={
+                "evaluations_computed": 17,
+                "confirmed_candidates": 1,
+            },
+            confirmed_candidate_count=1,
+            best_targeted_candidate_id=targeted_candidate_id,
+            best_targeted_candidate="best-fingerprint",
+        )
+    )
     monkeypatch.setattr(research_module, "read_historical_dataset_revision", revision)
     monkeypatch.setattr(research_module, "find_reusable_weekly_research_run", reusable)
     monkeypatch.setattr(research_module, "read_historical_dataset", dataset_loader)
@@ -151,10 +170,26 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     assert completed.execution.result.funnel["unstable_edges"] == 19
     assert completed.work.evaluations_computed == 0
     assert completed.work.evaluations_reused == 1
-    assert completed.work.simulations_avoided == 146
+    assert completed.work.simulations_avoided == 163
     assert completed.diagnostics["actionable_near_misses"] == 3
     assert completed.diagnostics["diagnostic_near_misses"] == 5
     assert completed.predictive_edge_run_id == predictive_run_id
+    assert completed.diagnostics["targeted_refinement_run_id"] == str(targeted_run_id)
+    assert completed.diagnostics["targeted_refinement_conclusion"] == (
+        TargetedRefinementConclusion.CONFIRMED.value
+    )
+    assert completed.diagnostics["targeted_refinement_summary"] == {
+        "evaluations_computed": 17,
+        "confirmed_candidates": 1,
+    }
+    assert completed.diagnostics["best_targeted_candidate"] == "best-fingerprint"
+    assert completed.diagnostics["best_targeted_candidate_id"] == str(
+        targeted_candidate_id
+    )
+    assert completed.diagnostics["targeted_current_work"] == {
+        "evaluations_computed": 0,
+        "evaluations_reused": 0,
+    }
     assert completed.diagnostics["computed_counts"] == {"training": 100}
     assert completed.diagnostics["predictive_edge_v4_conclusion"] == "completed"
     assert (

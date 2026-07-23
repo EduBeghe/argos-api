@@ -170,6 +170,11 @@ async def run(
                                             "targeted_refinement_summary"
                                         )
                                     ),
+                                    "targeted_refinement_run_id": (
+                                        item.diagnostics.get(
+                                            "targeted_refinement_run_id"
+                                        )
+                                    ),
                                     "targeted_candidates_url": item.diagnostics.get(
                                         "targeted_candidates_url"
                                     ),
@@ -180,6 +185,11 @@ async def run(
                                     ),
                                     "best_targeted_candidate": item.diagnostics.get(
                                         "best_targeted_candidate"
+                                    ),
+                                    "best_targeted_candidate_id": (
+                                        item.diagnostics.get(
+                                            "best_targeted_candidate_id"
+                                        )
                                     ),
                                     "hypotheses_generated": (
                                         item.execution.result.funnel.get(

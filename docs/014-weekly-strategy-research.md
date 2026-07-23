@@ -26,6 +26,13 @@ economic, stability, trade-count or drawdown requirements. Its conclusion is one
 `confirmed_candidates_found`. A confirmed candidate remains research evidence and is
 never activated automatically.
 
+Each cadence is evaluated with its own sampled matrices; candidates from 4h, 6h, 8h,
+and 12h groups never inherit another group's interval. Adjacent bins remain inside the
+frozen three-bin contract, and effective duplicate bounds consume only one place in the
+120-configuration budget. Candidate evidence records observed, required, absolute and
+relative margins for every executed-stage gate. A stage that was not executed is not
+reported as passed, and distance-to-pass is the sum of normalized failed-gate deficits.
+
 Persisted results are read-only:
 
 ```text
@@ -38,6 +45,8 @@ Run once with `--persist` for a fresh execution and repeat the exact command to 
 reuse. Exact reuse returns the original evidence, reports current heavy work as zero,
 and skips dataset loading, Feature construction, v4, v4.1, targeted refinement and
 Strategy simulation.
+It also preserves the targeted run and candidate IDs, deterministic ranking, best
+confirmed candidate, conclusion, original counters, and compute-avoided estimate.
 
 The process resolves scoring-enabled instruments from the market catalog and handles
 them sequentially. Each instrument has an isolated transaction and failure boundary.

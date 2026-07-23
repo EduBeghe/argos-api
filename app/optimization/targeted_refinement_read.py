@@ -32,11 +32,33 @@ async def get_targeted_refinement(
     )
     if row is None:
         raise TargetedRefinementNotFoundError("targeted refinement was not found")
+    confirmed = list(
+        (
+            await session.scalars(
+                select(TargetedRefinementCandidateRecord)
+                .where(
+                    TargetedRefinementCandidateRecord.run_id == row.id,
+                    TargetedRefinementCandidateRecord.status
+                    == TargetedCandidateStatus.CONFIRMED.value,
+                )
+                .order_by(
+                    TargetedRefinementCandidateRecord.normalized_distance,
+                    TargetedRefinementCandidateRecord.candidate_fingerprint,
+                )
+            )
+        ).all()
+    )
+    best = confirmed[0] if confirmed else None
     return TargetedRefinementSummaryResponse(
         id=row.id,
         predictive_edge_run_id=row.predictive_edge_run_id,
         conclusion=row.conclusion,
         summary=row.summary,
+        confirmed_candidate_count=len(confirmed),
+        best_targeted_candidate_id=best.id if best is not None else None,
+        best_targeted_candidate=(
+            best.candidate_fingerprint if best is not None else None
+        ),
     )
 
 
@@ -53,6 +75,7 @@ def _response(row: TargetedRefinementCandidateRecord) -> TargetedCandidateRespon
         test_metrics=row.test_metrics,
         passed_requirements=tuple(row.passed_requirements),
         failed_requirements=tuple(row.failed_requirements),
+        requirement_margins=tuple(row.requirement_margins),
         rejection_reason=row.rejection_reason,
     )
 
