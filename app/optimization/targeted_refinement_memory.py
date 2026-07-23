@@ -145,6 +145,7 @@ async def persist_targeted_refinement_result(
             created_at=now,
         )
     )
+    await session.flush()
     for item in result.candidates:
         session.add(
             TargetedRefinementCandidateRecord(

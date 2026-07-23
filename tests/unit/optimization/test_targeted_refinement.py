@@ -1,12 +1,14 @@
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 
 import app.optimization.targeted_refinement as targeted_module
 from app.optimization.edge_guided import (
+    EdgeGuidedCandidateEvaluation,
     EdgeGuidedCandidateStatus,
     EdgeGuidedEvaluationResult,
     EdgeGuidedSegmentEvaluation,
@@ -221,12 +223,16 @@ def test_four_targeted_statuses_are_derived_from_actual_stage_boundary() -> None
         def __init__(self, status: EdgeGuidedCandidateStatus) -> None:
             self.status = status
 
-    assert _status(Evaluation(EdgeGuidedCandidateStatus.REJECTED_TEST), True) is (
-        TargetedCandidateStatus.REJECTED_TEST
+    rejected = cast(
+        EdgeGuidedCandidateEvaluation,
+        Evaluation(EdgeGuidedCandidateStatus.REJECTED_TEST),
     )
-    assert _status(Evaluation(EdgeGuidedCandidateStatus.CONFIRMED), True) is (
-        TargetedCandidateStatus.CONFIRMED
+    confirmed = cast(
+        EdgeGuidedCandidateEvaluation,
+        Evaluation(EdgeGuidedCandidateStatus.CONFIRMED),
     )
+    assert _status(rejected, True) is (TargetedCandidateStatus.REJECTED_TEST)
+    assert _status(confirmed, True) is (TargetedCandidateStatus.CONFIRMED)
 
 
 def test_each_cadence_is_evaluated_with_its_own_sampling_interval(
