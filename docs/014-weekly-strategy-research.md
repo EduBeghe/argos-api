@@ -33,6 +33,11 @@ validation configurations, and 12 isolated tests. Processing is sequential. Cont
 regimes and derived predictors are frozen from training, and test cannot change bounds,
 action, ranking, or fingerprints. These limits do not imply an economic pattern exists.
 
+Confirmed v4.1 interactions become versioned, context-conditioned
+`StrategyHypothesis` records and join confirmed v4 hypotheses before edge-guided
+generation and walk-forward evaluation. Complete fingerprints prevent duplicates; no
+candidate is activated automatically.
+
 ## Complete Strategy Contract
 
 Generation contract version 3 replaces the previous action-filter-only search. That
@@ -131,6 +136,11 @@ is reused. A no-candidate outcome needs interpretation, not a retry. Retry opera
 failures after correcting their cause. Process instruments sequentially to bound memory;
 do not configure parallel BTC/ETH instances. Temporarily disable the Railway cron to
 pause research; do not change ingest or decide schedules.
+
+Structured output keeps `edge_guided_run_id` and `predictive_edge_run_id` separate and
+reports `predictive_edge_v4_conclusion`, `regime_conditioned_v41_conclusion`, and
+`strategy_research_outcome`. Exact reuse returns both persisted conclusions, the
+original v4.1 stage counters, and current reuse-work counters.
 
 Useful flags:
 
