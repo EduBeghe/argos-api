@@ -151,6 +151,7 @@ async def test_v41_diagnostics_and_near_misses_survive_session_restart(
                 },
             )
         )
+        await session.flush()
         common = dict(
             run_id=run_id,
             cadence_seconds=1800,
