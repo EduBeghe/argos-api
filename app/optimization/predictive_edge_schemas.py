@@ -261,6 +261,10 @@ class RegimeConditionedEvidenceResponse(BaseModel):
     stable: bool
     economic: bool
     passes: bool
+    usable_window_count: int
+    stable_window_count: int
+    positive_aligned_window_count: int
+    confirmed_window_count: int
 
 
 class PredictiveEdgeNearMissResponse(BaseModel):

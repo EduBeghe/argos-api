@@ -65,6 +65,10 @@ def upgrade() -> None:
     for column in columns:
         if column.name not in existing:
             op.add_column("predictive_edge_near_misses", column)
+    op.execute(
+        "UPDATE predictive_edge_near_misses "
+        "SET category_rank = rank WHERE engine = 'v4'"
+    )
 
 
 def downgrade() -> None:

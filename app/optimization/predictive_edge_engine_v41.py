@@ -124,6 +124,10 @@ class PhaseEvidence:
     stable: bool
     economic: bool
     passes: bool
+    usable_window_count: int = 0
+    stable_window_count: int = 0
+    positive_aligned_window_count: int = 0
+    confirmed_window_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,7 +609,7 @@ def _analyze_predictive_edges_v41(
     hypotheses = _build_hypotheses(confirmed, windows)
     actionable = tuple(
         sorted(
-            (item for item in final if not item.selected_for_test),
+            (item for item in final if not item.confirmed),
             key=_candidate_rank,
         )[:50]
     )
@@ -1047,6 +1051,7 @@ def _evaluate(
     standard_error = Decimal(str(sqrt(float(variance / Decimal(len(returns))))))
     stable = len(returns) >= MINIMUM_OBSERVATIONS and hit > Decimal("0.50")
     economic = net >= ECONOMIC_MARGIN
+    passes = stable and economic and improvement >= MINIMUM_HIT_IMPROVEMENT
     return PhaseEvidence(
         len(returns),
         gross,
@@ -1058,7 +1063,11 @@ def _evaluate(
         standard_error,
         stable,
         economic,
-        stable and economic and improvement >= MINIMUM_HIT_IMPROVEMENT,
+        passes,
+        1,
+        int(stable),
+        int(aligned > 0),
+        int(passes),
     )
 
 
@@ -1176,6 +1185,10 @@ def _combine_phase_evidence(values: tuple[PhaseEvidence, ...]) -> PhaseEvidence:
         stable,
         economic,
         passes,
+        len(usable_windows),
+        sum(item.stable_window_count for item in values),
+        sum(item.positive_aligned_window_count for item in values),
+        sum(item.confirmed_window_count for item in values),
     )
 
 
