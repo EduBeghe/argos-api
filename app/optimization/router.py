@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -175,6 +175,7 @@ async def predictive_edge_runs(
     status: Annotated[str | None, Query()] = None,
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = 50,
+    kind: Literal["actionable", "diagnostic"] = "actionable",
 ) -> PredictiveEdgeRunPageResponse:
     return await list_predictive_edge_runs(
         session,
@@ -287,10 +288,11 @@ async def predictive_edge_near_misses(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     cursor: Annotated[int | None, Query(ge=0)] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = 50,
+    kind: Literal["actionable", "diagnostic"] = "actionable",
 ) -> PredictiveEdgeNearMissPageResponse:
     try:
         return await list_predictive_edge_near_misses(
-            session, run_id=run_id, cursor=cursor, limit=limit
+            session, run_id=run_id, cursor=cursor, limit=limit, kind=kind
         )
     except PredictiveEdgeNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

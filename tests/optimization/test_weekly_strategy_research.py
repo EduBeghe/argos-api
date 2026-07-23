@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
 
 import pytest
 
@@ -84,16 +85,28 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
         "reused",
         {"edges_evaluated": 19, "unstable_edges": 19},
     )
-    execution = EdgeGuidedExecution(None, "key", True, result, 1, 0, 22)
+    predictive_run_id = uuid4()
+    execution = EdgeGuidedExecution(
+        None, "key", True, result, 1, 0, 22, predictive_run_id
+    )
     revision = AsyncMock(return_value=REVISION)
     reusable = AsyncMock(return_value=execution)
     dataset_loader = AsyncMock(side_effect=AssertionError("dataset loaded"))
     matrix_builder = Mock(side_effect=AssertionError("matrix built"))
     edge_analyzer = Mock(side_effect=AssertionError("edge analysis executed"))
     candidate_evaluator = Mock(side_effect=AssertionError("candidate simulated"))
+    diagnostics = AsyncMock(
+        return_value=SimpleNamespace(
+            model_dump=lambda **_: {
+                "diagnostic_conclusion": "no_regime_conditioned_edge",
+                "computed_counts": {"training": 100},
+            }
+        )
+    )
     monkeypatch.setattr(research_module, "read_historical_dataset_revision", revision)
     monkeypatch.setattr(research_module, "find_reusable_weekly_research_run", reusable)
     monkeypatch.setattr(research_module, "read_historical_dataset", dataset_loader)
+    monkeypatch.setattr(research_module, "get_predictive_edge_diagnostics", diagnostics)
     monkeypatch.setattr(
         research_module, "build_historical_feature_matrix", matrix_builder
     )
@@ -102,8 +115,9 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
         research_module, "evaluate_edge_guided_candidates", candidate_evaluator
     )
 
+    session = SimpleNamespace()
     completed = await execute_weekly_instrument_research(
-        session=SimpleNamespace(),  # type: ignore[arg-type]
+        session=session,  # type: ignore[arg-type]
         identity=IDENTITY,
         configuration=PredictiveEdgeConfiguration(),
         simulation=SimulationConfiguration(),
@@ -118,6 +132,9 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     assert completed.work.evaluations_computed == 0
     assert completed.work.evaluations_reused == 1
     assert completed.work.simulations_avoided == 22
+    assert completed.predictive_edge_run_id == predictive_run_id
+    assert completed.diagnostics["computed_counts"] == {"training": 100}
+    diagnostics.assert_awaited_once_with(session, predictive_run_id)
     dataset_loader.assert_not_awaited()
     matrix_builder.assert_not_called()
     edge_analyzer.assert_not_called()

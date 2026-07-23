@@ -60,6 +60,22 @@ Existing v3 rows remain readable. Their contract version prevents reuse as v4 ev
 Failure to detect an edge is not proof that none exists, and historical evidence does
 not guarantee future results.
 
+## Regime-conditioned discovery v4.1
+
+Contract 4.1 keeps direction separate from context. Directional predictors may propose
+`long_entry` or `exit_or_avoid`; ATR, relative volume, volume confirmation, and derived
+trend, volatility, volume, RSI, and breakout regimes are context-only and remain
+`diagnostic_only` when evaluated alone. A context may condition a directional signal
+but cannot occupy an actionable near-miss or isolated-test slot by itself.
+
+Research derives EMA slopes, EMA-spread change, return acceleration, and rolling
+breakout position in bounded memory using 12-, 48-, and 288-candle lookbacks. Training
+freezes regime bounds before validation. Validation and test reuse those exact bounds.
+The sequential funnel retains at most 24 directional relationships and 8 contexts,
+evaluates at most 192 training interactions, retains 60, validates 40, and sends at
+most 12 frozen actionable configurations to isolated test. Actionable and diagnostic
+near misses are ranked separately. No result guarantees a pattern or profitability.
+
 Completed v4 stage evidence is cached by instrument, predictor/version, cadence,
 horizon, frozen configuration, phase boundaries, an exact fingerprint of the consumed
 slice, costs, and contract version. The namespace deliberately excludes the complete

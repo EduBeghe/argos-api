@@ -219,6 +219,7 @@ class EdgeGuidedExecution:
     evaluations_reused: int
     evaluations_computed: int
     compute_avoided_estimate: int
+    predictive_edge_run_id: UUID | None = None
 
 
 def edge_guided_experiment_key(
@@ -367,6 +368,7 @@ def _reused_execution(
         0,
         int(result.funnel.get("edges_evaluated", 0))
         + result.evaluated_count * run.windows_available,
+        run.predictive_edge_run_id,
     )
 
 
@@ -549,7 +551,14 @@ async def persist_edge_guided_result(
         await session.rollback()
         raise
     return EdgeGuidedExecution(
-        run_id, experiment_key, False, result, 0, result.evaluated_count, 0
+        run_id,
+        experiment_key,
+        False,
+        result,
+        0,
+        result.evaluated_count,
+        0,
+        predictive_edge_run_id,
     )
 
 

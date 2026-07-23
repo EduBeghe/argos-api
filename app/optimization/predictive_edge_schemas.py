@@ -227,8 +227,12 @@ class PredictiveEdgeDiagnosticResponse(BaseModel):
 class PredictiveEdgeNearMissResponse(BaseModel):
     id: UUID
     rank: int
+    kind: str = "actionable"
     edge_fingerprint: str
     predictor_name: str
+    directional_predictor: str | None = None
+    context_predictor: str | None = None
+    context_regime: str | None = None
     cadence_seconds: int
     horizon_seconds: int
     bin_count: int

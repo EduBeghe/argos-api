@@ -475,8 +475,14 @@ class PredictiveEdgeNearMissRecord(Base):
         nullable=False,
     )
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="actionable"
+    )
     edge_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     predictor_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    directional_predictor: Mapped[str | None] = mapped_column(String(64))
+    context_predictor: Mapped[str | None] = mapped_column(String(64))
+    context_regime: Mapped[str | None] = mapped_column(String(32))
     cadence_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     bin_count: Mapped[int] = mapped_column(Integer, nullable=False)
