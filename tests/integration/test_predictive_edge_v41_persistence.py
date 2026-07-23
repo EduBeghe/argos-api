@@ -39,7 +39,7 @@ from app.paper.config import SimulationConfiguration
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 START = datetime(2032, 1, 1, tzinfo=UTC)
-KEY = "v41-production-persistence-" + "1" * 39
+KEY = "e" * 64
 
 
 @pytest_asyncio.fixture
