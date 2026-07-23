@@ -147,6 +147,36 @@ async def run(
                                             "regime_conditioned_v41_conclusion"
                                         )
                                     ),
+                                    "v41_stage_counters": item.diagnostics.get(
+                                        "regime_conditioned_stage_counters"
+                                    ),
+                                    "v41_actionable_near_miss_count": (
+                                        item.diagnostics.get(
+                                            "actionable_near_misses", 0
+                                        )
+                                    ),
+                                    "v41_diagnostic_near_miss_count": (
+                                        item.diagnostics.get(
+                                            "diagnostic_near_misses", 0
+                                        )
+                                    ),
+                                    "hypotheses_generated": (
+                                        item.execution.result.funnel.get(
+                                            "hypotheses_generated", 0
+                                        )
+                                    ),
+                                    "complete_strategies_generated": (
+                                        item.execution.result.generated_count
+                                    ),
+                                    "confirmed_candidates": (
+                                        item.execution.result.funnel.get(
+                                            "confirmed_candidates", 0
+                                        )
+                                    ),
+                                    "compute_avoided_estimate": (
+                                        item.work.simulations_avoided
+                                    ),
+                                    "total_seconds": item.timings["total"],
                                     "diagnostic_url": (
                                         "/optimization/predictive-edge-runs/"
                                         f"{item.predictive_edge_run_id}/diagnostics"

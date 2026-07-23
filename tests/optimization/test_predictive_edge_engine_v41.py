@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -579,3 +580,27 @@ def test_horizon_uses_t_plus_horizon_and_cadence_samples_boundaries() -> None:
     assert four_hours.gross_movement is not None
     assert four_hours.gross_movement > 0
     assert len(four_hour_samples) > len(eight_hour_samples)
+
+
+def test_execution_indexes_reuse_expensive_deterministic_primitives() -> None:
+    matrix = _matrix()
+    first = analyze_predictive_edges_v41(
+        matrix=matrix,
+        windows=_windows(),
+        simulation=SimulationConfiguration(),
+        force_recompute=True,
+    )
+    second = analyze_predictive_edges_v41(
+        matrix=matrix,
+        windows=_windows(),
+        simulation=SimulationConfiguration(),
+        force_recompute=True,
+    )
+
+    counters = first.primitive_counters
+    assert counters.price_index_builds == 1
+    assert counters.sampled_pair_requests > counters.sampled_pair_builds
+    assert counters.sampled_pair_reuses > 0
+    assert counters.slice_fingerprint_requests > counters.slice_fingerprint_builds
+    assert counters.slice_fingerprint_reuses > 0
+    assert replace(first, primitive_counters=second.primitive_counters) == second

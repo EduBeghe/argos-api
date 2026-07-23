@@ -469,6 +469,7 @@ class PredictiveEdgeRunDiagnosticRecord(Base):
     regime_conditioned_stage_counters: Mapped[dict[str, object] | None] = mapped_column(
         JSONB
     )
+    regime_conditioned_summary: Mapped[dict[str, object] | None] = mapped_column(JSONB)
 
 
 class PredictiveEdgeNearMissRecord(Base):
@@ -488,6 +489,13 @@ class PredictiveEdgeNearMissRecord(Base):
         nullable=False,
     )
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    category_rank: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1"
+    )
+    engine: Mapped[str] = mapped_column(String(16), nullable=False, server_default="v4")
+    engine_contract_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="4"
+    )
     kind: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="actionable"
     )
@@ -496,6 +504,15 @@ class PredictiveEdgeNearMissRecord(Base):
     directional_predictor: Mapped[str | None] = mapped_column(String(64))
     context_predictor: Mapped[str | None] = mapped_column(String(64))
     context_regime: Mapped[str | None] = mapped_column(String(32))
+    directional_predictor_version: Mapped[int | None] = mapped_column(Integer)
+    context_predictor_version: Mapped[int | None] = mapped_column(Integer)
+    selected_bin: Mapped[int | None] = mapped_column(Integer)
+    directional_lower_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    directional_upper_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    context_lower_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    context_upper_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    direction_mapping: Mapped[str | None] = mapped_column(String(32))
+    suggested_action: Mapped[str | None] = mapped_column(String(32))
     cadence_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     bin_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -518,9 +535,24 @@ class PredictiveEdgeNearMissRecord(Base):
         Numeric(38, 18), nullable=False
     )
     expected_net_movement: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    expected_gross_movement: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    expected_aligned_movement: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    directional_hit_rate: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    benchmark: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    benchmark_improvement: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    observations: Mapped[int | None] = mapped_column(Integer)
     normalized_missing_distance: Mapped[Decimal] = mapped_column(
         Numeric(38, 18), nullable=False
     )
+    training_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    directional_baseline_evidence: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB
+    )
+    validation_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    test_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    context_improvement: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    usable_window_count: Mapped[int | None] = mapped_column(Integer)
+    confirmed_window_count: Mapped[int | None] = mapped_column(Integer)
 
 
 class PredictiveEdgeSensitivityRecord(Base):

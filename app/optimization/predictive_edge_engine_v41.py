@@ -6,7 +6,8 @@ memory, are learned from training, and are frozen before validation and isolated
 
 import hashlib
 import json
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -166,6 +167,17 @@ class V41StageCounters:
 
 
 @dataclass(frozen=True, slots=True)
+class V41PrimitiveCounters:
+    price_index_builds: int
+    sampled_pair_requests: int
+    sampled_pair_builds: int
+    sampled_pair_reuses: int
+    slice_fingerprint_requests: int
+    slice_fingerprint_builds: int
+    slice_fingerprint_reuses: int
+
+
+@dataclass(frozen=True, slots=True)
 class PredictiveEdgeV41Result:
     directional_relationships: tuple[DirectionalScreen, ...]
     context_relationships: tuple[str, ...]
@@ -182,6 +194,42 @@ class PredictiveEdgeV41Result:
     stage_b: V41StageCounters
     stage_c: V41StageCounters
     cache_writes: dict[str, PhaseEvidence]
+    primitive_counters: V41PrimitiveCounters = V41PrimitiveCounters(0, 0, 0, 0, 0, 0, 0)
+
+
+class _ExecutionIndex:
+    """Bounded per-execution indexes for repeated deterministic primitives."""
+
+    def __init__(
+        self,
+        matrix: HistoricalFeatureMatrix,
+        values: dict[datetime, dict[str, Decimal]],
+    ) -> None:
+        self.matrix = matrix
+        self.values = values
+        self.prices = {row.candle_open_time: row.close_price for row in matrix.rows}
+        self.sampled: dict[
+            tuple[object, ...], tuple[tuple[datetime, Decimal, Decimal], ...]
+        ] = {}
+        self.slices: dict[tuple[datetime, datetime], str] = {}
+        self.sampled_requests = self.sampled_builds = 0
+        self.slice_requests = self.slice_builds = 0
+
+    def counters(self) -> V41PrimitiveCounters:
+        return V41PrimitiveCounters(
+            1,
+            self.sampled_requests,
+            self.sampled_builds,
+            self.sampled_requests - self.sampled_builds,
+            self.slice_requests,
+            self.slice_builds,
+            self.slice_requests - self.slice_builds,
+        )
+
+
+_EXECUTION_INDEX: ContextVar[_ExecutionIndex | None] = ContextVar(
+    "predictive_edge_v41_execution_index", default=None
+)
 
 
 DERIVED_PREDICTORS = (
@@ -326,10 +374,40 @@ def analyze_predictive_edges_v41(
     stage_cache: dict[str, PhaseEvidence] | None = None,
     force_recompute: bool = False,
 ) -> PredictiveEdgeV41Result:
-    """Run A1/A2/A3/B/C sequentially with frozen training regimes."""
+    """Run A1/A2/A3/B/C with shared bounded deterministic indexes."""
 
     rows = build_derived_feature_rows(matrix)
     values_by_time = {row.candle_open_time: row.values for row in rows}
+    index = _ExecutionIndex(matrix, values_by_time)
+    token = _EXECUTION_INDEX.set(index)
+    try:
+        result = _analyze_predictive_edges_v41(
+            matrix=matrix,
+            windows=windows,
+            simulation=simulation,
+            stage_cache=stage_cache,
+            force_recompute=force_recompute,
+            prepared_values=values_by_time,
+        )
+        return replace(result, primitive_counters=index.counters())
+    finally:
+        _EXECUTION_INDEX.reset(token)
+
+
+def _analyze_predictive_edges_v41(
+    *,
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    simulation: SimulationConfiguration,
+    stage_cache: dict[str, PhaseEvidence] | None = None,
+    force_recompute: bool = False,
+    prepared_values: dict[datetime, dict[str, Decimal]] | None = None,
+) -> PredictiveEdgeV41Result:
+    """Reference implementation used beneath the indexed public boundary."""
+
+    values_by_time = prepared_values or {
+        row.candle_open_time: row.values for row in build_derived_feature_rows(matrix)
+    }
     cache = stage_cache or {}
     writes: dict[str, PhaseEvidence] = {}
     directional = tuple(DIRECTIONAL_BASE) + tuple(
@@ -607,7 +685,17 @@ def _sampled_pairs(
 ) -> tuple[tuple[datetime, Decimal, Decimal], ...]:
     """Return predictor and T+horizon returns on cadence-aligned phase boundaries."""
 
-    prices = {row.candle_open_time: row.close_price for row in matrix.rows}
+    index = _EXECUTION_INDEX.get()
+    key = (window.ordinal, phase, predictor, cadence, horizon)
+    if index is not None and index.matrix is matrix and index.values is values:
+        index.sampled_requests += 1
+        existing = index.sampled.get(key)
+        if existing is not None:
+            return existing
+        index.sampled_builds += 1
+        prices = index.prices
+    else:
+        prices = {row.candle_open_time: row.close_price for row in matrix.rows}
     start, end = _phase_bounds(window, phase)
     result: list[tuple[datetime, Decimal, Decimal]] = []
     for at in sorted(values):
@@ -624,7 +712,10 @@ def _sampled_pairs(
             result.append(
                 (at, values[at][predictor], prices[future] / prices[at] - Decimal(1))
             )
-    return tuple(result)
+    value = tuple(result)
+    if index is not None and index.matrix is matrix and index.values is values:
+        index.sampled[key] = value
+    return value
 
 
 def _correlation(pairs: tuple[tuple[Decimal, Decimal], ...]) -> Decimal:
@@ -1288,9 +1379,20 @@ def _cache_key(
 def _slice_fingerprint(
     matrix: HistoricalFeatureMatrix, start: datetime, end: datetime
 ) -> str:
-    return _fingerprint(
+    index = _EXECUTION_INDEX.get()
+    key = (start, end)
+    if index is not None and index.matrix is matrix:
+        index.slice_requests += 1
+        existing = index.slices.get(key)
+        if existing is not None:
+            return existing
+        index.slice_builds += 1
+    value = _fingerprint(
         tuple(row for row in matrix.rows if start <= row.candle_open_time < end)
     )
+    if index is not None and index.matrix is matrix:
+        index.slices[key] = value
+    return value
 
 
 def _fingerprint(*values: object) -> str:
