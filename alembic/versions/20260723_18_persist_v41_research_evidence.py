@@ -18,10 +18,21 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "predictive_edge_run_diagnostics",
-        sa.Column("regime_conditioned_summary", postgresql.JSONB()),
-    )
+    diagnostic_columns = {
+        item["name"]
+        for item in sa.inspect(op.get_bind()).get_columns(
+            "predictive_edge_run_diagnostics"
+        )
+    }
+    if "regime_conditioned_summary" not in diagnostic_columns:
+        op.add_column(
+            "predictive_edge_run_diagnostics",
+            sa.Column("regime_conditioned_summary", postgresql.JSONB()),
+        )
+    existing = {
+        item["name"]
+        for item in sa.inspect(op.get_bind()).get_columns("predictive_edge_near_misses")
+    }
     columns = (
         sa.Column("category_rank", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("engine", sa.String(16), nullable=False, server_default="v4"),
@@ -52,7 +63,8 @@ def upgrade() -> None:
         sa.Column("confirmed_window_count", sa.Integer()),
     )
     for column in columns:
-        op.add_column("predictive_edge_near_misses", column)
+        if column.name not in existing:
+            op.add_column("predictive_edge_near_misses", column)
 
 
 def downgrade() -> None:
