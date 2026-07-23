@@ -24,6 +24,10 @@ from app.optimization.historical_data import (
 )
 from app.optimization.predictive_edge_engine_v41 import V41StageCounters
 from app.optimization.predictive_edges import PredictiveEdgeConfiguration
+from app.optimization.targeted_refinement import TargetedRefinementConclusion
+from app.optimization.targeted_refinement_schemas import (
+    TargetedRefinementSummaryResponse,
+)
 from app.optimization.weekly_research import (
     execute_weekly_instrument_research,
     weekly_boundary,
@@ -97,6 +101,7 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     matrix_builder = Mock(side_effect=AssertionError("matrix built"))
     edge_analyzer = Mock(side_effect=AssertionError("edge analysis executed"))
     regime_analyzer = Mock(side_effect=AssertionError("v4.1 analysis executed"))
+    targeted_analyzer = Mock(side_effect=AssertionError("targeted analysis executed"))
     candidate_evaluator = Mock(side_effect=AssertionError("candidate simulated"))
     diagnostics = AsyncMock(
         return_value=SimpleNamespace(
@@ -114,16 +119,36 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
             },
         )
     )
+    targeted_run_id = uuid4()
+    targeted_candidate_id = uuid4()
+    targeted_reader = AsyncMock(
+        return_value=TargetedRefinementSummaryResponse(
+            id=targeted_run_id,
+            predictive_edge_run_id=predictive_run_id,
+            conclusion=TargetedRefinementConclusion.CONFIRMED,
+            summary={
+                "evaluations_computed": 17,
+                "confirmed_candidates": 1,
+            },
+            confirmed_candidate_count=1,
+            best_targeted_candidate_id=targeted_candidate_id,
+            best_targeted_candidate="best-fingerprint",
+        )
+    )
     monkeypatch.setattr(research_module, "read_historical_dataset_revision", revision)
     monkeypatch.setattr(research_module, "find_reusable_weekly_research_run", reusable)
     monkeypatch.setattr(research_module, "read_historical_dataset", dataset_loader)
     monkeypatch.setattr(research_module, "get_predictive_edge_diagnostics", diagnostics)
+    monkeypatch.setattr(research_module, "get_targeted_refinement", targeted_reader)
     monkeypatch.setattr(
         research_module, "build_historical_feature_matrix", matrix_builder
     )
     monkeypatch.setattr(research_module, "analyze_predictive_edges_v4", edge_analyzer)
     monkeypatch.setattr(
         research_module, "analyze_predictive_edges_v41", regime_analyzer
+    )
+    monkeypatch.setattr(
+        research_module, "evaluate_targeted_refinement", targeted_analyzer
     )
     monkeypatch.setattr(
         research_module, "evaluate_edge_guided_candidates", candidate_evaluator
@@ -145,10 +170,26 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     assert completed.execution.result.funnel["unstable_edges"] == 19
     assert completed.work.evaluations_computed == 0
     assert completed.work.evaluations_reused == 1
-    assert completed.work.simulations_avoided == 146
+    assert completed.work.simulations_avoided == 163
     assert completed.diagnostics["actionable_near_misses"] == 3
     assert completed.diagnostics["diagnostic_near_misses"] == 5
     assert completed.predictive_edge_run_id == predictive_run_id
+    assert completed.diagnostics["targeted_refinement_run_id"] == str(targeted_run_id)
+    assert completed.diagnostics["targeted_refinement_conclusion"] == (
+        TargetedRefinementConclusion.CONFIRMED.value
+    )
+    assert completed.diagnostics["targeted_refinement_summary"] == {
+        "evaluations_computed": 17,
+        "confirmed_candidates": 1,
+    }
+    assert completed.diagnostics["best_targeted_candidate"] == "best-fingerprint"
+    assert completed.diagnostics["best_targeted_candidate_id"] == str(
+        targeted_candidate_id
+    )
+    assert completed.diagnostics["targeted_current_work"] == {
+        "evaluations_computed": 0,
+        "evaluations_reused": 0,
+    }
     assert completed.diagnostics["computed_counts"] == {"training": 100}
     assert completed.diagnostics["predictive_edge_v4_conclusion"] == "completed"
     assert (
@@ -156,9 +197,12 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
         == "no_regime_conditioned_edge"
     )
     diagnostics.assert_awaited_once_with(session, predictive_run_id)
+    targeted_reader.assert_awaited_once_with(session, predictive_run_id)
     dataset_loader.assert_not_awaited()
     matrix_builder.assert_not_called()
     edge_analyzer.assert_not_called()
+    regime_analyzer.assert_not_called()
+    targeted_analyzer.assert_not_called()
     candidate_evaluator.assert_not_called()
 
 

@@ -43,8 +43,8 @@ from app.strategies.baseline_long_only import (
 )
 
 DEFAULT_MAX_EDGE_GUIDED_CANDIDATES = 12
-MAX_EDGE_GUIDED_CANDIDATES = 100
-MAX_GENERATED_STRATEGIES = 60
+MAX_EDGE_GUIDED_CANDIDATES = 120
+MAX_GENERATED_STRATEGIES = 120
 MAX_TRAINING_RETAINED = 24
 MAX_VALIDATION_RETAINED = 12
 MAX_TEST_EVALUATED = 5
@@ -663,17 +663,19 @@ def evaluate_edge_guided_candidates(
     dataset: HistoricalDataset,
     feature_matrix: HistoricalFeatureMatrix,
     hypotheses: tuple[StrategyHypothesis, ...],
+    frozen_candidates: tuple[EdgeGuidedCandidate, ...] | None = None,
     initial_cash: Decimal,
     simulation: SimulationConfiguration,
     decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
     maximum_candidates: int = DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
+    maximum_test_candidates: int = MAX_TEST_EVALUATED,
     windows: tuple[WalkForwardWindow, ...],
     thresholds: EvidenceThresholds,
     reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence] | None = None,
 ) -> EdgeGuidedEvaluationResult:
     """Evaluate frozen candidates through the existing isolated walk-forward windows."""
 
-    candidates = generate_edge_guided_candidates(
+    candidates = frozen_candidates or generate_edge_guided_candidates(
         hypotheses=hypotheses,
         simulation=simulation,
         decision_interval=decision_interval,
@@ -746,7 +748,9 @@ def evaluate_edge_guided_candidates(
             key=lambda item: _segment_rank(item[2], item[0].candidate_fingerprint),
         )[:MAX_VALIDATION_RETAINED]
     )
-    test_candidates = validation_retained[: min(MAX_TEST_EVALUATED, maximum_candidates)]
+    test_candidates = validation_retained[
+        : min(maximum_test_candidates, maximum_candidates)
+    ]
     evaluations: list[EdgeGuidedCandidateEvaluation] = []
     for candidate, _, _ in test_candidates:
         window_results = _evaluate_candidate_windows(

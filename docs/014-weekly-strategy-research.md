@@ -8,6 +8,46 @@ Argos can run a bounded weekly research process with:
 python -m app.jobs.run_weekly_strategy_research
 ```
 
+## Targeted refinement
+
+After v4.1, Argos may select up to eight actionable near misses with sufficient
+validation evidence and positive movement after the configured fees and slippage. The
+versioned targeted-refinement stage searches only a local neighborhood around each
+frozen relationship: the original predictors, regime and direction; the selected bin
+and its immediate neighbours; bounded 4h/6h/8h/12h cadences; and bounded
+12h/24h/48h horizons. Duplicate fingerprints are removed before simulation and no more
+than 120 configurations are evaluated per instrument.
+
+Training calibrates the candidate, validation qualifies the frozen configuration, and
+isolated test is reached only after validation passes. The stage does not relax the
+economic, stability, trade-count or drawdown requirements. Its conclusion is one of
+`no_eligible_seeds`, `candidates_rejected_training`,
+`candidates_rejected_validation`, `candidates_rejected_test`, or
+`confirmed_candidates_found`. A confirmed candidate remains research evidence and is
+never activated automatically.
+
+Each cadence is evaluated with its own sampled matrices; candidates from 4h, 6h, 8h,
+and 12h groups never inherit another group's interval. Adjacent bins remain inside the
+frozen three-bin contract, and effective duplicate bounds consume only one place in the
+120-configuration budget. Candidate evidence records observed, required, absolute and
+relative margins for every executed-stage gate. A stage that was not executed is not
+reported as passed, and distance-to-pass is the sum of normalized failed-gate deficits.
+
+Persisted results are read-only:
+
+```text
+GET /optimization/predictive-edge-runs/{run_id}/targeted-refinement
+GET /optimization/predictive-edge-runs/{run_id}/targeted-refinement/candidates
+GET /optimization/predictive-edge-runs/{run_id}/targeted-refinement/candidates/{candidate_id}
+```
+
+Run once with `--persist` for a fresh execution and repeat the exact command to validate
+reuse. Exact reuse returns the original evidence, reports current heavy work as zero,
+and skips dataset loading, Feature construction, v4, v4.1, targeted refinement and
+Strategy simulation.
+It also preserves the targeted run and candidate IDs, deterministic ranking, best
+confirmed candidate, conclusion, original counters, and compute-avoided estimate.
+
 The process resolves scoring-enabled instruments from the market catalog and handles
 them sequentially. Each instrument has an isolated transaction and failure boundary.
 The job does not activate a candidate, access an exchange, or mutate Paper Trading.

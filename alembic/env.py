@@ -12,6 +12,7 @@ from app.optimization import (
     edge_guided_memory,  # noqa: F401
     memory,  # noqa: F401
     predictive_edge_memory,  # noqa: F401
+    targeted_refinement_memory,  # noqa: F401
     walk_forward_memory,  # noqa: F401
 )
 from app.paper import equity_snapshots  # noqa: F401
