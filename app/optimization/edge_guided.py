@@ -14,6 +14,7 @@ from app.optimization.predictive_edges import (
     Condition,
     DirectionMapping,
     EvidenceThresholds,
+    PredictiveEdgeError,
     StrategyHypothesis,
     SuggestedAction,
     predictive_edge_condition_matches,
@@ -547,7 +548,9 @@ def apply_edge_guided_action(
 ) -> StrategyAction:
     """Apply one frozen bin rule without introducing short exposure."""
 
-    value = predictive_edge_value(row, candidate.predictor_name)
+    value = _candidate_predictor_value(row, candidate.predictor_name)
+    if value is None:
+        return baseline_action
     inside = (
         (candidate.lower_bound is None or value > candidate.lower_bound)
         and (candidate.upper_bound is None or value <= candidate.upper_bound)
@@ -1561,7 +1564,9 @@ def _candidate_matches(
 ) -> bool:
     if not predictor_name:
         return False
-    value = predictive_edge_value(row, predictor_name)
+    value = _candidate_predictor_value(row, predictor_name)
+    if value is None:
+        return False
     return (
         (lower_bound is None or value > lower_bound)
         and (upper_bound is None or value <= upper_bound)
@@ -1576,12 +1581,25 @@ def _candidate_context_matches(
 ) -> bool:
     if candidate.context_predictor_name is None:
         return True
-    value = predictive_edge_value(row, candidate.context_predictor_name)
+    value = _candidate_predictor_value(row, candidate.context_predictor_name)
+    if value is None:
+        return False
     return (
         candidate.context_lower_bound is None or value >= candidate.context_lower_bound
     ) and (
         candidate.context_upper_bound is None or value <= candidate.context_upper_bound
     )
+
+
+def _candidate_predictor_value(
+    row: HistoricalFeatureRow, predictor_name: str
+) -> Decimal | None:
+    """Treat unavailable lookback-derived research evidence as a non-match."""
+
+    try:
+        return predictive_edge_value(row, predictor_name)
+    except PredictiveEdgeError:
+        return None
 
 
 def _research_outcome(

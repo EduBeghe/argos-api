@@ -1,10 +1,21 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from app.optimization.edge_guided import generate_edge_guided_candidates
+from app.market.catalog import MARKET_INSTRUMENTS
+from app.optimization.edge_guided import (
+    EdgeGuidedCandidateStatus,
+    evaluate_edge_guided_candidates,
+    generate_edge_guided_candidates,
+)
 from app.optimization.feature_matrix import (
     HistoricalFeatureMatrix,
     HistoricalFeatureRow,
+)
+from app.optimization.historical_data import (
+    HistoricalCandle,
+    HistoricalDataset,
+    HistoricalDatasetIdentity,
+    HistoricalDatasetRange,
 )
 from app.optimization.predictive_edge_engine_v41 import (
     CONTEXT_BASE,
@@ -21,7 +32,7 @@ from app.optimization.predictive_edge_engine_v41 import (
     build_derived_feature_rows,
     enrich_feature_matrix,
 )
-from app.optimization.predictive_edges import SuggestedAction
+from app.optimization.predictive_edges import EvidenceThresholds, SuggestedAction
 from app.optimization.walk_forward import WalkForwardWindow
 from app.paper.config import SimulationConfiguration
 
@@ -140,18 +151,19 @@ def _regime_matrix() -> HistoricalFeatureMatrix:
     """A 4h directional effect exists only in alternating high-volume regimes."""
 
     start = datetime(2025, 1, 1, tzinfo=UTC)
-    count = 3000
-    prices = tuple(
-        Decimal(100)
-        + Decimal(position if position <= 48 else 96 - position) / Decimal(4)
-        for index in range(count)
-        for position in (index % 96,)
-    )
+    block_count = 500
+    state = 17
+    levels: list[Decimal] = []
+    for _ in range(block_count + 20):
+        state = (1103515245 * state + 12345) % 2147483648
+        levels.append(Decimal(90) + Decimal(state % 2000) / Decimal(100))
     rows: list[HistoricalFeatureRow] = []
-    for index, price in enumerate(prices):
-        future = prices[min(index + 48, count - 1)]
+    for index in range(block_count * 6):
+        block_index = index // 6
+        price = levels[block_index]
+        future = levels[block_index + 8]
         direction = Decimal("0.01") if future > price else Decimal("-0.01")
-        high_volume = (index // 6) % 2 == 0
+        high_volume = block_index % 3 == 0
         signal = direction if high_volume else -direction
         rows.append(
             HistoricalFeatureRow(
@@ -238,6 +250,9 @@ def test_regime_conditioned_pattern_is_bounded_and_can_confirm() -> None:
     )
     assert result.confirmed_candidates
     assert result.hypotheses
+    assert {
+        item.horizon for item in result.hypotheses if item.predictor_name == "return_1"
+    } == {timedelta(hours=4)}
     generated = generate_edge_guided_candidates(
         hypotheses=result.hypotheses,
         simulation=SimulationConfiguration(),
@@ -251,6 +266,72 @@ def test_regime_conditioned_pattern_is_bounded_and_can_confirm() -> None:
         for hypothesis in result.hypotheses
         if item.source_hypothesis_id == hypothesis.hypothesis_id
     )
+
+
+def test_confirmed_interaction_executes_as_complete_edge_guided_strategy() -> None:
+    matrix = _regime_matrix()
+    windows = _long_windows()
+    simulation = SimulationConfiguration()
+    discovered = analyze_predictive_edges_v41(
+        matrix=matrix,
+        windows=windows,
+        simulation=simulation,
+    )
+    rows = matrix.rows
+    candles = tuple(
+        HistoricalCandle(
+            row.candle_open_time,
+            row.candle_open_time + timedelta(minutes=5) - timedelta(milliseconds=1),
+            row.close_price,
+            row.close_price,
+            row.close_price,
+            row.close_price,
+            Decimal(1),
+            Decimal(1),
+            1,
+            Decimal(1),
+            Decimal(1),
+        )
+        for row in rows
+    )
+    dataset = HistoricalDataset(
+        HistoricalDatasetIdentity(
+            MARKET_INSTRUMENTS[0].instrument,
+            HistoricalDatasetRange(
+                rows[0].candle_open_time,
+                rows[-1].candle_open_time + timedelta(minutes=5),
+            ),
+        ),
+        len(candles),
+        len(candles),
+        rows[0].candle_open_time,
+        rows[-1].candle_open_time,
+        0,
+        None,
+        None,
+        candles,
+        matrix.dataset_fingerprint,
+    )
+
+    evaluated = evaluate_edge_guided_candidates(
+        dataset=dataset,
+        feature_matrix=enrich_feature_matrix(matrix),
+        hypotheses=discovered.hypotheses,
+        initial_cash=Decimal(10000),
+        simulation=simulation,
+        maximum_candidates=1,
+        windows=windows,
+        thresholds=EvidenceThresholds(
+            minimum_observations=1,
+            minimum_windows=3,
+        ),
+    )
+
+    assert evaluated.evaluated_count == 1
+    assert evaluated.evaluations[0].status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert evaluated.evaluations[0].valid_window_count == 3
+    assert evaluated.evaluations[0].confirmed_window_count == 3
+    assert evaluated.evaluations[0].candidate.context_predictor_name is not None
 
 
 def test_no_interaction_control_does_not_confirm() -> None:
