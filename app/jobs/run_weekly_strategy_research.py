@@ -126,9 +126,45 @@ async def run(
                                         instrument.market_type.value,
                                         instrument.interval.value,
                                     ],
-                                    "run_id": str(item.execution.run_id),
+                                    "edge_guided_run_id": str(item.execution.run_id),
+                                    "predictive_edge_run_id": (
+                                        str(item.predictive_edge_run_id)
+                                        if item.predictive_edge_run_id is not None
+                                        else None
+                                    ),
                                     "reused": item.reused,
                                     "outcome": item.execution.result.outcome.value,
+                                    "strategy_research_outcome": (
+                                        item.execution.result.outcome.value
+                                    ),
+                                    "predictive_edge_v4_conclusion": (
+                                        item.diagnostics.get(
+                                            "predictive_edge_v4_conclusion"
+                                        )
+                                    ),
+                                    "regime_conditioned_v41_conclusion": (
+                                        item.diagnostics.get(
+                                            "regime_conditioned_v41_conclusion"
+                                        )
+                                    ),
+                                    "diagnostic_url": (
+                                        "/optimization/predictive-edge-runs/"
+                                        f"{item.predictive_edge_run_id}/diagnostics"
+                                        if item.predictive_edge_run_id is not None
+                                        else None
+                                    ),
+                                    "actionable_near_misses_url": (
+                                        "/optimization/predictive-edge-runs/"
+                                        f"{item.predictive_edge_run_id}/near-misses?kind=actionable"
+                                        if item.predictive_edge_run_id is not None
+                                        else None
+                                    ),
+                                    "diagnostic_near_misses_url": (
+                                        "/optimization/predictive-edge-runs/"
+                                        f"{item.predictive_edge_run_id}/near-misses?kind=diagnostic"
+                                        if item.predictive_edge_run_id is not None
+                                        else None
+                                    ),
                                     "outcome_explanation": (
                                         item.execution.result.outcome_explanation
                                     ),

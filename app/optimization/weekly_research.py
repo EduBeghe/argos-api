@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import perf_counter
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,12 +33,19 @@ from app.optimization.historical_data import (
     read_historical_dataset_revision,
 )
 from app.optimization.predictive_edge_engine_v4 import analyze_predictive_edges_v4
+from app.optimization.predictive_edge_engine_v41 import (
+    analyze_predictive_edges_v41,
+    enrich_feature_matrix,
+)
+from app.optimization.predictive_edge_read import get_predictive_edge_diagnostics
 from app.optimization.predictive_edge_service import (
     find_reusable_predictive_edge_run,
     load_predictive_edge_v4_cache,
+    load_predictive_edge_v41_cache,
     persist_predictive_edge_v4_result,
     predictive_edge_v4_cache_namespace,
     predictive_edge_v4_experiment_key,
+    predictive_edge_v41_cache_namespace,
 )
 from app.optimization.predictive_edge_v4 import (
     PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
@@ -74,6 +82,10 @@ class WeeklyInstrumentResearch:
     work: WeeklyResearchWork
     timings: dict[str, Decimal]
     diagnostics: dict[str, object] = field(default_factory=dict)
+
+    @property
+    def predictive_edge_run_id(self) -> UUID | None:
+        return self.execution.predictive_edge_run_id
 
 
 def weekly_boundary(now: datetime) -> datetime:
@@ -172,6 +184,29 @@ async def execute_weekly_instrument_research(
     if persist and not force_recompute:
         reused = await find_reusable_weekly_research_run(session, reuse_key)
         if reused is not None:
+            diagnostics: dict[str, object] = {}
+            if reused.predictive_edge_run_id is not None:
+                persisted = await get_predictive_edge_diagnostics(
+                    session, reused.predictive_edge_run_id
+                )
+                persisted_values = persisted.model_dump(mode="json")
+                diagnostics = {
+                    **persisted_values,
+                    "predictive_edge_v4_conclusion": (
+                        persisted.diagnostic_conclusion.value
+                    ),
+                    "regime_conditioned_v41_conclusion": (
+                        persisted.regime_conditioned_conclusion
+                    ),
+                    "strategy_research_outcome": reused.result.outcome.value,
+                    "current_work": {
+                        "evaluations_reused": reused.result.evaluated_count,
+                        "simulations_avoided": reused.compute_avoided_estimate,
+                    },
+                    "original_stage_counters": (
+                        persisted.regime_conditioned_stage_counters
+                    ),
+                }
             elapsed = perf_counter() - total_started
             return WeeklyInstrumentResearch(
                 identity.instrument,
@@ -190,6 +225,7 @@ async def execute_weekly_instrument_research(
                     "persistence": Decimal(0),
                     "total": Decimal(str(elapsed)),
                 },
+                diagnostics,
             )
 
     dataset_started = perf_counter()
@@ -216,6 +252,11 @@ async def execute_weekly_instrument_research(
         fee_rate=simulation.fee_rate,
         slippage_rate=simulation.slippage_rate,
     )
+    regime_cache_namespace = predictive_edge_v41_cache_namespace(
+        instrument=identity.instrument,
+        fee_rate=simulation.fee_rate,
+        slippage_rate=simulation.slippage_rate,
+    )
     edge_started = perf_counter()
     edge_execution = (
         await find_reusable_predictive_edge_run(session, edge_key)
@@ -237,6 +278,20 @@ async def execute_weekly_instrument_research(
         stage_cache=stage_cache,
         force_recompute=force_recompute,
     )
+    regime_cache = (
+        await load_predictive_edge_v41_cache(
+            session, cache_namespace=regime_cache_namespace
+        )
+        if persist and not force_recompute
+        else {}
+    )
+    regime_result = analyze_predictive_edges_v41(
+        matrix=matrix,
+        windows=windows,
+        simulation=simulation,
+        stage_cache=regime_cache,
+        force_recompute=force_recompute,
+    )
     if persist and force_recompute:
         edge_execution = await find_reusable_predictive_edge_run(session, edge_key)
     if persist and (edge_execution is None or edge_execution.run_id is None):
@@ -253,11 +308,20 @@ async def execute_weekly_instrument_research(
             fee_rate=simulation.fee_rate,
             slippage_rate=simulation.slippage_rate,
             started_at=boundary,
+            regime_result=regime_result,
+            regime_cache_namespace=regime_cache_namespace,
         )
     edge_elapsed = perf_counter() - edge_started
     candidate_started = perf_counter()
+    hypotheses_by_id = {
+        item.hypothesis_id: item
+        for item in (*edge_result.hypotheses, *regime_result.hypotheses)
+    }
+    combined_hypotheses = tuple(
+        hypotheses_by_id[key] for key in sorted(hypotheses_by_id)
+    )
     generated_candidates = generate_edge_guided_candidates(
-        hypotheses=edge_result.hypotheses,
+        hypotheses=combined_hypotheses,
         simulation=simulation,
         decision_interval=configuration.decision_interval,
         maximum_candidates=maximum_candidates,
@@ -273,8 +337,8 @@ async def execute_weekly_instrument_research(
     )
     result = evaluate_edge_guided_candidates(
         dataset=dataset,
-        feature_matrix=matrix,
-        hypotheses=edge_result.hypotheses,
+        feature_matrix=enrich_feature_matrix(matrix),
+        hypotheses=combined_hypotheses,
         initial_cash=initial_cash,
         simulation=simulation,
         decision_interval=configuration.decision_interval,
@@ -305,6 +369,13 @@ async def execute_weekly_instrument_research(
             "confirmed_edges": len(edge_result.confirmed_edges),
             "diagnostic_only_edges": len(edge_result.diagnostic_only_edges),
             "near_misses": len(edge_result.near_misses),
+            "v41_directional_relationships": regime_result.stage_a1.retained,
+            "v41_context_relationships": regime_result.stage_a2.retained,
+            "v41_interactions_generated": regime_result.stage_a3.generated,
+            "v41_interactions_retained": regime_result.stage_a3.retained,
+            "v41_validation_configurations": regime_result.stage_b.generated,
+            "v41_test_configurations": regime_result.stage_c.generated,
+            "v41_confirmed_interactions": len(regime_result.confirmed_candidates),
             **result.funnel,
         },
         timings={
@@ -333,7 +404,7 @@ async def execute_weekly_instrument_research(
             decision_interval=configuration.decision_interval,
             maximum_candidates=maximum_candidates,
             hypothesis_fingerprints=tuple(
-                item.hypothesis_id for item in edge_result.hypotheses
+                item.hypothesis_id for item in combined_hypotheses
             ),
         )
         execution = await persist_edge_guided_result(
@@ -387,7 +458,18 @@ async def execute_weekly_instrument_research(
             "rejection_counts": edge_result.rejection_counts,
             "bottleneck_stage": edge_result.bottleneck_stage,
             "strongest_observed_signal": edge_result.strongest_observed_signal,
-            "diagnostic_conclusion": edge_result.conclusion.value,
+            "predictive_edge_v4_conclusion": edge_result.conclusion.value,
             "outcome_explanation": edge_result.outcome_explanation,
+            "regime_conditioned_v41_conclusion": regime_result.conclusion.value,
+            "strategy_research_outcome": result.outcome.value,
+            "actionable_near_misses": len(regime_result.actionable_near_misses),
+            "diagnostic_near_misses": len(regime_result.diagnostic_near_misses),
+            "regime_conditioned_stage_counters": {
+                "a1": asdict(regime_result.stage_a1),
+                "a2": asdict(regime_result.stage_a2),
+                "a3": asdict(regime_result.stage_a3),
+                "validation": asdict(regime_result.stage_b),
+                "test": asdict(regime_result.stage_c),
+            },
         },
     )

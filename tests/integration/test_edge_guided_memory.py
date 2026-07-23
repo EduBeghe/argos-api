@@ -129,6 +129,11 @@ def result() -> EdgeGuidedEvaluationResult:
         "USDT",
         Decimal("0.001"),
         Decimal("0.0005"),
+        context_predictor_name="relative_volume_20",
+        context_predictor_version=3,
+        context_regime="high",
+        context_lower_bound=Decimal("1.500000000000000001"),
+        context_upper_bound=None,
     )
     training = metric(RefinementSegmentName.TRAINING, "0.011111111111111111")
     validation = metric(RefinementSegmentName.VALIDATION, "0.022222222222222222")
@@ -248,6 +253,9 @@ async def test_complete_round_trip_and_reuse_are_atomic(session: AsyncSession) -
     assert round_trip.training.beats_buy_and_hold is False
     assert round_trip.training.risk_acceptable is True
     assert round_trip.rejection_reasons == ()
+    assert round_trip.candidate.context_predictor_name == "relative_volume_20"
+    assert round_trip.candidate.context_regime == "high"
+    assert round_trip.candidate.context_lower_bound == Decimal("1.500000000000000001")
     assert reused.result.evaluations[0].test is not None
     assert reused.result.evaluations[0].test.total_return == Decimal(
         "0.033333333333333333"

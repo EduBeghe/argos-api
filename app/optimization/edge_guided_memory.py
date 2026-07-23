@@ -219,6 +219,7 @@ class EdgeGuidedExecution:
     evaluations_reused: int
     evaluations_computed: int
     compute_avoided_estimate: int
+    predictive_edge_run_id: UUID | None = None
 
 
 def edge_guided_experiment_key(
@@ -367,6 +368,7 @@ def _reused_execution(
         0,
         int(result.funnel.get("edges_evaluated", 0))
         + result.evaluated_count * run.windows_available,
+        run.predictive_edge_run_id,
     )
 
 
@@ -549,7 +551,14 @@ async def persist_edge_guided_result(
         await session.rollback()
         raise
     return EdgeGuidedExecution(
-        run_id, experiment_key, False, result, 0, result.evaluated_count, 0
+        run_id,
+        experiment_key,
+        False,
+        result,
+        0,
+        result.evaluated_count,
+        0,
+        predictive_edge_run_id,
     )
 
 
@@ -802,6 +811,31 @@ def _candidate(value: dict[str, object]) -> EdgeGuidedCandidate:
         tuple(str(item) for item in source_ids),
         int(str(value.get("generation_contract_version", 1))),
         int(str(value.get("qualification_contract_version", 1))),
+        context_predictor_name=(
+            str(value["context_predictor_name"])
+            if value.get("context_predictor_name") is not None
+            else None
+        ),
+        context_predictor_version=(
+            int(str(value["context_predictor_version"]))
+            if value.get("context_predictor_version") is not None
+            else None
+        ),
+        context_regime=(
+            str(value["context_regime"])
+            if value.get("context_regime") is not None
+            else None
+        ),
+        context_lower_bound=(
+            Decimal(str(value["context_lower_bound"]))
+            if value.get("context_lower_bound") is not None
+            else None
+        ),
+        context_upper_bound=(
+            Decimal(str(value["context_upper_bound"]))
+            if value.get("context_upper_bound") is not None
+            else None
+        ),
     )
 
 

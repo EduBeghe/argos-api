@@ -414,10 +414,12 @@ async def list_predictive_edge_near_misses(
     run_id: UUID,
     cursor: int | None = None,
     limit: int = DEFAULT_PAGE_LIMIT,
+    kind: str = "actionable",
 ) -> PredictiveEdgeNearMissPageResponse:
     await _require_run(session, run_id)
     statement = select(PredictiveEdgeNearMissRecord).where(
-        PredictiveEdgeNearMissRecord.run_id == run_id
+        PredictiveEdgeNearMissRecord.run_id == run_id,
+        PredictiveEdgeNearMissRecord.kind == kind,
     )
     if cursor is not None:
         statement = statement.where(PredictiveEdgeNearMissRecord.rank > cursor)

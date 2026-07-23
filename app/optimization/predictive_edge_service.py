@@ -17,6 +17,13 @@ from app.optimization.predictive_edge_engine_v4 import (
     decode_v4_cache_value,
     encode_v4_cache_value,
 )
+from app.optimization.predictive_edge_engine_v41 import (
+    PREDICTIVE_EDGE_V41_CONTRACT_VERSION,
+    PredictiveEdgeV41Result,
+)
+from app.optimization.predictive_edge_engine_v41 import (
+    PhaseEvidence as V41PhaseEvidence,
+)
 from app.optimization.predictive_edge_memory import (
     PredictiveEdgeAggregateRecord,
     PredictiveEdgeBenchmarkRecord,
@@ -463,6 +470,25 @@ def predictive_edge_v4_cache_namespace(
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
+def predictive_edge_v41_cache_namespace(
+    *, instrument: Instrument, fee_rate: Decimal, slippage_rate: Decimal
+) -> str:
+    payload = {
+        "engine": "predictive_edge_discovery_v41_stage_cache",
+        "contract_version": PREDICTIVE_EDGE_V41_CONTRACT_VERSION,
+        "instrument": [
+            instrument.asset.value,
+            instrument.provider.value,
+            instrument.market_type.value,
+            instrument.interval.value,
+        ],
+        "fee_rate": str(fee_rate),
+        "slippage_rate": str(slippage_rate),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 async def persist_predictive_edge_v4_result(
     *,
     session: AsyncSession,
@@ -477,6 +503,8 @@ async def persist_predictive_edge_v4_result(
     fee_rate: Decimal,
     slippage_rate: Decimal,
     started_at: datetime,
+    regime_result: PredictiveEdgeV41Result | None = None,
+    regime_cache_namespace: str | None = None,
 ) -> PredictiveEdgeExecution:
     """Persist the real v4 result without reconstructing synthetic configuration."""
 
@@ -583,6 +611,20 @@ async def persist_predictive_edge_v4_result(
                 "validation_configurations": result.validation_counters.reused,
                 "test_configurations": result.test_counters.reused,
             },
+            regime_conditioned_conclusion=(
+                regime_result.conclusion.value if regime_result is not None else None
+            ),
+            regime_conditioned_stage_counters=(
+                {
+                    "a1": asdict(regime_result.stage_a1),
+                    "a2": asdict(regime_result.stage_a2),
+                    "a3": asdict(regime_result.stage_a3),
+                    "validation": asdict(regime_result.stage_b),
+                    "test": asdict(regime_result.stage_c),
+                }
+                if regime_result is not None
+                else None
+            ),
         )
     )
     validation_by_fingerprint = {
@@ -653,7 +695,14 @@ async def persist_predictive_edge_v4_result(
                 ],
             )
         )
-    for hypothesis in result.hypotheses:
+    hypotheses = {
+        item.hypothesis_id: item
+        for item in (
+            *result.hypotheses,
+            *(regime_result.hypotheses if regime_result is not None else ()),
+        )
+    }
+    for hypothesis in (hypotheses[key] for key in sorted(hypotheses)):
         session.add(
             StrategyHypothesisRecord(
                 id=uuid4(),
@@ -687,6 +736,11 @@ async def persist_predictive_edge_v4_result(
                 evidence_status=hypothesis.evidence_status.value,
                 rationale=hypothesis.rationale,
                 limitations=hypothesis.limitations,
+                context_predictor_name=hypothesis.context_predictor_name,
+                context_predictor_version=hypothesis.context_predictor_version,
+                context_regime=hypothesis.context_regime,
+                context_lower_bound=hypothesis.context_lower_bound,
+                context_upper_bound=hypothesis.context_upper_bound,
             )
         )
     for cache_key, cache_value in result.cache_writes.items():
@@ -735,6 +789,46 @@ async def persist_predictive_edge_v4_result(
             .on_conflict_do_nothing(index_elements=["cache_key"])
         )
         await session.execute(statement)
+    if regime_result is not None and regime_cache_namespace is not None:
+        for cache_key, evidence in regime_result.cache_writes.items():
+            payload = {
+                "observations": evidence.observations,
+                "gross_movement": _decimal_text(evidence.gross_movement),
+                "aligned_gross_movement": _decimal_text(
+                    evidence.aligned_gross_movement
+                ),
+                "net_movement": _decimal_text(evidence.net_movement),
+                "directional_hit_rate": _decimal_text(evidence.directional_hit_rate),
+                "benchmark": _decimal_text(evidence.benchmark),
+                "benchmark_improvement": _decimal_text(evidence.benchmark_improvement),
+                "standard_error": _decimal_text(evidence.standard_error),
+                "stable": evidence.stable,
+                "economic": evidence.economic,
+                "passes": evidence.passes,
+            }
+            await session.execute(
+                postgresql_insert(PredictiveEdgeV4CacheRecord)
+                .values(
+                    id=uuid4(),
+                    cache_key=cache_key,
+                    cache_namespace=regime_cache_namespace,
+                    status="completed",
+                    evidence_kind="regime_conditioned_phase",
+                    contract_version=PREDICTIVE_EDGE_V41_CONTRACT_VERSION,
+                    dataset_fingerprint=dataset_fingerprint,
+                    cadence_seconds=0,
+                    horizon_seconds=0,
+                    bin_count=None,
+                    condition=None,
+                    neutral_policy=None,
+                    profile="regime_conditioned_v41",
+                    fee_rate=fee_rate,
+                    slippage_rate=slippage_rate,
+                    payload=payload,
+                    created_at=datetime.now(UTC),
+                )
+                .on_conflict_do_nothing(index_elements=["cache_key"])
+            )
     await session.commit()
     return PredictiveEdgeExecution(run_id, False, None, 0, 0)
 
@@ -762,3 +856,46 @@ async def load_predictive_edge_v4_cache(
             # A malformed or incomplete cache row is never reusable.
             continue
     return result
+
+
+async def load_predictive_edge_v41_cache(
+    session: AsyncSession, *, cache_namespace: str
+) -> dict[str, V41PhaseEvidence]:
+    rows = (
+        await session.scalars(
+            select(PredictiveEdgeV4CacheRecord).where(
+                PredictiveEdgeV4CacheRecord.cache_namespace == cache_namespace,
+                PredictiveEdgeV4CacheRecord.status == "completed",
+                PredictiveEdgeV4CacheRecord.contract_version
+                == PREDICTIVE_EDGE_V41_CONTRACT_VERSION,
+            )
+        )
+    ).all()
+    result: dict[str, V41PhaseEvidence] = {}
+    for row in rows:
+        try:
+            payload = row.payload
+            result[row.cache_key] = V41PhaseEvidence(
+                observations=int(str(payload["observations"])),
+                gross_movement=_decimal(payload.get("gross_movement")),
+                aligned_gross_movement=_decimal(payload.get("aligned_gross_movement")),
+                net_movement=_decimal(payload.get("net_movement")),
+                directional_hit_rate=_decimal(payload.get("directional_hit_rate")),
+                benchmark=_decimal(payload.get("benchmark")),
+                benchmark_improvement=_decimal(payload.get("benchmark_improvement")),
+                standard_error=_decimal(payload.get("standard_error")),
+                stable=bool(payload["stable"]),
+                economic=bool(payload["economic"]),
+                passes=bool(payload["passes"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return result
+
+
+def _decimal_text(value: Decimal | None) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _decimal(value: object) -> Decimal | None:
+    return Decimal(str(value)) if value is not None else None

@@ -128,6 +128,41 @@ def candidates(
     )
 
 
+def test_regime_conditioned_hypothesis_is_gated_by_its_frozen_context() -> None:
+    base = hypothesis()
+    conditioned = replace(
+        base,
+        context_predictor_name="relative_volume_20",
+        context_predictor_version=3,
+        context_regime="high",
+        context_lower_bound=Decimal("1.5"),
+        context_upper_bound=None,
+    )
+    candidate = candidates((conditioned,))[0]
+
+    outside = apply_edge_guided_action(
+        candidate=candidate,
+        row=row("-0.015"),
+        position_is_open=False,
+        baseline_action=StrategyAction.OPEN_POSITION,
+        volatility_threshold=Decimal("0.03"),
+    )
+    inside = apply_edge_guided_action(
+        candidate=candidate,
+        row=replace(row("-0.015"), relative_volume_20=Decimal(2)),
+        position_is_open=False,
+        baseline_action=StrategyAction.OPEN_POSITION,
+        volatility_threshold=Decimal("0.03"),
+    )
+
+    assert outside is StrategyAction.NO_ACTION
+    assert inside is StrategyAction.OPEN_POSITION
+    assert candidate.context_predictor_name == "relative_volume_20"
+    assert candidate.cadence == conditioned.minimum_evaluation_interval
+    unconditioned = candidates((base,))[0]
+    assert candidate.candidate_fingerprint != unconditioned.candidate_fingerprint
+
+
 def evaluation_evidence(
     *, windows: int = 2
 ) -> tuple[HistoricalDataset, HistoricalFeatureMatrix, tuple[WalkForwardWindow, ...]]:

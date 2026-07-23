@@ -14,6 +14,7 @@ from app.optimization.predictive_edges import (
     Condition,
     DirectionMapping,
     EvidenceThresholds,
+    PredictiveEdgeError,
     StrategyHypothesis,
     SuggestedAction,
     predictive_edge_condition_matches,
@@ -154,6 +155,11 @@ class EdgeGuidedCandidate:
     source_hypothesis_ids: tuple[str, ...] = ()
     generation_contract_version: int = EDGE_GUIDED_STRATEGY_CONTRACT_VERSION
     qualification_contract_version: int = EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+    context_predictor_name: str | None = None
+    context_predictor_version: int | None = None
+    context_regime: str | None = None
+    context_lower_bound: Decimal | None = None
+    context_upper_bound: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,12 +310,18 @@ def generate_edge_guided_candidates(
         ]
     ] = []
     for entry in entries:
-        cadences = _compatible_cadences(entry.horizon)
+        cadences = (
+            (entry.minimum_evaluation_interval,)
+            if entry.context_predictor_name is not None
+            else _compatible_cadences(entry.horizon)
+        )
         compatible_exits = tuple(
             value
             for value in exits
             if value.condition is entry.condition
             and abs(value.horizon - entry.horizon) <= entry.horizon
+            and value.context_predictor_name == entry.context_predictor_name
+            and value.context_regime == entry.context_regime
         )
         families = (
             (CandidateFamily.EDGE_ENTRY_TIMED_EXIT, ExitRule.TIMED, None),
@@ -341,12 +353,17 @@ def generate_edge_guided_candidates(
                         )
                     )
     for overlay in exits:
+        overlay_cadence = (
+            overlay.minimum_evaluation_interval
+            if overlay.context_predictor_name is not None
+            else decision_interval
+        )
         definitions.append(
             (
                 overlay,
                 CandidateFamily.EXIT_OR_AVOID_OVERLAY,
                 ExitRule.DEFENSIVE_OVERLAY,
-                decision_interval,
+                overlay_cadence,
                 timedelta(0),
                 TARGET_ALLOCATIONS[1],
                 None,
@@ -400,6 +417,11 @@ def generate_edge_guided_candidates(
             "exit_lower_bound": exit_edge.lower_bound if exit_edge else None,
             "exit_upper_bound": exit_edge.upper_bound if exit_edge else None,
             "direction_mapping": hypothesis.direction_mapping.value,
+            "context_predictor_name": hypothesis.context_predictor_name,
+            "context_predictor_version": hypothesis.context_predictor_version,
+            "context_regime": hypothesis.context_regime,
+            "context_lower_bound": hypothesis.context_lower_bound,
+            "context_upper_bound": hypothesis.context_upper_bound,
             "score_model_name": MODEL_NAME,
             "score_model_version": MODEL_VERSION,
             "strategy_name": STRATEGY_NAME,
@@ -448,6 +470,11 @@ def generate_edge_guided_candidates(
                 exit_edge.lower_bound if exit_edge else None,
                 exit_edge.upper_bound if exit_edge else None,
                 source_ids,
+                context_predictor_name=hypothesis.context_predictor_name,
+                context_predictor_version=hypothesis.context_predictor_version,
+                context_regime=hypothesis.context_regime,
+                context_lower_bound=hypothesis.context_lower_bound,
+                context_upper_bound=hypothesis.context_upper_bound,
             )
         )
     unique = {item.candidate_fingerprint: item for item in candidates}
@@ -521,7 +548,9 @@ def apply_edge_guided_action(
 ) -> StrategyAction:
     """Apply one frozen bin rule without introducing short exposure."""
 
-    value = predictive_edge_value(row, candidate.predictor_name)
+    value = _candidate_predictor_value(row, candidate.predictor_name)
+    if value is None:
+        return baseline_action
     inside = (
         (candidate.lower_bound is None or value > candidate.lower_bound)
         and (candidate.upper_bound is None or value <= candidate.upper_bound)
@@ -530,6 +559,7 @@ def apply_edge_guided_action(
             candidate.condition,
             volatility_threshold=volatility_threshold,
         )
+        and _candidate_context_matches(row, candidate)
     )
     if candidate.suggested_action is SuggestedAction.LONG_ENTRY:
         if position_is_open:
@@ -565,7 +595,7 @@ def _candidate_action_filter(
             lower_bound=candidate.lower_bound,
             upper_bound=candidate.upper_bound,
             volatility_threshold=volatility_threshold,
-        )
+        ) and _candidate_context_matches(row, candidate)
 
         if candidate.candidate_family is CandidateFamily.EXIT_OR_AVOID_OVERLAY:
             return apply_edge_guided_action(
@@ -1534,7 +1564,9 @@ def _candidate_matches(
 ) -> bool:
     if not predictor_name:
         return False
-    value = predictive_edge_value(row, predictor_name)
+    value = _candidate_predictor_value(row, predictor_name)
+    if value is None:
+        return False
     return (
         (lower_bound is None or value > lower_bound)
         and (upper_bound is None or value <= upper_bound)
@@ -1542,6 +1574,32 @@ def _candidate_matches(
             row, condition, volatility_threshold=volatility_threshold
         )
     )
+
+
+def _candidate_context_matches(
+    row: HistoricalFeatureRow, candidate: EdgeGuidedCandidate
+) -> bool:
+    if candidate.context_predictor_name is None:
+        return True
+    value = _candidate_predictor_value(row, candidate.context_predictor_name)
+    if value is None:
+        return False
+    return (
+        candidate.context_lower_bound is None or value >= candidate.context_lower_bound
+    ) and (
+        candidate.context_upper_bound is None or value <= candidate.context_upper_bound
+    )
+
+
+def _candidate_predictor_value(
+    row: HistoricalFeatureRow, predictor_name: str
+) -> Decimal | None:
+    """Treat unavailable lookback-derived research evidence as a non-match."""
+
+    try:
+        return predictive_edge_value(row, predictor_name)
+    except PredictiveEdgeError:
+        return None
 
 
 def _research_outcome(

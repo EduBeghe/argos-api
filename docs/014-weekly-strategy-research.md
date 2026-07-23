@@ -23,9 +23,20 @@ training relationships, 40 frozen validation configurations, and 12 isolated-tes
 configurations. Its diagnostic output identifies the bottleneck, strongest observed
 signal, rejection counts and requirement margins rather than reducing a zero-candidate
 run to “no stable predictive edge”. Stage timings and computed/reused counts make a
-slow first execution auditable. The counters are incremented by the real v4 loops: generated/computed/reused/retained cheap relationships, validation configurations, and isolated-test configurations. They are not inferred from legacy collection sizes. Exact reuse remains keyed by data content, instrument,
+slow first execution auditable. Exact reuse remains keyed by data content, instrument,
 costs, configuration, profile, and contract versions; v3 evidence is readable but is
 not reusable as v4.
+
+The separate v4.1 research contract uses A1/A2/A3/B/C limits of 24 directional
+relationships, 8 contexts, 192 generated interactions, 60 retained interactions, 40
+validation configurations, and 12 isolated tests. Processing is sequential. Context
+regimes and derived predictors are frozen from training, and test cannot change bounds,
+action, ranking, or fingerprints. These limits do not imply an economic pattern exists.
+
+Confirmed v4.1 interactions become versioned, context-conditioned
+`StrategyHypothesis` records and join confirmed v4 hypotheses before edge-guided
+generation and walk-forward evaluation. Complete fingerprints prevent duplicates; no
+candidate is activated automatically.
 
 ## Complete Strategy Contract
 
@@ -125,6 +136,11 @@ is reused. A no-candidate outcome needs interpretation, not a retry. Retry opera
 failures after correcting their cause. Process instruments sequentially to bound memory;
 do not configure parallel BTC/ETH instances. Temporarily disable the Railway cron to
 pause research; do not change ingest or decide schedules.
+
+Structured output keeps `edge_guided_run_id` and `predictive_edge_run_id` separate and
+reports `predictive_edge_v4_conclusion`, `regime_conditioned_v41_conclusion`, and
+`strategy_research_outcome`. Exact reuse returns both persisted conclusions, the
+original v4.1 stage counters, and current reuse-work counters.
 
 Useful flags:
 

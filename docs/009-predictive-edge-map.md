@@ -60,6 +60,22 @@ Existing v3 rows remain readable. Their contract version prevents reuse as v4 ev
 Failure to detect an edge is not proof that none exists, and historical evidence does
 not guarantee future results.
 
+## Regime-conditioned discovery v4.1
+
+Contract 4.1 keeps direction separate from context. Directional predictors may propose
+`long_entry` or `exit_or_avoid`; ATR, relative volume, volume confirmation, and derived
+trend, volatility, volume, RSI, and breakout regimes are context-only and remain
+`diagnostic_only` when evaluated alone. A context may condition a directional signal
+but cannot occupy an actionable near-miss or isolated-test slot by itself.
+
+Research derives EMA slopes, EMA-spread change, return acceleration, and rolling
+breakout position in bounded memory using 12-, 48-, and 288-candle lookbacks. Training
+freezes regime bounds before validation. Validation and test reuse those exact bounds.
+The sequential funnel retains at most 24 directional relationships and 8 contexts,
+evaluates at most 192 training interactions, retains 60, validates 40, and sends at
+most 12 frozen actionable configurations to isolated test. Actionable and diagnostic
+near misses are ranked separately. No result guarantees a pattern or profitability.
+
 Completed v4 stage evidence is cached by instrument, predictor/version, cadence,
 horizon, frozen configuration, phase boundaries, an exact fingerprint of the consumed
 slice, costs, and contract version. The namespace deliberately excludes the complete
@@ -113,13 +129,16 @@ window. Failure to detect an edge is not proof that none exists. Multiple compar
 and false discoveries remain limitations. Correlation is not causality, and historical
 evidence does not guarantee future profitability.
 
-## Strategy hypotheses and future flow
+## Strategy hypotheses and executable research flow
 
 Promising evidence creates an immutable `StrategyHypothesis` with complete instrument
 identity, predictor and hypothesis contract versions, horizon, condition, frozen
 direction mapping, one bin/range, one suggested action, validation evidence, confirmed
 test evidence, cross-window stability, rationale, limitations, and cautious timing
-suggestions. It has no entry/exit threshold or position size and is not executable.
+suggestions. Regime-conditioned contract 42 additionally freezes its context predictor,
+context version, regime bounds, discovery cadence, and exact T-plus-horizon evidence.
+It has no position size and cannot activate itself, but it is executable as input to
+the bounded edge-guided research evaluator.
 Different bins of one predictor may create independent long-entry and exit/avoid
 hypotheses when each has independently selected and confirmed evidence.
 
@@ -136,7 +155,9 @@ candidate makes no edge-guided entry or exit and the baseline action remains unc
 Neither action opens a short position or changes production configuration.
 
 Candidates reuse the existing historical simulator, fees, slippage, initial cash,
-30-minute cadence, score model, Strategy version, and existing walk-forward windows.
+score model, Strategy version, and existing walk-forward windows. A v4.1 hypothesis
+retains its training-selected cadence; observations at boundary T use the persisted
+price at exactly T plus the frozen horizon, never the next 5-minute candle by default.
 Every window keeps isolated training, validation, and test phases. Parameters come only
 from the frozen hypothesis and the training-frozen condition boundary; validation
 selects and test only confirms. Qualification contract v2 distinguishes detecting an

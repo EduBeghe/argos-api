@@ -1,5 +1,19 @@
 # Glossary
 
+**Directional predictor:** Evidence whose sign can support a long-only entry or an
+exit/avoid action after validation and isolated-test confirmation.
+
+**Context predictor:** Non-actionable evidence describing volatility, activity,
+volume, trend, RSI, or breakout regime. It may condition a directional predictor but
+cannot independently produce a trading action.
+
+**Regime-conditioned relationship:** A versioned directional predictor × context
+regime identity whose bounds are learned on training and frozen for later phases.
+
+**Actionable near miss:** A directional or regime-conditioned candidate that failed an
+explicit requirement. **Diagnostic near miss:** context-only evidence that may explain
+market behavior but is never executable.
+
 **Statistical signal:** A measured historical relationship that clears statistical
 requirements; it may still be uneconomic.
 

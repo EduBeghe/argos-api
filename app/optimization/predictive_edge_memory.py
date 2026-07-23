@@ -391,6 +391,11 @@ class StrategyHypothesisRecord(Base):
     evidence_status: Mapped[str] = mapped_column(String(48), nullable=False)
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
     limitations: Mapped[str] = mapped_column(Text, nullable=False)
+    context_predictor_name: Mapped[str | None] = mapped_column(String(64))
+    context_predictor_version: Mapped[int | None] = mapped_column(Integer)
+    context_regime: Mapped[str | None] = mapped_column(String(32))
+    context_lower_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    context_upper_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
 
 
 class PredictiveEdgeBenchmarkRecord(Base):
@@ -460,12 +465,20 @@ class PredictiveEdgeRunDiagnosticRecord(Base):
     stage_timings: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False)
     computed_counts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
     reused_counts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
+    regime_conditioned_conclusion: Mapped[str | None] = mapped_column(String(64))
+    regime_conditioned_stage_counters: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB
+    )
 
 
 class PredictiveEdgeNearMissRecord(Base):
     __tablename__ = "predictive_edge_near_misses"
     __table_args__ = (
         UniqueConstraint("run_id", "rank", name="uq_predictive_edge_near_misses_rank"),
+        CheckConstraint(
+            "kind IN ('actionable', 'diagnostic')",
+            name="ck_predictive_edge_near_misses_kind",
+        ),
         Index("ix_predictive_edge_near_misses_run_rank", "run_id", "rank"),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
@@ -475,8 +488,14 @@ class PredictiveEdgeNearMissRecord(Base):
         nullable=False,
     )
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="actionable"
+    )
     edge_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     predictor_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    directional_predictor: Mapped[str | None] = mapped_column(String(64))
+    context_predictor: Mapped[str | None] = mapped_column(String(64))
+    context_regime: Mapped[str | None] = mapped_column(String(32))
     cadence_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     bin_count: Mapped[int] = mapped_column(Integer, nullable=False)

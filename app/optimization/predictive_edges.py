@@ -409,6 +409,11 @@ class StrategyHypothesis:
     evidence_status: EvidenceStatus
     rationale: str
     limitations: str
+    context_predictor_name: str | None = None
+    context_predictor_version: int | None = None
+    context_regime: str | None = None
+    context_lower_bound: Decimal | None = None
+    context_upper_bound: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -745,6 +750,7 @@ def _predictors(row: HistoricalFeatureRow) -> dict[str, Decimal]:
         "volume_confirmation": score.volume_confirmation_factor,
         "directional_score": score.directional_score,
         "overall_score": score.overall_score,
+        **row.research_values,
     }
 
 
