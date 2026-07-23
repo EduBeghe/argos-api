@@ -44,6 +44,9 @@ The FastAPI application is currently a read-only HTTP surface. It does not conta
 | Optimization | `GET /optimization/predictive-edge-runs/{run_id}/edges` | predictor/horizon/condition/classification/page | edge evidence | no |
 | Optimization | `GET /optimization/predictive-edge-runs/{run_id}/edges/{edge_id}/windows` | page | edge window evidence | no |
 | Optimization | `GET /optimization/predictive-edge-runs/{run_id}/hypotheses` | page | Strategy hypotheses | no |
+| Optimization | `GET /optimization/predictive-edge-runs/{run_id}/targeted-refinement` | run ID | targeted stage summary | no |
+| Optimization | `GET /optimization/predictive-edge-runs/{run_id}/targeted-refinement/candidates` | status/page | targeted candidate evidence | no |
+| Optimization | `GET /optimization/predictive-edge-runs/{run_id}/targeted-refinement/candidates/{candidate_id}` | candidate ID | targeted candidate detail | no |
 | Optimization | `GET /optimization/edge-guided/runs` | instrument/status/page | qualification runs | no |
 | Optimization | `GET /optimization/edge-guided/runs/{run_id}` | run ID | one qualification run | no |
 | Optimization | `GET /optimization/edge-guided/candidates` | run/instrument/status/action/predictor/condition/page | candidate evaluations | no |

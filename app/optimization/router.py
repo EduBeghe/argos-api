@@ -72,6 +72,19 @@ from app.optimization.schemas import (
     WalkForwardSelectionPageResponse,
     WalkForwardWindowEvaluationPageResponse,
 )
+from app.optimization.targeted_refinement import TargetedCandidateStatus
+from app.optimization.targeted_refinement_read import (
+    MAX_TARGETED_PAGE_LIMIT,
+    TargetedRefinementNotFoundError,
+    get_targeted_candidate,
+    get_targeted_refinement,
+    list_targeted_candidates,
+)
+from app.optimization.targeted_refinement_schemas import (
+    TargetedCandidateDetailResponse,
+    TargetedCandidatePageResponse,
+    TargetedRefinementSummaryResponse,
+)
 from app.optimization.walk_forward import WalkForwardClassification
 from app.optimization.walk_forward_read import (
     WalkForwardReadNotFoundError,
@@ -85,6 +98,53 @@ from app.optimization.walk_forward_read import (
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 RunQuery = Annotated[RefinementRunQuery, Query()]
 CandidatesQuery = Annotated[CandidateQuery, Query()]
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/targeted-refinement",
+    response_model=TargetedRefinementSummaryResponse,
+)
+async def targeted_refinement(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> TargetedRefinementSummaryResponse:
+    try:
+        return await get_targeted_refinement(session, run_id)
+    except TargetedRefinementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/targeted-refinement/candidates",
+    response_model=TargetedCandidatePageResponse,
+)
+async def targeted_refinement_candidates(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    status: Annotated[TargetedCandidateStatus | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_TARGETED_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> TargetedCandidatePageResponse:
+    try:
+        return await list_targeted_candidates(
+            session, run_id, status=status, limit=limit, offset=offset
+        )
+    except TargetedRefinementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/targeted-refinement/candidates/{candidate_id}",
+    response_model=TargetedCandidateDetailResponse,
+)
+async def targeted_refinement_candidate(
+    run_id: UUID,
+    candidate_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> TargetedCandidateDetailResponse:
+    try:
+        return await get_targeted_candidate(session, run_id, candidate_id)
+    except TargetedRefinementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get("/edge-guided/runs", response_model=EdgeGuidedRunPageResponse)

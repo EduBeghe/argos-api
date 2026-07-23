@@ -160,6 +160,27 @@ async def run(
                                             "diagnostic_near_misses", 0
                                         )
                                     ),
+                                    "targeted_refinement_conclusion": (
+                                        item.diagnostics.get(
+                                            "targeted_refinement_conclusion"
+                                        )
+                                    ),
+                                    "targeted_refinement_summary": (
+                                        item.diagnostics.get(
+                                            "targeted_refinement_summary"
+                                        )
+                                    ),
+                                    "targeted_candidates_url": item.diagnostics.get(
+                                        "targeted_candidates_url"
+                                    ),
+                                    "targeted_confirmed_candidates": (
+                                        item.diagnostics.get(
+                                            "targeted_confirmed_candidates", 0
+                                        )
+                                    ),
+                                    "best_targeted_candidate": item.diagnostics.get(
+                                        "best_targeted_candidate"
+                                    ),
                                     "hypotheses_generated": (
                                         item.execution.result.funnel.get(
                                             "hypotheses_generated", 0

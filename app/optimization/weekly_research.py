@@ -56,9 +56,17 @@ from app.optimization.predictive_edges import (
     PredictiveEdgeConfiguration,
     build_predictive_windows,
 )
+from app.optimization.targeted_refinement import (
+    TARGETED_REFINEMENT_CONTRACT_VERSION,
+    evaluate_targeted_refinement,
+)
+from app.optimization.targeted_refinement_memory import (
+    persist_targeted_refinement_result,
+)
+from app.optimization.targeted_refinement_read import get_targeted_refinement
 from app.paper.config import SimulationConfiguration
 
-WEEKLY_RESEARCH_CONTRACT_VERSION = 1
+WEEKLY_RESEARCH_CONTRACT_VERSION = 2
 WEEKLY_RESEARCH_ADVISORY_LOCK = 0x4152474F53524553
 
 
@@ -129,6 +137,7 @@ def weekly_research_reuse_key(
         "weekly_research_contract_version": WEEKLY_RESEARCH_CONTRACT_VERSION,
         "predictor_version": PREDICTOR_VERSION,
         "edge_algorithm_version": PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
+        "targeted_refinement_contract_version": TARGETED_REFINEMENT_CONTRACT_VERSION,
         "strategy_contract_version": EDGE_GUIDED_STRATEGY_CONTRACT_VERSION,
         "ranking_contract_version": EDGE_GUIDED_RANKING_CONTRACT_VERSION,
         "qualification_contract_version": EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
@@ -242,6 +251,33 @@ async def execute_weekly_instrument_research(
                         "diagnostic_near_miss_count", 0
                     ),
                 }
+                try:
+                    targeted = await get_targeted_refinement(
+                        session, reused.predictive_edge_run_id
+                    )
+                except LookupError:
+                    pass
+                else:
+                    targeted_summary = targeted.summary
+                    targeted_avoided = targeted_summary.get("evaluations_computed", 0)
+                    if isinstance(targeted_avoided, int):
+                        avoided += targeted_avoided
+                    diagnostics.update(
+                        {
+                            "targeted_refinement_conclusion": (
+                                targeted.conclusion.value
+                            ),
+                            "targeted_refinement_summary": targeted_summary,
+                            "targeted_confirmed_candidates": targeted_summary.get(
+                                "confirmed_candidates", 0
+                            ),
+                            "targeted_candidates_url": (
+                                f"/optimization/predictive-edge-runs/"
+                                f"{reused.predictive_edge_run_id}/"
+                                "targeted-refinement/candidates"
+                            ),
+                        }
+                    )
             elapsed = perf_counter() - total_started
             return WeeklyInstrumentResearch(
                 identity.instrument,
@@ -351,6 +387,24 @@ async def execute_weekly_instrument_research(
             started_at=boundary,
             regime_result=regime_result,
             regime_cache_namespace=regime_cache_namespace,
+        )
+    targeted_result = evaluate_targeted_refinement(
+        regime_result=regime_result,
+        dataset=dataset,
+        feature_matrix=enrich_feature_matrix(matrix),
+        windows=windows,
+        initial_cash=initial_cash,
+        simulation=simulation,
+        thresholds=configuration.thresholds,
+    )
+    if persist:
+        if edge_execution is None or edge_execution.run_id is None:
+            raise WeeklyResearchError("predictive evidence was not persisted")
+        await persist_targeted_refinement_result(
+            session=session,
+            predictive_edge_run_id=edge_execution.run_id,
+            experiment_key=reuse_key,
+            result=targeted_result,
         )
     edge_elapsed = perf_counter() - edge_started
     candidate_started = perf_counter()
@@ -505,6 +559,25 @@ async def execute_weekly_instrument_research(
             "strategy_research_outcome": result.outcome.value,
             "actionable_near_misses": len(regime_result.actionable_near_misses),
             "diagnostic_near_misses": len(regime_result.diagnostic_near_misses),
+            "targeted_refinement_conclusion": targeted_result.conclusion.value,
+            "targeted_refinement_summary": asdict(targeted_result.summary),
+            "targeted_confirmed_candidates": (
+                targeted_result.summary.confirmed_candidates
+            ),
+            "targeted_candidates_url": (
+                f"/optimization/predictive-edge-runs/{edge_execution.run_id}/"
+                "targeted-refinement/candidates"
+                if edge_execution is not None and edge_execution.run_id is not None
+                else None
+            ),
+            "best_targeted_candidate": next(
+                (
+                    item.candidate.candidate_fingerprint
+                    for item in targeted_result.candidates
+                    if item.status.value == "confirmed_candidate"
+                ),
+                None,
+            ),
             "regime_conditioned_stage_counters": {
                 "a1": asdict(regime_result.stage_a1),
                 "a2": asdict(regime_result.stage_a2),

@@ -824,3 +824,5 @@ Feature matrix are loaded. The job processes instruments sequentially, does not
 activate candidates, and does not mutate Paper Trading. Railway setup, candidate
 families, outcomes, and reuse semantics are documented in
 [`docs/014-weekly-strategy-research.md`](docs/014-weekly-strategy-research.md).
+That runbook also documents the bounded targeted-refinement stage for economically
+promising v4.1 near misses and its read-only evidence endpoints.
