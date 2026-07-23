@@ -454,4 +454,730 @@ def test_zero_hypotheses_is_a_valid_empty_evaluation() -> None:
     dataset, matrix, windows = evaluation_evidence(windows=1)
     result = evaluate_edge_guided_candidates(
         dataset=dataset,
-        feature_maßz¶‰žËkºwµç@€€Ñ•ÍÐõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸õ…¹‘¥‘…Ñ•}É•ÑÕÉ¸°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆ´À¸ÀÈˆ°(€€€€€€€€¤°(€€€€¤(€€€…ÍÍ•ÉÐÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹Ì€ôô€ ¤(€€€…ÍÍ•ÉÐÉ•ÍÕ±Ð¹™Õ¹¹•±l‰ÑÉ…¥¹¥¹}É•Ñ…¥¹•‘}½Õ¹Ð‰t€ôô€À(()‘•˜Ñ•ÍÑ}ÁÉ½™¥Ñ…‰±•}…¹‘¥‘…Ñ•}µÕÍÑ}ÍÑÉ¥Ñ±å}‰•…Ñ}ÁÉ½‘ÕÑ¥½¸ (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(¤€´ø9½¹”è(€€€É•ÍÕ±Ð€ô•Ù…±Õ…Ñ•}Ý¥Ñ¡}µ•ÑÉ¥Ì (€€€€€€€µ½¹­•åÁ…Ñ °(€€€€€€€ÑÉ…¥¹¥¹œõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀˆ°(€€€€€€€€¤°(€€€€€€€Ù…±¥‘…Ñ¥½¸õ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=8°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€¤°(€€€€€€€Ñ•ÍÐõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀˆ°(€€€€€€€€¤°(€€€€¤(€€€•Ù…±Õ…Ñ¥½¸€ôÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹ÍlÁt(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹ÍÑ…ÑÕÌ¥Ì‘•Õ¥‘•‘…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}Y1%Q%=8(€€€…ÍÍ•ÉÐ€ (€€€€€€€‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸¹%}9=Q}	Q}AI=UQ%=9}Y1%Q%=8(€€€€€€€¥¸•Ù…±Õ…Ñ¥½¸¹É•©•Ñ¥½¹}É•…Í½¹Ì(€€€€¤(()‘•˜Ñ•ÍÑ}•½¹½µ¥…±±å}Ù¥…‰±•}…¹‘¥‘…Ñ•}…¹}½¹™¥Éµ}Ý¥Ñ¡½ÕÑ}‰•…Ñ¥¹}‰Õå}…¹‘}¡½± (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(¤€´ø9½¹”è(€€€É•ÍÕ±Ð€ô•Ù…±Õ…Ñ•}Ý¥Ñ¡}µ•ÑÉ¥Ì (€€€€€€€µ½¹­•åÁ…Ñ °(€€€€€€€ÑÉ…¥¹¥¹œõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€‰Õå}…¹‘}¡½±‘}É•ÑÕÉ¸ôˆÀ¸ÀÌˆ°(€€€€€€€€¤°(€€€€€€€Ù…±¥‘…Ñ¥½¸õ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=8°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€‰Õå}…¹‘}¡½±‘}É•ÑÕÉ¸ôˆÀ¸ÀÌˆ°(€€€€€€€€¤°(€€€€€€€Ñ•ÍÐõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€‰Õå}…¹‘}¡½±‘}É•ÑÕÉ¸ôˆÀ¸ÀÌˆ°(€€€€€€€€¤°(€€€€¤(€€€•Ù…±Õ…Ñ¥½¸€ôÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹ÍlÁt(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹ÍÑ…ÑÕÌ¥Ì‘•Õ¥‘•‘…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹=9%I5(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹Ñ•ÍÐ¥Ì¹½Ð9½¹”(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹Ñ•ÍÐ¹‰•…ÑÍ}ÁÉ½‘ÕÑ¥½¸¥ÌQÉÕ”(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹Ñ•ÍÐ¹‰•…ÑÍ}‰Õå}…¹‘}¡½±¥Ì…±Í”(€€€…ÍÍ•ÉÐ€‰‰•…ÐÁÉ½‘ÕÑ¥½¸ˆ¥¸•Ù…±Õ…Ñ¥½¸¹•áÁ±…¹…Ñ¥½¸(€€€…ÍÍ•ÉÐ€‰‰•…Ð‰½Ñ ˆ¹½Ð¥¸•Ù…±Õ…Ñ¥½¸¹•áÁ±…¹…Ñ¥½¸(()‘•˜Ñ•ÍÑ}½¹±å}Ù…±¥‘…Ñ¥½¹}…¹‘¥‘…Ñ•}‰•…Ñ¥¹}ÁÉ½‘ÕÑ¥½¹}½¹ÍÕµ•Í}Ñ•ÍÑ}‰Õ‘•Ð (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(¤€´ø9½¹”è(€€€‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ€ô•Ù…±Õ…Ñ¥½¹}•Ù¥‘•¹”¡Ý¥¹‘½ÝÌôÄ¤(€€€Ý•…­•È€ô¡åÁ½Ñ¡•Í¥Ì¡¥‘•¹Ñ¥™¥•ÈôˆÄˆ€¨€ØÐ¤(€€€ÍÑÉ½¹•È€ô¡åÁ½Ñ¡•Í¥Ì¡¥‘•¹Ñ¥™¥•ÈôˆÈˆ€¨€ØÐ¤(€€€Ñ•ÍÑ}Í½ÕÉ•Ìè±¥ÍÑmÍÑÉt€ômt((€€€‘•˜•Ù…±Õ…Ñ•}Í•µ•¹Ð (€€€€€€€€©…ÉÌè½‰©•Ð°€¨©­Ý…ÉÌè½‰©•Ð(€€€€¤€´ø‘•Õ¥‘•‘M•µ•¹ÑÙ…±Õ…Ñ¥½¸è(€€€€€€€‘•°­Ý…ÉÌ(€€€€€€€Í•µ•¹Ð€ô…ÉÍlÉt(€€€€€€€…¹‘¥‘…Ñ”€ô…ÉÍlÍt(€€€€€€€…ÍÍ•ÉÐ¥Í¥¹ÍÑ…¹”¡Í•µ•¹Ð°I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¤(€€€€€€€…ÍÍ•ÉÐ¥Í¥¹ÍÑ…¹”¡…¹‘¥‘…Ñ”°‘•Õ¥‘•‘…¹‘¥‘…Ñ”¤(€€€€€€€¥˜Í•µ•¹Ð¥ÌI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMPè(€€€€€€€€€€€Ñ•ÍÑ}Í½ÕÉ•Ì¹…ÁÁ•¹¡…¹‘¥‘…Ñ”¹Í½ÕÉ•}¡åÁ½Ñ¡•Í¥Í}¥¤(€€€€€€€‘¥™™•É•¹”€ô€ (€€€€€€€€€€€•¥µ…° ˆ´À¸ÀÀÄˆ¤(€€€€€€€€€€€¥˜Í•µ•¹Ð¥ÌI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=8(€€€€€€€€€€€…¹…¹‘¥‘…Ñ”¹Í½ÕÉ•}¡åÁ½Ñ¡•Í¥Í}¥€ôôÝ•…­•È¹¡åÁ½Ñ¡•Í¥Í}¥(€€€€€€€€€€€•±Í”•¥µ…° ˆÀ¸ÀÄˆ¤(€€€€€€€€¤(€€€€€€€É•ÑÕÉ¸Í•µ•¹Ñ}É•ÍÕ±Ð¡Í•µ•¹Ð°‘¥™™•É•¹”¤((€€€µ½¹­•åÁ…Ñ ¹Í•Ñ…ÑÑÈ¡•‘•}Õ¥‘•‘}µ½‘Õ±”°€‰}•Ù…±Õ…Ñ•}Í•µ•¹Ðˆ°•Ù…±Õ…Ñ•}Í•µ•¹Ð¤(€€€É•ÍÕ±Ð€ô•Ù…±Õ…Ñ•}•‘•}Õ¥‘•‘}…¹‘¥‘…Ñ•Ì (€€€€€€€‘…Ñ…Í•Ðõ‘…Ñ…Í•Ð°(€€€€€€€™•…ÑÕÉ•}µ…ÑÉ¥àõµ…ÑÉ¥à°(€€€€€€€¡åÁ½Ñ¡•Í•Ìô¡Ý•…­•È°ÍÑÉ½¹•È¤°(€€€€€€€¥¹¥Ñ¥…±}…Í õ•¥µ…° ˆÄÀÀÀÀˆ¤°(€€€€€€€Í¥µÕ±…Ñ¥½¸õM¥µÕ±…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¸ ¤°(€€€€€€€µ…á¥µÕµ}…¹‘¥‘…Ñ•ÌôÄ°(€€€€€€€Ý¥¹‘½ÝÌõÝ¥¹‘½ÝÌ°(€€€€€€€Ñ¡É•Í¡½±‘ÌõÙ¥‘•¹•Q¡É•Í¡½±‘Ì¡µ¥¹¥µÕµ}½‰Í•ÉÙ…Ñ¥½¹ÌôÄ°µ¥¹¥µÕµ}Ý¥¹‘½ÝÌôÄ¤°(€€€€¤((€€€…ÍÍ•ÉÐÑ•ÍÑ}Í½ÕÉ•Ì(€€€…ÍÍ•ÉÐÍ•Ð¡Ñ•ÍÑ}Í½ÕÉ•Ì¤€ôôíÍÑÉ½¹•È¹¡åÁ½Ñ¡•Í¥Í}¥‘ô(€€€…ÍÍ•ÉÐÉ•ÍÕ±Ð¹™Õ¹¹•±l‰Ñ•ÍÑ}•Ù…±Õ…Ñ•‘}½Õ¹Ð‰t€ôô€Ä(()‘•˜Ñ•ÍÑ}ÍÑ…•}…¡•}É•ÕÍ•Í}ÑÉ…¥¹¥¹}Ù…±¥‘…Ñ¥½¹}…¹‘}Ñ•ÍÑ}Ý½É¬ (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(¤€´ø9½¹”è(€€€‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ€ô•Ù…±Õ…Ñ¥½¹}•Ù¥‘•¹”¡Ý¥¹‘½ÝÌôÄ¤(€€€…±±Ìè‘¥ÑmI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”°¥¹Ñt€ôì(€€€€€€€ÍÑ…”è€À™½ÈÍÑ…”¥¸•‘•}Õ¥‘•‘}µ½‘Õ±”¹}U%}MQL(€€€ô((€€€‘•˜•Ù…±Õ…Ñ•}Í•µ•¹Ð (€€€€€€€€©…ÉÌè½‰©•Ð°€¨©­Ý…ÉÌè½‰©•Ð(€€€€¤€´ø‘•Õ¥‘•‘M•µ•¹ÑÙ…±Õ…Ñ¥½¸è(€€€€€€€‘•°­Ý…ÉÌ(€€€€€€€Í•µ•¹Ð€ô…ÉÍlÉt(€€€€€€€…ÍÍ•ÉÐ¥Í¥¹ÍÑ…¹”¡Í•µ•¹Ð°I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¤(€€€€€€€…±±ÍmÍ•µ•¹Ñt€¬ô€Ä(€€€€€€€É•ÑÕÉ¸Í•µ•¹Ñ}É•ÍÕ±Ð¡Í•µ•¹Ð°•¥µ…° ˆÀ¸ÀÄˆ¤¤((€€€µ½¹­•åÁ…Ñ ¹Í•Ñ…ÑÑÈ¡•‘•}Õ¥‘•‘}µ½‘Õ±”°€‰}•Ù…±Õ…Ñ•}Í•µ•¹Ðˆ°•Ù…±Õ…Ñ•}Í•µ•¹Ð¤(€€€™¥ÉÍÐ€ô•Ù…±Õ…Ñ•}…¡•‘}•Ù¥‘•¹”¡‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ¤(€€€™¥ÉÍÑ}…±±Ì€ô‘¥Ð¡…±±Ì¤(€€€…ÍÍ•ÉÐ…±°¡Ù…±Õ”€ø€À™½ÈÙ…±Õ”¥¸™¥ÉÍÑ}…±±Ì¹Ù…±Õ•Ì ¤¤((€€€…±±Ì¹ÕÁ‘…Ñ”¡íÍÑ…”è€À™½ÈÍÑ…”¥¸•‘•}Õ¥‘•‘}µ½‘Õ±”¹}U%}MQMô¤(€€€Í•½¹€ô•Ù…±Õ…Ñ•}…¡•‘}•Ù¥‘•¹” (€€€€€€€‘…Ñ…Í•Ð°(€€€€€€€µ…ÑÉ¥à°(€€€€€€€Ý¥¹‘½ÝÌ°(€€€€€€€í¥Ñ•´¹…¡•}­•äè¥Ñ•´™½È¥Ñ•´¥¸™¥ÉÍÐ¹ÍÑ…•}•Ù¥‘•¹•ô°(€€€€¤((€€€…ÍÍ•ÉÐ…±±Ì€ôôíÍÑ…”è€À™½ÈÍÑ…”¥¸•‘•}Õ¥‘•‘}µ½‘Õ±”¹}U%}MQMô(€€€…ÍÍ•ÉÐÍ•½¹¹™Õ¹¹•±l‰Ý¥¹‘½ÝÍ}½µÁÕÑ•‰t€ôô€À(€€€…ÍÍ•ÉÐÍ•½¹¹™Õ¹¹•±l‰Ý¥¹‘½ÝÍ}É•ÕÍ•‰t€ôô±•¸¡Í•½¹¹ÍÑ…•}•Ù¥‘•¹”¤(€€€…ÍÍ•ÉÐÍ•½¹¹™Õ¹¹•±l‰Ñ•ÍÑ}•Ù…±Õ…Ñ•‘}½Õ¹Ð‰t€ôô€Ä((€€€…±±Ì¹ÕÁ‘…Ñ”¡íÍÑ…”è€À™½ÈÍÑ…”¥¸•‘•}Õ¥‘•‘}µ½‘Õ±”¹}U%}MQMô¤(€€€™½É•€ô•Ù…±Õ…Ñ•}…¡•‘}•Ù¥‘•¹”¡‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ¤(€€€…ÍÍ•ÉÐ™½É•¹™Õ¹¹•±l‰Ý¥¹‘½ÝÍ}É•ÕÍ•‰t€ôô€À(€€€…ÍÍ•ÉÐ™½É•¹™Õ¹¹•±l‰Ý¥¹‘½ÝÍ}½µÁÕÑ•‰t€ø€À(€€€…ÍÍ•ÉÐ…±±Ì€ôô™¥ÉÍÑ}…±±Ì(()ÁåÑ•ÍÐ¹µ…É¬¹Á…É…µ•ÑÉ¥é” (€€€€ ‰™…¥±•‘}ÍÑ…”ˆ°€‰•áÁ•Ñ•‘}ÍÑ…•Ìˆ¤°(€€€l(€€€€€€€€¡I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9°íI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9ô¤°(€€€€€€€€ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=8°(€€€€€€€€€€€íI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9°I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=9ô°(€€€€€€€€¤°(€€€t°(¤)‘•˜Ñ•ÍÑ}É•©•Ñ•‘}ÍÑ…•}•Ù¥‘•¹•}¥Í}É•ÕÍ…‰±” (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(€€€™…¥±•‘}ÍÑ…”èI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”°(€€€•áÁ•Ñ•‘}ÍÑ…•ÌèÍ•ÑmI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ•t°(¤€´ø9½¹”è(€€€‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ€ô•Ù…±Õ…Ñ¥½¹}•Ù¥‘•¹”¡Ý¥¹‘½ÝÌôÄ¤(€€€…±±Ìè±¥ÍÑmI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ•t€ômt((€€€‘•˜•Ù…±Õ…Ñ•}Í•µ•¹Ð (€€€€€€€€©…ÉÌè½‰©•Ð°€¨©­Ý…ÉÌè½‰©•Ð(€€€€¤€´ø‘•Õ¥‘•‘M•µ•¹ÑÙ…±Õ…Ñ¥½¸è(€€€€€€€‘•°­Ý…ÉÌ(€€€€€€€ÍÑ…”€ô…ÉÍlÉt(€€€€€€€…ÍÍ•ÉÐ¥Í¥¹ÍÑ…¹”¡ÍÑ…”°I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¤(€€€€€€€…±±Ì¹…ÁÁ•¹¡ÍÑ…”¤(€€€€€€€‘¥™™•É•¹”€ô•¥µ…° ˆ´À¸ÀÈˆ¤¥˜ÍÑ…”¥Ì™…¥±•‘}ÍÑ…”•±Í”•¥µ…° ˆÀ¸ÀÄˆ¤(€€€€€€€É•ÑÕÉ¸Í•µ•¹Ñ}É•ÍÕ±Ð¡ÍÑ…”°‘¥™™•É•¹”¤((€€€µ½¹­•åÁ…Ñ ¹Í•Ñ…ÑÑÈ¡•‘•}Õ¥‘•‘}µ½‘Õ±”°€‰}•Ù…±Õ…Ñ•}Í•µ•¹Ðˆ°•Ù…±Õ…Ñ•}Í•µ•¹Ð¤(€€€™¥ÉÍÐ€ô•Ù…±Õ…Ñ•}…¡•‘}•Ù¥‘•¹”¡‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ¤(€€€…ÍÍ•ÉÐí¥Ñ•´¹ÍÑ…”™½È¥Ñ•´¥¸™¥ÉÍÐ¹ÍÑ…•}•Ù¥‘•¹•ô€ôô•áÁ•Ñ•‘}ÍÑ…•Ì((€€€…±±Ì¹±•…È ¤(€€€Í•½¹€ô•Ù…±Õ…Ñ•}…¡•‘}•Ù¥‘•¹” (€€€€€€€‘…Ñ…Í•Ð°(€€€€€€€µ…ÑÉ¥à°(€€€€€€€Ý¥¹‘½ÝÌ°(€€€€€€€í¥Ñ•´¹…¡•}­•äè¥Ñ•´™½È¥Ñ•´¥¸™¥ÉÍÐ¹ÍÑ…•}•Ù¥‘•¹•ô°(€€€€¤(€€€…ÍÍ•ÉÐ…±±Ì€ôômt(€€€…ÍÍ•ÉÐÍ•½¹¹™Õ¹¹•±l‰Ý¥¹‘½ÝÍ}½µÁÕÑ•‰t€ôô€À(€€€…ÍÍ•ÉÐÍ•½¹¹™Õ¹¹•±l‰Ý¥¹‘½ÝÍ}É•ÕÍ•‰t€ôô±•¸¡Í•½¹¹ÍÑ…•}•Ù¥‘•¹”¤(()‘•˜Ñ•ÍÑ}¡…¹•‘}Ù…±¥‘…Ñ¥½¹}½¹Ñ•¹Ñ}¥¹Ù…±¥‘…Ñ•Í}½¹±å}Ù…±¥‘…Ñ¥½¹}ÍÑ…” (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(¤€´ø9½¹”è(€€€‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ€ô•Ù…±Õ…Ñ¥½¹}•Ù¥‘•¹”¡Ý¥¹‘½ÝÌôÄ¤(€€€…±±Ìè±¥ÍÑmI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ•t€ômt((€€€‘•˜•Ù…±Õ…Ñ•}Í•µ•¹Ð (€€€€€€€€©…ÉÌè½‰©•Ð°€¨©­Ý…ÉÌè½‰©•Ð(€€€€¤€´ø‘•Õ¥‘•‘M•µ•¹ÑÙ…±Õ…Ñ¥½¸è(€€€€€€€‘•°­Ý…ÉÌ(€€€€€€€ÍÑ…”€ô…ÉÍlÉt(€€€€€€€…ÍÍ•ÉÐ¥Í¥¹ÍÑ…¹”¡ÍÑ…”°I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¤(€€€€€€€…±±Ì¹…ÁÁ•¹¡ÍÑ…”¤(€€€€€€€É•ÑÕÉ¸Í•µ•¹Ñ}É•ÍÕ±Ð¡ÍÑ…”°•¥µ…° ˆÀ¸ÀÄˆ¤¤((€€€µ½¹­•åÁ…Ñ ¹Í•Ñ…ÑÑÈ¡•‘•}Õ¥‘•‘}µ½‘Õ±”°€‰}•Ù…±Õ…Ñ•}Í•µ•¹Ðˆ°•Ù…±Õ…Ñ•}Í•µ•¹Ð¤(€€€™¥ÉÍÐ€ô•Ù…±Õ…Ñ•}…¡•‘}•Ù¥‘•¹”¡‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ¤(€€€¡…¹•‘}É½ÝÌ€ô±¥ÍÐ¡µ…ÑÉ¥à¹É½ÝÌ¤(€€€¡…¹•‘}É½ÝÍlÄÅt€ôÉ•Á±…”¡¡…¹•‘}É½ÝÍlÄÅt°É•ÑÕÉ¹|Äõ•¥µ…° ˆÀ¸ÄÈÌˆ¤¤(€€€…±±Ì¹±•…È ¤((€€€Í•½¹€ô•Ù…±Õ…Ñ•}…¡•‘}•Ù¥‘•¹” (€€€€€€€‘…Ñ…Í•Ð°(€€€€€€€É•Á±…”¡µ…ÑÉ¥à°É½ÝÌõÑÕÁ±”¡¡…¹•‘}É½ÝÌ¤¤°(€€€€€€€Ý¥¹‘½ÝÌ°(€€€€€€€í¥Ñ•´¹…¡•}­•äè¥Ñ•´™½È¥Ñ•´¥¸™¥ÉÍÐ¹ÍÑ…•}•Ù¥‘•¹•ô°(€€€€¤((€€€…ÍÍ•ÉÐ…±±Ì(€€€…ÍÍ•ÉÐÍ•Ð¡…±±Ì¤€ôôíI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=9ô(€€€…ÍÍ•ÉÐÍ•½¹¹™Õ¹¹•±l‰ÑÉ…¥¹¥¹}Ý¥¹‘½ÝÍ}½µÁÕÑ•‰t€ôô€À(€€€…ÍÍ•ÉÐÍ•½¹¹™Õ¹¹•±l‰Ñ•ÍÑ}Ý¥¹‘½ÝÍ}½µÁÕÑ•‰t€ôô€À(€€€…ÍÍ•ÉÐÍ•½¹¹™Õ¹¹•±l‰Ù…±¥‘…Ñ¥½¹}Ý¥¹‘½ÝÍ}½µÁÕÑ•‰t€ø€À(()‘•˜Ñ•ÍÑ}•á•ÍÍ¥Ù•}‘É…Ý‘½Ý¹}É•©•ÑÍ}½Ñ¡•ÉÝ¥Í•}ÁÉ½™¥Ñ…‰±•}…¹‘¥‘…Ñ” (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(¤€´ø9½¹”è(€€€É•ÍÕ±Ð€ô•Ù…±Õ…Ñ•}Ý¥Ñ¡}µ•ÑÉ¥Ì (€€€€€€€µ½¹­•åÁ…Ñ °(€€€€€€€ÑÉ…¥¹¥¹œõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€¤°(€€€€€€€Ù…±¥‘…Ñ¥½¸õ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=8°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€µ…á}‘É…Ý‘½Ý¸ôˆÀ¸ÄÄˆ°(€€€€€€€€¤°(€€€€€€€Ñ•ÍÐõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€¤°(€€€€¤(€€€•Ù…±Õ…Ñ¥½¸€ôÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹ÍlÁt(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹ÍÑ…ÑÕÌ¥Ì‘•Õ¥‘•‘…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}Y1%Q%=8(€€€…ÍÍ•ÉÐ‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸¹aMM%Y}I]=]8¥¸•Ù…±Õ…Ñ¥½¸¹É•©•Ñ¥½¹}É•…Í½¹Ì(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹Ù…±¥‘…Ñ¥½¸¹É¥Í­}…•ÁÑ…‰±”¥Ì…±Í”(()ÁåÑ•ÍÐ¹µ…É¬¹Á…É…µ•ÑÉ¥é” (€€€€ ‰Ñ•ÍÑ}µ•ÑÉ¥Œˆ°€‰•áÁ•Ñ•‘}É•…Í½¸ˆ¤°(€€€l(€€€€€€€€ (€€€€€€€€€€€•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP°(€€€€€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€€€€€ÑÉ…‘•}½Õ¹ÐôÀ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸¹%9MU%%9Q}QIL°(€€€€€€€€¤°(€€€€€€€€ (€€€€€€€€€€€•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP°(€€€€€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀˆ°(€€€€€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆ´À¸ÀÄˆ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸¹9=9}A=M%Q%Y}QMQ}IQUI8°(€€€€€€€€¤°(€€€€€€€€ (€€€€€€€€€€€•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP°(€€€€€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€€€€€€€€µ…á}‘É…Ý‘½Ý¸ôˆÀ¸ÄÄˆ°(€€€€€€€€€€€€¤°(€€€€€€€€€€€‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸¹aMM%Y}I]=]8°(€€€€€€€€¤°(€€€t°(€€€¥‘Ìô ‰¹¼µÑ•ÍÐµÑÉ…‘•Ìˆ°€‰¹½¸µÁ½Í¥Ñ¥Ù”µÑ•ÍÐµÉ•ÑÕÉ¸ˆ°€‰•á•ÍÍ¥Ù”µÑ•ÍÐµ‘É…Ý‘½Ý¸ˆ¤°(¤)‘•˜Ñ•ÍÑ}Ñ•ÍÑ}½¹±å}™…¥±ÕÉ•}¥Í}±…ÍÍ¥™¥•‘}…Í}É•©•Ñ•‘}Ñ•ÍÐ (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(€€€Ñ•ÍÑ}µ•ÑÉ¥Œè‘•Õ¥‘•‘M•µ•¹ÑÙ…±Õ…Ñ¥½¸°(€€€•áÁ•Ñ•‘}É•…Í½¸è‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸°(¤€´ø9½¹”è(€€€É•ÍÕ±Ð€ô•Ù…±Õ…Ñ•}Ý¥Ñ¡}µ•ÑÉ¥Ì (€€€€€€€µ½¹­•åÁ…Ñ °(€€€€€€€ÑÉ…¥¹¥¹œõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€¤°(€€€€€€€Ù…±¥‘…Ñ¥½¸õ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=8°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€¤°(€€€€€€€Ñ•ÍÐõÑ•ÍÑ}µ•ÑÉ¥Œ°(€€€€¤((€€€•Ù…±Õ…Ñ¥½¸€ôÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹ÍlÁt(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹ÍÑ…ÑÕÌ¥Ì‘•Õ¥‘•‘…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}QMP(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹Ù…±¥‘}Ý¥¹‘½Ý}½Õ¹Ð€ôô€Ä(€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹½¹™¥Éµ•‘}Ý¥¹‘½Ý}½Õ¹Ð€ôô€À(€€€…ÍÍ•ÉÐ•áÁ•Ñ•‘}É•…Í½¸¥¸•Ù…±Õ…Ñ¥½¸¹É•©•Ñ¥½¹}É•…Í½¹Ì(()ÁåÑ•ÍÐ¹µ…É¬¹Á…É…µ•ÑÉ¥é” ‰™…¥±¥¹}Í•µ•¹Ðˆ°l‰ÑÉ…¥¹¥¹œˆ°€‰Ù…±¥‘…Ñ¥½¸‰t¤)‘•˜Ñ•ÍÑ}é•É½}ÑÉ…‘•Í}‰•™½É•}Ñ•ÍÑ}…É•}±…ÍÍ¥™¥•‘}…Í}É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¸ (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °™…¥±¥¹}Í•µ•¹ÐèÍÑÈ(¤€´ø9½¹”è(€€€ÑÉ…¥¹¥¹œ€ô•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9°(€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€ÑÉ…‘•}½Õ¹ÐôÀ¥˜™…¥±¥¹}Í•µ•¹Ð€ôô€‰ÑÉ…¥¹¥¹œˆ•±Í”€Ä°(€€€€¤(€€€Ù…±¥‘…Ñ¥½¸€ô•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=8°(€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€ÑÉ…‘•}½Õ¹ÐôÀ¥˜™…¥±¥¹}Í•µ•¹Ð€ôô€‰Ù…±¥‘…Ñ¥½¸ˆ•±Í”€Ä°(€€€€¤(€€€É•ÍÕ±Ð€ô•Ù…±Õ…Ñ•}Ý¥Ñ¡}µ•ÑÉ¥Ì (€€€€€€€µ½¹­•åÁ…Ñ °(€€€€€€€ÑÉ…¥¹¥¹œõÑÉ…¥¹¥¹œ°(€€€€€€€Ù…±¥‘…Ñ¥½¸õÙ…±¥‘…Ñ¥½¸°(€€€€€€€Ñ•ÍÐõ•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP°(€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀ¸ÀÈˆ°(€€€€€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀ¸ÀÄˆ°(€€€€€€€€¤°(€€€€¤((€€€¥˜™…¥±¥¹}Í•µ•¹Ð€ôô€‰ÑÉ…¥¹¥¹œˆè(€€€€€€€…ÍÍ•ÉÐÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹Ì€ôô€ ¤(€€€€€€€…ÍÍ•ÉÐÉ•ÍÕ±Ð¹™Õ¹¹•±l‰ÑÉ…¥¹¥¹}É•Ñ…¥¹•‘}½Õ¹Ð‰t€ôô€À(€€€•±Í”è(€€€€€€€•Ù…±Õ…Ñ¥½¸€ôÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹ÍlÁt(€€€€€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹ÍÑ…ÑÕÌ¥Ì‘•Õ¥‘•‘…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}Y1%Q%=8(€€€€€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹½¹™¥Éµ•‘}Ý¥¹‘½Ý}½Õ¹Ð€ôô€À(€€€€€€€…ÍÍ•ÉÐ•Ù…±Õ…Ñ¥½¸¹Ñ•ÍÐ¥Ì9½¹”(€€€€€€€…ÍÍ•ÉÐ€ (€€€€€€€€€€€‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸¹%9MU%%9Q}QIL(€€€€€€€€€€€¥¸•Ù…±Õ…Ñ¥½¸¹É•©•Ñ¥½¹}É•…Í½¹Ì(€€€€€€€€¤(()‘•˜Ñ•ÍÑ}É•©•Ñ¥½¹}É•…Í½¹Í}…É•}ÍÑ…‰±•}…¹‘}Õ¹¥ÅÕ” (€€€µ½¹­•åÁ…Ñ èÁåÑ•ÍÐ¹5½¹­•åA…Ñ °(¤€´ø9½¹”è(€€€é•É¼€ô•½¹½µ¥}µ•ÑÉ¥Œ (€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QI%9%9°(€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸ôˆÀˆ°(€€€€€€€ÁÉ½‘ÕÑ¥½¹}É•ÑÕÉ¸ôˆÀˆ°(€€€€€€€ÑÉ…‘•}½Õ¹ÐôÀ°(€€€€¤(€€€É•ÍÕ±Ð€ô•Ù…±Õ…Ñ•}Ý¥Ñ¡}µ•ÑÉ¥Ì (€€€€€€€µ½¹­•åÁ…Ñ °(€€€€€€€ÑÉ…¥¹¥¹œõé•É¼°(€€€€€€€Ù…±¥‘…Ñ¥½¸õÉ•Á±…”¡é•É¼°Í•µ•¹ÐõI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹Y1%Q%=8¤°(€€€€€€€Ñ•ÍÐõÉ•Á±…”¡é•É¼°Í•µ•¹ÐõI•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¹QMP¤°(€€€€¤(€€€…ÍÍ•ÉÐÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹Ì€ôô€ ¤(€€€…ÍÍ•ÉÐÉ•ÍÕ±Ð¹™Õ¹¹•±l‰ÑÉ…¥¹¥¹}É•Ñ…¥¹•‘}½Õ¹Ð‰t€ôô€À(()‘•˜Ñ•ÍÑ}•Ù…±Õ…Ñ¥½¹}Á…ÍÍ•Í}•™™•Ñ¥Ù•}™••Í}…¹‘}Í±¥ÁÁ…•}Ñ½}É•…±}Í¥µÕ±…Ñ½È ¤€´ø9½¹”è(€€€‘…Ñ…Í•Ð°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ€ô•Ù…±Õ…Ñ¥½¹}•Ù¥‘•¹”¡Ý¥¹‘½ÝÌôÄ¤(€€€Í¥µÕ±…Ñ¥½¸€ôM¥µÕ±…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¸ (€€€€€€€™••}É…Ñ”õ•¥µ…° ˆÀ¸ÀÀÈÌˆ¤°Í±¥ÁÁ…•}É…Ñ”õ•¥µ…° ˆÀ¸ÀÀÀÜˆ¤(€€€€¤(€€€…±±Ìè±¥ÍÑmÑÕÁ±•m•¥µ…°°•¥µ…°°‰½½±ut€ômt((€€€‘•˜Í¥µÕ±…Ñ” ¨©­Ý…ÉÌè½‰©•Ð¤€´øM¥µÁ±•9…µ•ÍÁ…”è(€€€€€€€™•”€ô­Ý…ÉÍl‰™••}É…Ñ”‰t(€€€€€€€Í±¥ÁÁ…”€ô­Ý…ÉÍl‰Í±¥ÁÁ…•}É…Ñ”‰t(€€€€€€€™¥±Ñ•É•€ô­Ý…ÉÌ¹•Ð ‰‘•¥Í¥½¹}…Ñ¥½¹}™¥±Ñ•Èˆ¤¥Ì¹½Ð9½¹”(€€€€€€€…ÍÍ•ÉÐ¥Í¥¹ÍÑ…¹”¡™•”°•¥µ…°¤(€€€€€€€…ÍÍ•ÉÐ¥Í¥¹ÍÑ…¹”¡Í±¥ÁÁ…”°•¥µ…°¤(€€€€€€€…±±Ì¹…ÁÁ•¹ ¡™•”°Í±¥ÁÁ…”°™¥±Ñ•É•¤¤(€€€€€€€É•ÑÕÉ¸M¥µÁ±•9…µ•ÍÁ…” (€€€€€€€€€€€Ñ½Ñ…±}É•ÑÕÉ¸õ•¥µ…° ˆÀ¸ÀÈˆ¤¥˜™¥±Ñ•É••±Í”•¥µ…° ˆÀ¸ÀÄˆ¤°(€€€€€€€€€€€µ…á}‘É…Ý‘½Ý¸õ•¥µ…° ˆÀ¸ÀÄˆ¤°(€€€€€€€€€€€ÑÉ…‘•}½Õ¹ÐôÄ°(€€€€€€€€€€€™••Í}Á…¥õ•¥µ…° ˆÄ¸ÀÀˆ¤°(€€€€€€€€¤((€€€‰•¹¡µ…É¬€ôM¥µÁ±•9…µ•ÍÁ…”¡Ñ½Ñ…±}É•ÑÕÉ¸õ•¥µ…° À¤¤(€€€Ý¥Ñ € (€€€€€€€Á…Ñ ¹½‰©•Ð (€€€€€€€€€€€•‘•}Õ¥‘•‘}µ½‘Õ±”°€‰Í¥µÕ±…Ñ•}¡¥ÍÑ½É¥…±}™•…ÑÕÉ•}µ…ÑÉ¥àˆ°Í¥µÕ±…Ñ”(€€€€€€€€¤°(€€€€€€€Á…Ñ ¹½‰©•Ð (€€€€€€€€€€€•‘•}Õ¥‘•‘}µ½‘Õ±”°€‰Í¥µÕ±…Ñ•}‰Õå}…¹‘}¡½±ˆ°É•ÑÕÉ¹}Ù…±Õ”õ‰•¹¡µ…É¬(€€€€€€€€¤°(€€€€¤è(€€€€€€€É•ÍÕ±Ð€ô•Ù…±Õ…Ñ•}•‘•}Õ¥‘•‘}…¹‘¥‘…Ñ•Ì (€€€€€€€€€€€‘…Ñ…Í•Ðõ‘…Ñ…Í•Ð°(€€€€€€€€€€€™•…ÑÕÉ•}µ…ÑÉ¥àõµ…ÑÉ¥à°(€€€€€€€€€€€¡åÁ½Ñ¡•Í•Ìô¡¡åÁ½Ñ¡•Í¥Ì ¤°¤°(€€€€€€€€€€€¥¹¥Ñ¥…±}…Í õ•¥µ…° ˆÄÀÀÀÀˆ¤°(€€€€€€€€€€€Í¥µÕ±…Ñ¥½¸õÍ¥µÕ±…Ñ¥½¸°(€€€€€€€€€€€Ý¥¹‘½ÝÌõÝ¥¹‘½ÝÌ°(€€€€€€€€€€€Ñ¡É•Í¡½±‘ÌõÙ¥‘•¹•Q¡É•Í¡½±‘Ì (€€€€€€€€€€€€€€€µ¥¹¥µÕµ}½‰Í•ÉÙ…Ñ¥½¹ÌôÄ°(€€€€€€€€€€€€€€€µ¥¹¥µÕµ}Ý¥¹‘½ÝÌôÄ°(€€€€€€€€€€€€€€€µ¥¹¥µÕµ}ÍÑ…‰±•}‘¥É•Ñ¥½¹}É…Ñ¥¼õ•¥µ…° Ä¤°(€€€€€€€€€€€€¤°(€€€€€€€€¤(€€€…ÍÍ•ÉÐÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹ÍlÁt¹ÍÑ…ÑÕÌ¥Ì‘•Õ¥‘•‘…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹=9%I5(€€€…ÍÍ•ÉÐ…±±Ì(€€€…ÍÍ•ÉÐ…±° (€€€€€€€™•”€ôôÍ¥µÕ±…Ñ¥½¸¹™••}É…Ñ”…¹Í±¥ÁÁ…”€ôôÍ¥µÕ±…Ñ¥½¸¹Í±¥ÁÁ…•}É…Ñ”(€€€€€€€™½È™•”°Í±¥ÁÁ…”°|¥¸…±±Ì(€€€€¤(€€€…ÍÍ•ÉÐ…¹ä¡™¥±Ñ•É•™½È|°|°™¥±Ñ•É•¥¸…±±Ì¤(€€€…ÍÍ•ÉÐ…¹ä¡¹½Ð™¥±Ñ•É•™½È|°|°™¥±Ñ•É•¥¸…±±Ì¤(
+        feature_matrix=matrix,
+        hypotheses=(),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        windows=windows,
+        thresholds=EvidenceThresholds(minimum_windows=1),
+    )
+    assert result.generated_count == 0
+    assert result.evaluated_count == 0
+    assert result.evaluations == ()
+
+
+def test_long_entry_gates_only_a_baseline_entry() -> None:
+    candidate = candidates((hypothesis(),))[0]
+    inside = row("-0.015")
+    outside = row("0.01")
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=inside,
+            position_is_open=False,
+            baseline_action=StrategyAction.OPEN_POSITION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.OPEN_POSITION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=inside,
+            position_is_open=False,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=outside,
+            position_is_open=False,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=outside,
+            position_is_open=False,
+            baseline_action=StrategyAction.OPEN_POSITION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=inside,
+            position_is_open=True,
+            baseline_action=StrategyAction.SELL_ALL,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.SELL_ALL
+    )
+
+
+def test_exit_or_avoid_never_creates_a_short_position() -> None:
+    source = hypothesis(
+        action=SuggestedAction.EXIT_OR_AVOID,
+        lower=Decimal("0.01"),
+        upper=Decimal("0.02"),
+    )
+    candidate = candidates((source,))[0]
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=row("0.015"),
+            position_is_open=False,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=row("0.015"),
+            position_is_open=True,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.SELL_ALL
+    )
+    assert StrategyAction.INCREASE_POSITION not in {
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=row("0.015"),
+            position_is_open=False,
+            baseline_action=StrategyAction.NO_ACTION,
+            volatility_threshold=Decimal("0.02"),
+        )
+    }
+
+
+def test_condition_is_part_of_identity_and_required_for_application() -> None:
+    source = hypothesis(condition=Condition.HIGH_VOLATILITY)
+    candidate = candidates((source,))[0]
+    unconditional = candidates((hypothesis(),))[0]
+    assert candidate.condition is Condition.HIGH_VOLATILITY
+    assert candidate.candidate_fingerprint != unconditional.candidate_fingerprint
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=row("-0.015", atr_14="1"),
+            position_is_open=False,
+            baseline_action=StrategyAction.OPEN_POSITION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.NO_ACTION
+    )
+    assert (
+        apply_edge_guided_action(
+            candidate=candidate,
+            row=row("-0.015", atr_14="3"),
+            position_is_open=False,
+            baseline_action=StrategyAction.OPEN_POSITION,
+            volatility_threshold=Decimal("0.02"),
+        )
+        is StrategyAction.OPEN_POSITION
+    )
+
+
+def test_limit_order_and_fingerprints_are_deterministic_and_complete() -> None:
+    values = tuple(hypothesis(identifier=f"{index:064x}") for index in range(1, 5))
+    first = candidates(tuple(reversed(values)), maximum=2)
+    second = candidates(values, maximum=2)
+    assert first == second
+    assert len(first) <= edge_guided_module.MAX_GENERATED_STRATEGIES
+    assert len(first) > 2
+    base = candidates((hypothesis(),))[0]
+    variants = (
+        candidates((replace(hypothesis(), lower_bound=Decimal("-0.03")),))[0],
+        candidates(
+            (
+                hypothesis(
+                    action=SuggestedAction.EXIT_OR_AVOID,
+                    lower=Decimal("0.01"),
+                    upper=Decimal("0.02"),
+                ),
+            )
+        )[0],
+        candidates((hypothesis(horizon=timedelta(hours=1)),))[0],
+        candidates((hypothesis(),), fee_rate=Decimal("0.002"))[0],
+    )
+    assert all(
+        item.candidate_fingerprint != base.candidate_fingerprint for item in variants
+    )
+    assert base.fee_rate == Decimal("0.001")
+    assert base.slippage_rate == Decimal("0.0005")
+
+
+def test_cli_keeps_edge_guided_evaluation_explicitly_disabled_by_default() -> None:
+    required = [
+        "--asset",
+        "BTC/USDT",
+        "--provider",
+        "binance",
+        "--market-type",
+        "spot",
+        "--interval",
+        "5m",
+        "--from",
+        "2025-01-01T00:00:00Z",
+        "--to",
+        "2026-01-01T00:00:00Z",
+    ]
+    assert build_parser().parse_args(required).edge_guided_candidates is False
+    enabled = build_parser().parse_args([*required, "--edge-guided-candidates"])
+    assert enabled.edge_guided_candidates is True
+    assert enabled.max_edge_guided_candidates == 12
+
+
+def test_walk_forward_candidate_rejected_in_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_differences(
+        monkeypatch,
+        validation=(Decimal("-0.01"), Decimal("-0.02")),
+        test=(),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert evaluation.valid_window_count == 0
+    assert evaluation.rejected_validation_window_count == 0
+    assert evaluation.test is None
+    assert evaluation.confirmed_window_count == 0
+    assert all(item.test is None for item in evaluation.windows)
+    assert evaluation.test is None
+    assert EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN not in (
+        evaluation.rejection_reasons
+    )
+    assert EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST not in (
+        evaluation.rejection_reasons
+    )
+    assert "test was not executed" in evaluation.explanation
+
+
+def test_walk_forward_candidate_passes_validation_but_fails_isolated_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_differences(
+        monkeypatch,
+        validation=(Decimal("0.01"), Decimal("0.02")),
+        test=(Decimal("-0.01"), Decimal("-0.02")),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_TEST
+    assert evaluation.rejected_test_window_count == 2
+    assert evaluation.confirmed_window_count == 0
+
+
+def test_candidate_confirms_across_multiple_walk_forward_windows_without_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_differences(
+        monkeypatch,
+        validation=(Decimal("0.01"), Decimal("0.02"), Decimal("0.03")),
+        test=(Decimal("0.01"), Decimal("0.02"), Decimal("0.03")),
+    )
+    evaluation = result.evaluations[0]
+    assert result.windows_available == 3
+    assert evaluation.status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert evaluation.valid_window_count == 3
+    assert evaluation.confirmed_window_count == 3
+    assert [item.window_ordinal for item in evaluation.windows] == [1, 2, 3]
+    assert all(item.test_confirmed for item in evaluation.windows)
+    assert evaluation.candidate in candidates((hypothesis(),))
+    source = hypothesis()
+    assert evaluation.candidate.condition is source.condition
+    assert evaluation.candidate.lower_bound == source.lower_bound
+    assert evaluation.candidate.upper_bound == source.upper_bound
+    assert evaluation.candidate.suggested_action is source.suggested_action
+    summary = edge_guided_summary(result)
+    summary_evaluations = summary["evaluations"]
+    assert isinstance(summary_evaluations, list)
+    assert summary_evaluations[0]["candidate"]["condition"] == "all"
+    assert summary_evaluations[0]["test"]["positive_net_return"] is True
+    assert summary_evaluations[0]["test"]["sufficient_trades"] is True
+    assert summary_evaluations[0]["rejection_reasons"] == []
+
+
+def test_zero_trade_candidate_cannot_pass_validation_or_confirm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zero = economic_metric(
+        RefinementSegmentName.TRAINING,
+        total_return="0",
+        production_return="-0.01",
+        trade_count=0,
+    )
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=zero,
+        validation=replace(zero, segment=RefinementSegmentName.VALIDATION),
+        test=replace(zero, segment=RefinementSegmentName.TEST),
+    )
+    assert (
+        result.qualification_contract_version
+        == EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+    )
+    assert result.evaluations == ()
+    assert result.funnel["training_retained_count"] == 0
+    assert result.funnel["test_evaluated_count"] == 0
+
+
+@pytest.mark.parametrize("candidate_return", ["-0.01", "0"])
+def test_non_positive_candidate_is_rejected_even_when_it_beats_losing_production(
+    monkeypatch: pytest.MonkeyPatch, candidate_return: str
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return=candidate_return,
+            production_return="-0.02",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return=candidate_return,
+            production_return="-0.02",
+        ),
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return=candidate_return,
+            production_return="-0.02",
+        ),
+    )
+    assert result.evaluations == ()
+    assert result.funnel["training_retained_count"] == 0
+
+
+def test_profitable_candidate_must_strictly_beat_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return="0.01",
+            production_return="0",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return="0.01",
+            production_return="0.02",
+        ),
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return="0.01",
+            production_return="0",
+        ),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert (
+        EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION
+        in evaluation.rejection_reasons
+    )
+
+
+def test_economically_viable_candidate_can_confirm_without_beating_buy_and_hold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return="0.02",
+            production_return="0.01",
+            buy_and_hold_return="0.03",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return="0.02",
+            production_return="0.01",
+            buy_and_hold_return="0.03",
+        ),
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return="0.02",
+            production_return="0.01",
+            buy_and_hold_return="0.03",
+        ),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert evaluation.test is not None
+    assert evaluation.test.beats_production is True
+    assert evaluation.test.beats_buy_and_hold is False
+    assert "beat production" in evaluation.explanation
+    assert "beat both" not in evaluation.explanation
+
+
+def test_only_validation_candidate_beating_production_consumes_test_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    weaker = hypothesis(identifier="1" * 64)
+    stronger = hypothesis(identifier="2" * 64)
+    test_sources: list[str] = []
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        segment = args[2]
+        candidate = args[3]
+        assert isinstance(segment, RefinementSegmentName)
+        assert isinstance(candidate, EdgeGuidedCandidate)
+        if segment is RefinementSegmentName.TEST:
+            test_sources.append(candidate.source_hypothesis_id)
+        difference = (
+            Decimal("-0.001")
+            if segment is RefinementSegmentName.VALIDATION
+            and candidate.source_hypothesis_id == weaker.hypothesis_id
+            else Decimal("0.01")
+        )
+        return segment_result(segment, difference)
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    result = evaluate_edge_guided_candidates(
+        dataset=dataset,
+        feature_matrix=matrix,
+        hypotheses=(weaker, stronger),
+        initial_cash=Decimal("10000"),
+        simulation=SimulationConfiguration(),
+        maximum_candidates=1,
+        windows=windows,
+        thresholds=EvidenceThresholds(minimum_observations=1, minimum_windows=1),
+    )
+
+    assert test_sources
+    assert set(test_sources) == {stronger.hypothesis_id}
+    assert result.funnel["test_evaluated_count"] == 1
+
+
+def test_stage_cache_reuses_training_validation_and_test_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    calls: dict[RefinementSegmentName, int] = {
+        stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES
+    }
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        segment = args[2]
+        assert isinstance(segment, RefinementSegmentName)
+        calls[segment] += 1
+        return segment_result(segment, Decimal("0.01"))
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
+    first_calls = dict(calls)
+    assert all(value > 0 for value in first_calls.values())
+
+    calls.update({stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES})
+    second = evaluate_cached_evidence(
+        dataset,
+        matrix,
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
+    )
+
+    assert calls == {stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES}
+    assert second.funnel["windows_computed"] == 0
+    assert second.funnel["windows_reused"] == len(second.stage_evidence)
+    assert second.funnel["test_evaluated_count"] == 1
+
+    calls.update({stage: 0 for stage in edge_guided_module.EDGE_GUIDED_STAGES})
+    forced = evaluate_cached_evidence(dataset, matrix, windows)
+    assert forced.funnel["windows_reused"] == 0
+    assert forced.funnel["windows_computed"] > 0
+    assert calls == first_calls
+
+
+@pytest.mark.parametrize(
+    ("failed_stage", "expected_stages"),
+    [
+        (RefinementSegmentName.TRAINING, {RefinementSegmentName.TRAINING}),
+        (
+            RefinementSegmentName.VALIDATION,
+            {RefinementSegmentName.TRAINING, RefinementSegmentName.VALIDATION},
+        ),
+    ],
+)
+def test_rejected_stage_evidence_is_reusable(
+    monkeypatch: pytest.MonkeyPatch,
+    failed_stage: RefinementSegmentName,
+    expected_stages: set[RefinementSegmentName],
+) -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    calls: list[RefinementSegmentName] = []
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        stage = args[2]
+        assert isinstance(stage, RefinementSegmentName)
+        calls.append(stage)
+        difference = Decimal("-0.02") if stage is failed_stage else Decimal("0.01")
+        return segment_result(stage, difference)
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
+    assert {item.stage for item in first.stage_evidence} == expected_stages
+
+    calls.clear()
+    second = evaluate_cached_evidence(
+        dataset,
+        matrix,
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
+    )
+    assert calls == []
+    assert second.funnel["windows_computed"] == 0
+    assert second.funnel["windows_reused"] == len(second.stage_evidence)
+
+
+def test_changed_validation_content_invalidates_only_validation_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    calls: list[RefinementSegmentName] = []
+
+    def evaluate_segment(
+        *args: object, **kwargs: object
+    ) -> EdgeGuidedSegmentEvaluation:
+        del kwargs
+        stage = args[2]
+        assert isinstance(stage, RefinementSegmentName)
+        calls.append(stage)
+        return segment_result(stage, Decimal("0.01"))
+
+    monkeypatch.setattr(edge_guided_module, "_evaluate_segment", evaluate_segment)
+    first = evaluate_cached_evidence(dataset, matrix, windows)
+    changed_rows = list(matrix.rows)
+    changed_rows[11] = replace(changed_rows[11], return_1=Decimal("0.123"))
+    calls.clear()
+
+    second = evaluate_cached_evidence(
+        dataset,
+        replace(matrix, rows=tuple(changed_rows)),
+        windows,
+        {item.cache_key: item for item in first.stage_evidence},
+    )
+
+    assert calls
+    assert set(calls) == {RefinementSegmentName.VALIDATION}
+    assert second.funnel["training_windows_computed"] == 0
+    assert second.funnel["test_windows_computed"] == 0
+    assert second.funnel["validation_windows_computed"] > 0
+
+
+def test_excessive_drawdown_rejects_otherwise_profitable_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return="0.02",
+            production_return="0.01",
+            max_drawdown="0.11",
+        ),
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+    )
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+    assert EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN in evaluation.rejection_reasons
+    assert evaluation.validation.risk_acceptable is False
+
+
+@pytest.mark.parametrize(
+    ("test_metric", "expected_reason"),
+    [
+        (
+            economic_metric(
+                RefinementSegmentName.TEST,
+                total_return="0.02",
+                production_return="0.01",
+                trade_count=0,
+            ),
+            EdgeGuidedRejectionReason.INSUFFICIENT_TRADES,
+        ),
+        (
+            economic_metric(
+                RefinementSegmentName.TEST,
+                total_return="0",
+                production_return="-0.01",
+            ),
+            EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN,
+        ),
+        (
+            economic_metric(
+                RefinementSegmentName.TEST,
+                total_return="0.02",
+                production_return="0.01",
+                max_drawdown="0.11",
+            ),
+            EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN,
+        ),
+    ],
+    ids=("no-test-trades", "non-positive-test-return", "excessive-test-drawdown"),
+)
+def test_test_only_failure_is_classified_as_rejected_test(
+    monkeypatch: pytest.MonkeyPatch,
+    test_metric: EdgeGuidedSegmentEvaluation,
+    expected_reason: EdgeGuidedRejectionReason,
+) -> None:
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=economic_metric(
+            RefinementSegmentName.TRAINING,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+        validation=economic_metric(
+            RefinementSegmentName.VALIDATION,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+        test=test_metric,
+    )
+
+    evaluation = result.evaluations[0]
+    assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_TEST
+    assert evaluation.valid_window_count == 1
+    assert evaluation.confirmed_window_count == 0
+    assert expected_reason in evaluation.rejection_reasons
+
+
+@pytest.mark.parametrize("failing_segment", ["training", "validation"])
+def test_zero_trades_before_test_are_classified_as_rejected_validation(
+    monkeypatch: pytest.MonkeyPatch, failing_segment: str
+) -> None:
+    training = economic_metric(
+        RefinementSegmentName.TRAINING,
+        total_return="0.02",
+        production_return="0.01",
+        trade_count=0 if failing_segment == "training" else 1,
+    )
+    validation = economic_metric(
+        RefinementSegmentName.VALIDATION,
+        total_return="0.02",
+        production_return="0.01",
+        trade_count=0 if failing_segment == "validation" else 1,
+    )
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=training,
+        validation=validation,
+        test=economic_metric(
+            RefinementSegmentName.TEST,
+            total_return="0.02",
+            production_return="0.01",
+        ),
+    )
+
+    if failing_segment == "training":
+        assert result.evaluations == ()
+        assert result.funnel["training_retained_count"] == 0
+    else:
+        evaluation = result.evaluations[0]
+        assert evaluation.status is EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+        assert evaluation.confirmed_window_count == 0
+        assert evaluation.test is None
+        assert (
+            EdgeGuidedRejectionReason.INSUFFICIENT_TRADES
+            in evaluation.rejection_reasons
+        )
+
+
+def test_rejection_reasons_are_stable_and_unique(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zero = economic_metric(
+        RefinementSegmentName.TRAINING,
+        total_return="0",
+        production_return="0",
+        trade_count=0,
+    )
+    result = evaluate_with_metrics(
+        monkeypatch,
+        training=zero,
+        validation=replace(zero, segment=RefinementSegmentName.VALIDATION),
+        test=replace(zero, segment=RefinementSegmentName.TEST),
+    )
+    assert result.evaluations == ()
+    assert result.funnel["training_retained_count"] == 0
+
+
+def test_evaluation_passes_effective_fees_and_slippage_to_real_simulator() -> None:
+    dataset, matrix, windows = evaluation_evidence(windows=1)
+    simulation = SimulationConfiguration(
+        fee_rate=Decimal("0.0023"), slippage_rate=Decimal("0.0007")
+    )
+    calls: list[tuple[Decimal, Decimal, bool]] = []
+
+    def simulate(**kwargs: object) -> SimpleNamespace:
+        fee = kwargs["fee_rate"]
+        slippage = kwargs["slippage_rate"]
+        filtered = kwargs.get("decision_action_filter") is not None
+        assert isinstance(fee, Decimal)
+        assert isinstance(slippage, Decimal)
+        calls.append((fee, slippage, filtered))
+        return SimpleNamespace(
+            total_return=Decimal("0.02") if filtered else Decimal("0.01"),
+            max_drawdown=Decimal("0.01"),
+            trade_count=1,
+            fees_paid=Decimal("1.00"),
+        )
+
+    benchmark = SimpleNamespace(total_return=Decimal(0))
+    with (
+        patch.object(
+            edge_guided_module, "simulate_historical_feature_matrix", simulate
+        ),
+        patch.object(
+            edge_guided_module, "simulate_buy_and_hold", return_value=benchmark
+        ),
+    ):
+        result = evaluate_edge_guided_candidates(
+            dataset=dataset,
+            feature_matrix=matrix,
+            hypotheses=(hypothesis(),),
+            initial_cash=Decimal("10000"),
+            simulation=simulation,
+            windows=windows,
+            thresholds=EvidenceThresholds(
+                minimum_observations=1,
+                minimum_windows=1,
+                minimum_stable_direction_ratio=Decimal(1),
+            ),
+        )
+    assert result.evaluations[0].status is EdgeGuidedCandidateStatus.CONFIRMED
+    assert calls
+    assert all(
+        fee == simulation.fee_rate and slippage == simulation.slippage_rate
+        for fee, slippage, _ in calls
+    )
+    assert any(filtered for _, _, filtered in calls)
+    assert any(not filtered for _, _, filtered in calls)

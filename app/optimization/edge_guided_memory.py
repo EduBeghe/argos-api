@@ -349,4 +349,512 @@ async def load_reusable_edge_guided_stages(
             RefinementSegmentName(item.stage),
             item.window_ordinal,
             item.segment_from,
-            item.segment_to×¿w¶‰žËkºwµç@€€€€€€€€€€€€€Í½É•}µ½‘•±}¹…µ”õ•Ù…±Õ…Ñ¥½¸¹…¹‘¥‘…Ñ”¹Í½É•}µ½‘•±}¹…µ”°(€€€€€€€€€€€€€€€Í½É•}µ½‘•±}Ù•ÉÍ¥½¸õ•Ù…±Õ…Ñ¥½¸¹…¹‘¥‘…Ñ”¹Í½É•}µ½‘•±}Ù•ÉÍ¥½¸°(€€€€€€€€€€€€€€€ÍÑÉ…Ñ•å}¹…µ”õ•Ù…±Õ…Ñ¥½¸¹…¹‘¥‘…Ñ”¹ÍÑÉ…Ñ•å}¹…µ”°(€€€€€€€€€€€€€€€ÍÑÉ…Ñ•å}Ù•ÉÍ¥½¸õ•Ù…±Õ…Ñ¥½¸¹…¹‘¥‘…Ñ”¹ÍÑÉ…Ñ•å}Ù•ÉÍ¥½¸°(€€€€€€€€€€€€€€€ÍÑÉ…Ñ•å}½¹™¥ÕÉ…Ñ¥½¹}Ù•ÉÍ¥½¸ô (€€€€€€€€€€€€€€€€€€€•Ù…±Õ…Ñ¥½¸¹…¹‘¥‘…Ñ”¹ÍÑÉ…Ñ•å}½¹™¥ÕÉ…Ñ¥½¹}Ù•ÉÍ¥½¸(€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”õì(€€€€€€€€€€€€€€€€€€€€¨©}…¹‘¥‘…Ñ•}Á…å±½…¡•Ù…±Õ…Ñ¥½¸¹…¹‘¥‘…Ñ”¤°(€€€€€€€€€€€€€€€€€€€€‰É…¹­¥¹œˆè}©Í½¸¡…Í‘¥Ð¡•Ù…±Õ…Ñ¥½¸¹É…¹­¥¹œ¤¤(€€€€€€€€€€€€€€€€€€€¥˜•Ù…±Õ…Ñ¥½¸¹É…¹­¥¹œ¥Ì¹½Ð9½¹”(€€€€€€€€€€€€€€€€€€€•±Í”9½¹”°(€€€€€€€€€€€€€€€ô°(€€€€€€€€€€€€€€€ÍÑ…ÑÕÌõ•Ù…±Õ…Ñ¥½¸¹ÍÑ…ÑÕÌ¹Ù…±Õ”°(€€€€€€€€€€€€€€€•áÁ±…¹…Ñ¥½¸õ•Ù…±Õ…Ñ¥½¸¹•áÁ±…¹…Ñ¥½¸°(€€€€€€€€€€€€€€€É•©•Ñ¥½¹}É•…Í½¹Ìõm¥Ñ•´¹Ù…±Õ”™½È¥Ñ•´¥¸•Ù…±Õ…Ñ¥½¸¹É•©•Ñ¥½¹}É•…Í½¹Ít°(€€€€€€€€€€€€€€€Ù…±¥‘}Ý¥¹‘½Ý}½Õ¹Ðõ•Ù…±Õ…Ñ¥½¸¹Ù…±¥‘}Ý¥¹‘½Ý}½Õ¹Ð°(€€€€€€€€€€€€€€€½¹™¥Éµ•‘}Ý¥¹‘½Ý}½Õ¹Ðõ•Ù…±Õ…Ñ¥½¸¹½¹™¥Éµ•‘}Ý¥¹‘½Ý}½Õ¹Ð°(€€€€€€€€€€€€€€€É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¹}Ý¥¹‘½Ý}½Õ¹Ðõ•Ù…±Õ…Ñ¥½¸¹É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¹}Ý¥¹‘½Ý}½Õ¹Ð°(€€€€€€€€€€€€€€€É•©•Ñ•‘}Ñ•ÍÑ}Ý¥¹‘½Ý}½Õ¹Ðõ•Ù…±Õ…Ñ¥½¸¹É•©•Ñ•‘}Ñ•ÍÑ}Ý¥¹‘½Ý}½Õ¹Ð°(€€€€€€€€€€€€€€€ÑÉ…¥¹¥¹}µ•ÑÉ¥Ìõ}µ•ÑÉ¥Œ¡•Ù…±Õ…Ñ¥½¸¹ÑÉ…¥¹¥¹œ¤°(€€€€€€€€€€€€€€€Ù…±¥‘…Ñ¥½¹}µ•ÑÉ¥Ìõ}µ•ÑÉ¥Œ¡•Ù…±Õ…Ñ¥½¸¹Ù…±¥‘…Ñ¥½¸¤°(€€€€€€€€€€€€€€€Ñ•ÍÑ}µ•ÑÉ¥Ìô (€€€€€€€€€€€€€€€€€€€}µ•ÑÉ¥Œ¡•Ù…±Õ…Ñ¥½¸¹Ñ•ÍÐ¤¥˜•Ù…±Õ…Ñ¥½¸¹Ñ•ÍÐ¥Ì¹½Ð9½¹”•±Í”9½¹”(€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€Õ¹½¹‘¥Ñ¥½¹…±}‰•¹¡µ…É¬õ•Ù…±Õ…Ñ¥½¸¹Õ¹½¹‘¥Ñ¥½¹…±}‰•¹¡µ…É¬°(€€€€€€€€€€€€¤(€€€€€€€€¤(€€€€€€€ÑÉäè(€€€€€€€€€€€…Ý…¥ÐÍ•ÍÍ¥½¸¹™±ÕÍ  ¤(€€€€€€€•á•ÁÐá•ÁÑ¥½¸è(€€€€€€€€€€€…Ý…¥ÐÍ•ÍÍ¥½¸¹É½±±‰…¬ ¤(€€€€€€€€€€€É…¥Í”(€€€€€€€™½ÈÝ¥¹‘½Ü¥¸•Ù…±Õ…Ñ¥½¸¹Ý¥¹‘½ÝÌè(€€€€€€€€€€€Í•ÍÍ¥½¸¹…‘ (€€€€€€€€€€€€€€€‘•Õ¥‘•‘]¥¹‘½ÝI•½É (€€€€€€€€€€€€€€€€€€€¥õÕÕ¥Ð ¤°(€€€€€€€€€€€€€€€€€€€…¹‘¥‘…Ñ•}•Ù…±Õ…Ñ¥½¹}¥õ…¹‘¥‘…Ñ•}¥°(€€€€€€€€€€€€€€€€€€€Ý¥¹‘½Ý}½É‘¥¹…°õÝ¥¹‘½Ü¹Ý¥¹‘½Ý}½É‘¥¹…°°(€€€€€€€€€€€€€€€€€€€…¡•}­•äõÝ¥¹‘½Ü¹…¡•}­•ä½È9½¹”°(€€€€€€€€€€€€€€€€€€€Ù½±…Ñ¥±¥Ñå}Ñ¡É•Í¡½±õÝ¥¹‘½Ü¹Ù½±…Ñ¥±¥Ñå}Ñ¡É•Í¡½±°(€€€€€€€€€€€€€€€€€€€ÑÉ…¥¹¥¹}µ•ÑÉ¥Ìõ}µ•ÑÉ¥Œ¡Ý¥¹‘½Ü¹ÑÉ…¥¹¥¹œ¤°(€€€€€€€€€€€€€€€€€€€Ù…±¥‘…Ñ¥½¹}µ•ÑÉ¥Ìõ}µ•ÑÉ¥Œ¡Ý¥¹‘½Ü¹Ù…±¥‘…Ñ¥½¸¤°(€€€€€€€€€€€€€€€€€€€Ñ•ÍÑ}µ•ÑÉ¥Ìõ}µ•ÑÉ¥Œ¡Ý¥¹‘½Ü¹Ñ•ÍÐ¤¥˜Ý¥¹‘½Ü¹Ñ•ÍÐ•±Í”9½¹”°(€€€€€€€€€€€€€€€€€€€Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•õÝ¥¹‘½Ü¹Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•°(€€€€€€€€€€€€€€€€€€€Ñ•ÍÑ}½¹™¥Éµ•õÝ¥¹‘½Ü¹Ñ•ÍÑ}½¹™¥Éµ•°(€€€€€€€€€€€€€€€€€€€É•©•Ñ¥½¹}É•…Í½¹Ìõm¥Ñ•´¹Ù…±Õ”™½È¥Ñ•´¥¸Ý¥¹‘½Ü¹É•©•Ñ¥½¹}É•…Í½¹Ít°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤(€€€ÑÉäè(€€€€€€€…Ý…¥ÐÍ•ÍÍ¥½¸¹½µµ¥Ð ¤(€€€•á•ÁÐ%¹Ñ•É¥ÑåÉÉ½Èè(€€€€€€€…Ý…¥ÐÍ•ÍÍ¥½¸¹É½±±‰…¬ ¤(€€€€€€€É•ÕÍ•€ô…Ý…¥Ð™¥¹‘}É•ÕÍ…‰±•}•‘•}Õ¥‘•‘}ÉÕ¸¡Í•ÍÍ¥½¸°•áÁ•É¥µ•¹Ñ}­•ä¤(€€€€€€€¥˜É•ÕÍ•¥Ì9½¹”è(€€€€€€€€€€€É…¥Í”(€€€€€€€É•ÑÕÉ¸É•ÕÍ•(€€€•á•ÁÐá•ÁÑ¥½¸è(€€€€€€€…Ý…¥ÐÍ•ÍÍ¥½¸¹É½±±‰…¬ ¤(€€€€€€€É…¥Í”(€€€É•ÑÕÉ¸‘•Õ¥‘•‘á•ÕÑ¥½¸ (€€€€€€€ÉÕ¹}¥°(€€€€€€€•áÁ•É¥µ•¹Ñ}­•ä°(€€€€€€€…±Í”°(€€€€€€€É•ÍÕ±Ð°(€€€€€€€€À°(€€€€€€€É•ÍÕ±Ð¹•Ù…±Õ…Ñ•‘}½Õ¹Ð°(€€€€€€€€À°(€€€€€€€ÁÉ•‘¥Ñ¥Ù•}•‘•}ÉÕ¹}¥°(€€€€¤(()…Íå¹Œ‘•˜}±½…‘}É•ÍÕ±Ð (€€€Í•ÍÍ¥½¸èÍå¹M•ÍÍ¥½¸°ÉÕ¸è‘•Õ¥‘•‘IÕ¹I•½É(¤€´ø‘•Õ¥‘•‘Ù…±Õ…Ñ¥½¹I•ÍÕ±Ðè(€€€É•½É‘Ì€ô€ (€€€€€€€…Ý…¥ÐÍ•ÍÍ¥½¸¹Í…±…ÉÌ (€€€€€€€€€€€Í•±•Ð¡‘•Õ¥‘•‘…¹‘¥‘…Ñ•I•½É¤(€€€€€€€€€€€€¹Ý¡•É”¡‘•Õ¥‘•‘…¹‘¥‘…Ñ•I•½É¹ÉÕ¹}¥€ôôÉÕ¸¹¥¤(€€€€€€€€€€€€¹½É‘•É}‰ä¡‘•Õ¥‘•‘…¹‘¥‘…Ñ•I•½É¹…¹‘¥‘…Ñ•}™¥¹•ÉÁÉ¥¹Ð¤(€€€€€€€€¤(€€€€¤¹…±° ¤(€€€ÍÑ…•}É•½É‘Ì€ô€ (€€€€€€€…Ý…¥ÐÍ•ÍÍ¥½¸¹Í…±…ÉÌ (€€€€€€€€€€€Í•±•Ð¡‘•Õ¥‘•‘MÑ…•Ù¥‘•¹•I•½É¤(€€€€€€€€€€€€¹Ý¡•É”¡‘•Õ¥‘•‘MÑ…•Ù¥‘•¹•I•½É¹ÉÕ¹}¥€ôôÉÕ¸¹¥¤(€€€€€€€€€€€€¹½É‘•É}‰ä¡‘•Õ¥‘•‘MÑ…•Ù¥‘•¹•I•½É¹…¡•}­•ä¤(€€€€€€€€¤(€€€€¤¹…±° ¤(€€€…¹‘¥‘…Ñ•}¥‘Ì€ôÑÕÁ±”¡É•½É¹¥™½ÈÉ•½É¥¸É•½É‘Ì¤(€€€Ý¥¹‘½Ý}É•½É‘Ì€ô€ (€€€€€€€€ (€€€€€€€€€€€…Ý…¥ÐÍ•ÍÍ¥½¸¹Í…±…ÉÌ (€€€€€€€€€€€€€€€Í•±•Ð¡‘•Õ¥‘•‘]¥¹‘½ÝI•½É¤(€€€€€€€€€€€€€€€€¹Ý¡•É” (€€€€€€€€€€€€€€€€€€€‘•Õ¥‘•‘]¥¹‘½ÝI•½É¹…¹‘¥‘…Ñ•}•Ù…±Õ…Ñ¥½¹}¥¹¥¹|¡…¹‘¥‘…Ñ•}¥‘Ì¤(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€€¹½É‘•É}‰ä (€€€€€€€€€€€€€€€€€€€‘•Õ¥‘•‘]¥¹‘½ÝI•½É¹…¹‘¥‘…Ñ•}•Ù…±Õ…Ñ¥½¹}¥°(€€€€€€€€€€€€€€€€€€€‘•Õ¥‘•‘]¥¹‘½ÝI•½É¹Ý¥¹‘½Ý}½É‘¥¹…°°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤(€€€€€€€€¤¹…±° ¤(€€€€€€€¥˜…¹‘¥‘…Ñ•}¥‘Ì(€€€€€€€•±Í”mt(€€€€¤(€€€Ý¥¹‘½ÝÍ}‰å}…¹‘¥‘…Ñ”è‘¥ÑmUU%°±¥ÍÑm‘•Õ¥‘•‘]¥¹‘½ÝI•½É‘ut€ôíô(€€€™½ÈÝ¥¹‘½Ý}É•½É¥¸Ý¥¹‘½Ý}É•½É‘Ìè(€€€€€€€Ý¥¹‘½ÝÍ}‰å}…¹‘¥‘…Ñ”¹Í•Ñ‘•™…Õ±Ð (€€€€€€€€€€€Ý¥¹‘½Ý}É•½É¹…¹‘¥‘…Ñ•}•Ù…±Õ…Ñ¥½¹}¥°mt(€€€€€€€€¤¹…ÁÁ•¹¡Ý¥¹‘½Ý}É•½É¤(€€€•Ù…±Õ…Ñ¥½¹Ì€ômt(€€€™½ÈÉ•½É¥¸É•½É‘Ìè(€€€€€€€Ý¥¹‘½ÝÌ€ôÝ¥¹‘½ÝÍ}‰å}…¹‘¥‘…Ñ”¹•Ð¡É•½É¹¥°mt¤(€€€€€€€…¹‘¥‘…Ñ”€ô}…¹‘¥‘…Ñ”¡É•½É¹…¹‘¥‘…Ñ”¤(€€€€€€€•Ù…±Õ…Ñ¥½¹Ì¹…ÁÁ•¹ (€€€€€€€€€€€‘•Õ¥‘•‘…¹‘¥‘…Ñ•Ù…±Õ…Ñ¥½¸ (€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”°(€€€€€€€€€€€€€€€}É•…‘}µ•ÑÉ¥Œ¡É•½É¹ÑÉ…¥¹¥¹}µ•ÑÉ¥Ì¤°(€€€€€€€€€€€€€€€}É•…‘}µ•ÑÉ¥Œ¡É•½É¹Ù…±¥‘…Ñ¥½¹}µ•ÑÉ¥Ì¤°(€€€€€€€€€€€€€€€}É•…‘}µ•ÑÉ¥Œ¡É•½É¹Ñ•ÍÑ}µ•ÑÉ¥Ì¤¥˜É•½É¹Ñ•ÍÑ}µ•ÑÉ¥Ì•±Í”9½¹”°(€€€€€€€€€€€€€€€ÑÕÁ±” (€€€€€€€€€€€€€€€€€€€‘•Õ¥‘•‘]¥¹‘½ÝÙ…±Õ…Ñ¥½¸ (€€€€€€€€€€€€€€€€€€€€€€€¥Ñ•´¹Ý¥¹‘½Ý}½É‘¥¹…°°(€€€€€€€€€€€€€€€€€€€€€€€¥Ñ•´¹Ù½±…Ñ¥±¥Ñå}Ñ¡É•Í¡½±°(€€€€€€€€€€€€€€€€€€€€€€€}É•…‘}µ•ÑÉ¥Œ¡¥Ñ•´¹ÑÉ…¥¹¥¹}µ•ÑÉ¥Ì¤°(€€€€€€€€€€€€€€€€€€€€€€€}É•…‘}µ•ÑÉ¥Œ¡¥Ñ•´¹Ù…±¥‘…Ñ¥½¹}µ•ÑÉ¥Ì¤°(€€€€€€€€€€€€€€€€€€€€€€€}É•…‘}µ•ÑÉ¥Œ¡¥Ñ•´¹Ñ•ÍÑ}µ•ÑÉ¥Ì¤¥˜¥Ñ•´¹Ñ•ÍÑ}µ•ÑÉ¥Ì•±Í”9½¹”°(€€€€€€€€€€€€€€€€€€€€€€€¥Ñ•´¹Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•°(€€€€€€€€€€€€€€€€€€€€€€€¥Ñ•´¹Ñ•ÍÑ}½¹™¥Éµ•°(€€€€€€€€€€€€€€€€€€€€€€€ÑÕÁ±” (€€€€€€€€€€€€€€€€€€€€€€€€€€€‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸¡Ù…±Õ”¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€™½ÈÙ…±Õ”¥¸¥Ñ•´¹É•©•Ñ¥½¹}É•…Í½¹Ì(€€€€€€€€€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€€€€€€€€€¥Ñ•´¹…¡•}­•ä½È€ˆˆ°(€€€€€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€€€€€™½È¥Ñ•´¥¸Ý¥¹‘½ÝÌ(€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€É•½É¹Ù…±¥‘}Ý¥¹‘½Ý}½Õ¹Ð°(€€€€€€€€€€€€€€€É•½É¹½¹™¥Éµ•‘}Ý¥¹‘½Ý}½Õ¹Ð°(€€€€€€€€€€€€€€€É•½É¹É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¹}Ý¥¹‘½Ý}½Õ¹Ð°(€€€€€€€€€€€€€€€É•½É¹É•©•Ñ•‘}Ñ•ÍÑ}Ý¥¹‘½Ý}½Õ¹Ð°(€€€€€€€€€€€€€€€É•½É¹Õ¹½¹‘¥Ñ¥½¹…±}‰•¹¡µ…É¬°(€€€€€€€€€€€€€€€‘•Õ¥‘•‘…¹‘¥‘…Ñ•MÑ…ÑÕÌ¡É•½É¹ÍÑ…ÑÕÌ¤°(€€€€€€€€€€€€€€€É•½É¹•áÁ±…¹…Ñ¥½¸°(€€€€€€€€€€€€€€€ÑÕÁ±” (€€€€€€€€€€€€€€€€€€€‘•Õ¥‘•‘I•©•Ñ¥½¹I•…Í½¸¡Ù…±Õ”¤(€€€€€€€€€€€€€€€€€€€™½ÈÙ…±Õ”¥¸É•½É¹É•©•Ñ¥½¹}É•…Í½¹Ì(€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€}É•…‘}É…¹­¥¹œ¡É•½É¹…¹‘¥‘…Ñ”¹•Ð ‰É…¹­¥¹œˆ¤¤°(€€€€€€€€€€€€¤(€€€€€€€€¤(€€€É•ÑÕÉ¸‘•Õ¥‘•‘Ù…±Õ…Ñ¥½¹I•ÍÕ±Ð (€€€€€€€‘…Ñ…Í•Ñ}™¥¹•ÉÁÉ¥¹ÐõÉÕ¸¹‘…Ñ…Í•Ñ}™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€•¹•É…Ñ•‘}½Õ¹ÐõÉÕ¸¹•¹•É…Ñ•‘}½Õ¹Ð°(€€€€€€€•Ù…±Õ…Ñ•‘}½Õ¹ÐõÉÕ¸¹•Ù…±Õ…Ñ•‘}½Õ¹Ð°(€€€€€€€µ…á¥µÕµ}…¹‘¥‘…Ñ•ÌõÉÕ¸¹µ…á¥µÕµ}…¹‘¥‘…Ñ•Ì°(€€€€€€€Ý¥¹‘½ÝÍ}…Ù…¥±…‰±”õÉÕ¸¹Ý¥¹‘½ÝÍ}…Ù…¥±…‰±”°(€€€€€€€•Ù…±Õ…Ñ¥½¹ÌõÑÕÁ±”¡•Ù…±Õ…Ñ¥½¹Ì¤°(€€€€€€€½ÕÑ½µ”õI•Í•…É¡=ÕÑ½µ”¡ÉÕ¸¹É•Í•…É¡}½ÕÑ½µ”¤(€€€€€€€¥˜ÉÕ¸¹É•Í•…É¡}½ÕÑ½µ”(€€€€€€€•±Í”I•Í•…É¡=ÕÑ½µ”¹9=}AI%Q%Y}°(€€€€€€€½ÕÑ½µ•}•áÁ±…¹…Ñ¥½¸õÉÕ¸¹½ÕÑ½µ•}•áÁ±…¹…Ñ¥½¸(€€€€€€€½È€‰1•…äÉ•Í•…É ÉÕ¸Ý¥Ñ¡½ÕÐ…¸½ÕÑ½µ”•áÁ±…¹…Ñ¥½¸¸ˆ°(€€€€€€€™Õ¹¹•°õí­•äè¥¹Ð¡ÍÑÈ¡Ù…±Õ”¤¤™½È­•ä°Ù…±Õ”¥¸€¡ÉÕ¸¹™Õ¹¹•°½Èíô¤¹¥Ñ•µÌ ¥ô°(€€€€€€€Ñ¥µ¥¹Ìõì(€€€€€€€€€€€­•äè•¥µ…°¡ÍÑÈ¡Ù…±Õ”¤¤™½È­•ä°Ù…±Õ”¥¸€¡ÉÕ¸¹Ñ¥µ¥¹Ì½Èíô¤¹¥Ñ•µÌ ¤(€€€€€€€ô°(€€€€€€€ÅÕ…±¥™¥…Ñ¥½¹}½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸õÉÕ¸¹ÅÕ…±¥™¥…Ñ¥½¹}½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸°(€€€€€€€ÍÑ…•}•Ù¥‘•¹”õÑÕÁ±” (€€€€€€€€€€€‘•Õ¥‘•‘MÑ…•Ù¥‘•¹” (€€€€€€€€€€€€€€€¥Ñ•´¹…¡•}­•ä°(€€€€€€€€€€€€€€€¥Ñ•´¹…¹‘¥‘…Ñ•}™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€€€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¡¥Ñ•´¹ÍÑ…”¤°(€€€€€€€€€€€€€€€¥Ñ•´¹Ý¥¹‘½Ý}½É‘¥¹…°°(€€€€€€€€€€€€€€€¥Ñ•´¹Í•µ•¹Ñ}™É½´°(€€€€€€€€€€€€€€€¥Ñ•´¹Í•µ•¹Ñ}Ñ¼°(€€€€€€€€€€€€€€€¥Ñ•´¹½¹Ñ•¹Ñ}™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€€€€€€€€€}É•…‘}µ•ÑÉ¥Œ¡¥Ñ•´¹µ•ÑÉ¥Ì¤°(€€€€€€€€€€€€¤(€€€€€€€€€€€™½È¥Ñ•´¥¸ÍÑ…•}É•½É‘Ì(€€€€€€€€¤°(€€€€¤(()…Íå¹Œ‘•˜}±½…‘}Ù…±¥‘}É•ÍÕ±Ð (€€€Í•ÍÍ¥½¸èÍå¹M•ÍÍ¥½¸°ÉÕ¸è‘•Õ¥‘•‘IÕ¹I•½É(¤€´ø‘•Õ¥‘•‘Ù…±Õ…Ñ¥½¹I•ÍÕ±Ðð9½¹”è(€€€¥˜ÉÕ¸¹ÅÕ…±¥™¥…Ñ¥½¹}½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸€„ô}U%}EU1%%Q%=9}=9QIQ}YIM%=8è(€€€€€€€É•ÑÕÉ¸9½¹”(€€€¥˜ÉÕ¸¹•¹•É…Ñ•‘}½Õ¹Ð€ðÉÕ¸¹•Ù…±Õ…Ñ•‘}½Õ¹Ðè(€€€€€€€É•ÑÕÉ¸9½¹”(€€€É•ÍÕ±Ð€ô…Ý…¥Ð}±½…‘}É•ÍÕ±Ð¡Í•ÍÍ¥½¸°ÉÕ¸¤(€€€¥˜±•¸¡É•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹Ì¤€„ôÉÕ¸¹•Ù…±Õ…Ñ•‘}½Õ¹Ðè(€€€€€€€É•ÑÕÉ¸9½¹”(€€€¥˜ÉÕ¸¹•Ù…±Õ…Ñ•‘}½Õ¹Ð€ôô€Àè(€€€€€€€É•ÑÕÉ¸É•ÍÕ±Ð¥˜¹½ÐÉ•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹Ì•±Í”9½¹”(€€€™½È•Ù…±Õ…Ñ¥½¸¥¸É•ÍÕ±Ð¹•Ù…±Õ…Ñ¥½¹Ìè(€€€€€€€Ý¥¹‘½ÝÌ€ô•Ù…±Õ…Ñ¥½¸¹Ý¥¹‘½ÝÌ(€€€€€€€¥˜±•¸¡Ý¥¹‘½ÝÌ¤€„ô€ (€€€€€€€€€€€•Ù…±Õ…Ñ¥½¸¹Ù…±¥‘}Ý¥¹‘½Ý}½Õ¹Ð€¬•Ù…±Õ…Ñ¥½¸¹É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¹}Ý¥¹‘½Ý}½Õ¹Ð(€€€€€€€€¤è(€€€€€€€€€€€É•ÑÕÉ¸9½¹”(€€€€€€€½É‘¥¹…±Ì€ôÑÕÁ±”¡¥Ñ•´¹Ý¥¹‘½Ý}½É‘¥¹…°™½È¥Ñ•´¥¸Ý¥¹‘½ÝÌ¤(€€€€€€€¥˜±•¸¡Í•Ð¡½É‘¥¹…±Ì¤¤€„ô±•¸¡½É‘¥¹…±Ì¤è(€€€€€€€€€€€É•ÑÕÉ¸9½¹”(€€€€€€€½¹™¥Éµ•€ôÍÕ´¡¥Ñ•´¹Ñ•ÍÑ}½¹™¥Éµ•™½È¥Ñ•´¥¸Ý¥¹‘½ÝÌ¤(€€€€€€€É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¸€ôÍÕ´¡¹½Ð¥Ñ•´¹Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•™½È¥Ñ•´¥¸Ý¥¹‘½ÝÌ¤(€€€€€€€É•©•Ñ•‘}Ñ•ÍÐ€ôÍÕ´ (€€€€€€€€€€€¥Ñ•´¹Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•…¹¹½Ð¥Ñ•´¹Ñ•ÍÑ}½¹™¥Éµ•™½È¥Ñ•´¥¸Ý¥¹‘½ÝÌ(€€€€€€€€¤(€€€€€€€¥˜€ (€€€€€€€€€€€½¹™¥Éµ•€„ô•Ù…±Õ…Ñ¥½¸¹½¹™¥Éµ•‘}Ý¥¹‘½Ý}½Õ¹Ð(€€€€€€€€€€€½ÈÉ•©•Ñ•‘}Ù…±¥‘…Ñ¥½¸€„ô•Ù…±Õ…Ñ¥½¸¹É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¹}Ý¥¹‘½Ý}½Õ¹Ð(€€€€€€€€€€€½ÈÉ•©•Ñ•‘}Ñ•ÍÐ€„ô•Ù…±Õ…Ñ¥½¸¹É•©•Ñ•‘}Ñ•ÍÑ}Ý¥¹‘½Ý}½Õ¹Ð(€€€€€€€€¤è(€€€€€€€€€€€É•ÑÕÉ¸9½¹”(€€€É•ÑÕÉ¸É•ÍÕ±Ð(()‘•˜}©Í½¸¡Ù…±Õ”è½‰©•Ð¤€´ø‘¥ÑmÍÑÈ°½‰©•Ñtè(€€€É•ÍÕ±Ð€ô©Í½¸¹±½…‘Ì¡©Í½¸¹‘ÕµÁÌ¡Ù…±Õ”°‘•™…Õ±ÐõÍÑÈ¤¤(€€€¥˜¹½Ð¥Í¥¹ÍÑ…¹”¡É•ÍÕ±Ð°‘¥Ð¤è(€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰•‘”µÕ¥‘•Ù…±Õ”µÕÍÐ‰”…¸½‰©•Ðˆ¤(€€€É•ÑÕÉ¸É•ÍÕ±Ð(()‘•˜}µ•ÑÉ¥Œ¡Ù…±Õ”è‘•Õ¥‘•‘M•µ•¹ÑÙ…±Õ…Ñ¥½¸¤€´ø‘¥ÑmÍÑÈ°½‰©•Ñtè(€€€É•ÑÕÉ¸}©Í½¸¡…Í‘¥Ð¡Ù…±Õ”¤¤(()‘•˜}…¹‘¥‘…Ñ•}Á…å±½…¡Ù…±Õ”è‘•Õ¥‘•‘…¹‘¥‘…Ñ”¤€´ø‘¥ÑmÍÑÈ°½‰©•Ñtè(€€€Á…å±½…€ô…Í‘¥Ð¡Ù…±Õ”¤(€€€Á…å±½…‘l‰¡½É¥é½¹}Í•½¹‘Ì‰t€ô¥¹Ð¡Ù…±Õ”¹¡½É¥é½¸¹Ñ½Ñ…±}Í•½¹‘Ì ¤¤(€€€Á…å±½…‘l‰‘•¥Í¥½¹}¥¹Ñ•ÉÙ…±}Í•½¹‘Ì‰t€ô¥¹Ð¡Ù…±Õ”¹‘•¥Í¥½¹}¥¹Ñ•ÉÙ…°¹Ñ½Ñ…±}Í•½¹‘Ì ¤¤(€€€Á…å±½…‘l‰…‘•¹•}Í•½¹‘Ì‰t€ô¥¹Ð¡Ù…±Õ”¹…‘•¹”¹Ñ½Ñ…±}Í•½¹‘Ì ¤¤(€€€Á…å±½…‘l‰µ¥¹¥µÕµ}¡½±‘¥¹}Í•½¹‘Ì‰t€ô¥¹Ð (€€€€€€€Ù…±Õ”¹µ¥¹¥µÕµ}¡½±‘¥¹}Á•É¥½¹Ñ½Ñ…±}Í•½¹‘Ì ¤(€€€€¤(€€€Á…å±½…‘l‰µ…á¥µÕµ}¡½±‘¥¹}Í•½¹‘Ì‰t€ô¥¹Ð (€€€€€€€Ù…±Õ”¹µ…á¥µÕµ}¡½±‘¥¹}Á•É¥½¹Ñ½Ñ…±}Í•½¹‘Ì ¤(€€€€¤(€€€Á…å±½…‘l‰½½±‘½Ý¹}Í•½¹‘Ì‰t€ô¥¹Ð¡Ù…±Õ”¹½½±‘½Ý¸¹Ñ½Ñ…±}Í•½¹‘Ì ¤¤(€€€‘•°Á…å±½…‘l‰¡½É¥é½¸‰t(€€€‘•°Á…å±½…‘l‰‘•¥Í¥½¹}¥¹Ñ•ÉÙ…°‰t(€€€‘•°Á…å±½…‘l‰…‘•¹”‰t(€€€‘•°Á…å±½…‘l‰µ¥¹¥µÕµ}¡½±‘¥¹}Á•É¥½‰t(€€€‘•°Á…å±½…‘l‰µ…á¥µÕµ}¡½±‘¥¹}Á•É¥½‰t(€€€‘•°Á…å±½…‘l‰½½±‘½Ý¸‰t(€€€É•ÑÕÉ¸}©Í½¸¡Á…å±½…¤(()‘•˜}É•…‘}µ•ÑÉ¥Œ¡Ù…±Õ”è‘¥ÑmÍÑÈ°½‰©•Ñt¤€´ø‘•Õ¥‘•‘M•µ•¹ÑÙ…±Õ…Ñ¥½¸è(€€€É•ÑÕÉ¸‘•Õ¥‘•‘M•µ•¹ÑÙ…±Õ…Ñ¥½¸ (€€€€€€€I•™¥¹•µ•¹ÑM•µ•¹Ñ9…µ”¡ÍÑÈ¡Ù…±Õ•l‰Í•µ•¹Ð‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰Ñ½Ñ…±}É•ÑÕÉ¸‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰µ…á}‘É…Ý‘½Ý¸‰t¤¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰ÑÉ…‘•}½Õ¹Ð‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰™••Í}Á…¥‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰É•ÑÕÉ¹}‘¥™™•É•¹•}™É½µ}ÁÉ½‘ÕÑ¥½¸‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰É•ÑÕÉ¹}‘¥™™•É•¹•}™É½µ}‰Õå}…¹‘}¡½±‰t¤¤°(€€€€¤(()‘•˜}…¹‘¥‘…Ñ”¡Ù…±Õ”è‘¥ÑmÍÑÈ°½‰©•Ñt¤€´ø‘•Õ¥‘•‘…¹‘¥‘…Ñ”è(€€€Í½ÕÉ•}¥‘Ì€ôÙ…±Õ”¹•Ð ‰Í½ÕÉ•}¡åÁ½Ñ¡•Í¥Í}¥‘Ìˆ°mt¤(€€€¥˜¹½Ð¥Í¥¹ÍÑ…¹”¡Í½ÕÉ•}¥‘Ì°±¥ÍÐ¤è(€€€€€€€Í½ÕÉ•}¥‘Ì€ômt(€€€É•ÑÕÉ¸‘•Õ¥‘•‘…¹‘¥‘…Ñ” (€€€€€€€ÍÑÈ¡Ù…±Õ•l‰…¹‘¥‘…Ñ•}™¥¹•ÉÁÉ¥¹Ð‰t¤°(€€€€€€€ÍÑÈ¡Ù…±Õ•l‰Í½ÕÉ•}•‘•}™¥¹•ÉÁÉ¥¹Ð‰t¤°(€€€€€€€ÍÑÈ¡Ù…±Õ•l‰Í½ÕÉ•}¡åÁ½Ñ¡•Í¥Í}¥‰t¤°(€€€€€€€ÍÑÈ¡Ù…±Õ•l‰ÁÉ•‘¥Ñ½É}¹…µ”‰t¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰ÁÉ•‘¥Ñ½É}Ù•ÉÍ¥½¸‰t¤¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰¡åÁ½Ñ¡•Í¥Í}½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸‰t¤¤°(€€€€€€€½¹‘¥Ñ¥½¸¡ÍÑÈ¡Ù…±Õ•l‰½¹‘¥Ñ¥½¸‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰±½Ý•É}‰½Õ¹‰t¤¤(€€€€€€€¥˜Ù…±Õ•l‰±½Ý•É}‰½Õ¹‰t¥Ì¹½Ð9½¹”(€€€€€€€•±Í”9½¹”°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰ÕÁÁ•É}‰½Õ¹‰t¤¤(€€€€€€€¥˜Ù…±Õ•l‰ÕÁÁ•É}‰½Õ¹‰t¥Ì¹½Ð9½¹”(€€€€€€€•±Í”9½¹”°(€€€€€€€MÕ•ÍÑ•‘Ñ¥½¸¡ÍÑÈ¡Ù…±Õ•l‰ÍÕ•ÍÑ•‘}…Ñ¥½¸‰t¤¤°(€€€€€€€Ñ¥µ•‘•±Ñ„¡Í•½¹‘Ìõ¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰¡½É¥é½¹}Í•½¹‘Ì‰t¤¤¤°(€€€€€€€Ñ¥µ•‘•±Ñ„¡Í•½¹‘Ìõ¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰‘•¥Í¥½¹}¥¹Ñ•ÉÙ…±}Í•½¹‘Ì‰t¤¤¤°(€€€€€€€¥É•Ñ¥½¹5…ÁÁ¥¹œ¡ÍÑÈ¡Ù…±Õ•l‰‘¥É•Ñ¥½¹}µ…ÁÁ¥¹œ‰t¤¤°(€€€€€€€ÍÑÈ¡Ù…±Õ•l‰Í½É•}µ½‘•±}¹…µ”‰t¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰Í½É•}µ½‘•±}Ù•ÉÍ¥½¸‰t¤¤°(€€€€€€€ÍÑÈ¡Ù…±Õ•l‰ÍÑÉ…Ñ•å}¹…µ”‰t¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰ÍÑÉ…Ñ•å}Ù•ÉÍ¥½¸‰t¤¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰ÍÑÉ…Ñ•å}½¹™¥ÕÉ…Ñ¥½¹}Ù•ÉÍ¥½¸‰t¤¤°(€€€€€€€ÍÑÈ¡Ù…±Õ•l‰…½Õ¹Ñ}ÕÉÉ•¹ä‰t¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰™••}É…Ñ”‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰Í±¥ÁÁ…•}É…Ñ”‰t¤¤°(€€€€€€€…¹‘¥‘…Ñ•…µ¥±ä¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰…¹‘¥‘…Ñ•}™…µ¥±äˆ°€‰•á¥Ñ}½É}…Ù½¥‘}½Ù•É±…äˆ¤¤¤°(€€€€€€€¹ÑÉåIÕ±”¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰•¹ÑÉå}ÉÕ±”ˆ°€‰ÁÉ½‘ÕÑ¥½¹}‰…Í•±¥¹”ˆ¤¤¤°(€€€€€€€á¥ÑIÕ±”¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰•á¥Ñ}ÉÕ±”ˆ°€‰‘•™•¹Í¥Ù•}½Ù•É±…äˆ¤¤¤°(€€€€€€€Ñ¥µ•‘•±Ñ„ (€€€€€€€€€€€Í•½¹‘Ìõ¥¹Ð (€€€€€€€€€€€€€€€ÍÑÈ¡Ù…±Õ”¹•Ð ‰…‘•¹•}Í•½¹‘Ìˆ°Ù…±Õ•l‰‘•¥Í¥½¹}¥¹Ñ•ÉÙ…±}Í•½¹‘Ì‰t¤¤(€€€€€€€€€€€€¤(€€€€€€€€¤°(€€€€€€€Ñ¥µ•‘•±Ñ„¡Í•½¹‘Ìõ¥¹Ð¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰µ¥¹¥µÕµ}¡½±‘¥¹}Í•½¹‘Ìˆ°€À¤¤¤¤°(€€€€€€€Ñ¥µ•‘•±Ñ„¡Í•½¹‘Ìõ¥¹Ð¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰µ…á¥µÕµ}¡½±‘¥¹}Í•½¹‘Ìˆ°€À¤¤¤¤°(€€€€€€€Ñ¥µ•‘•±Ñ„¡Í•½¹‘Ìõ¥¹Ð¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰½½±‘½Ý¹}Í•½¹‘Ìˆ°€À¤¤¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰Ñ…É•Ñ}…±±½…Ñ¥½¹}Á•É•¹Ñ…”ˆ°€ˆÄÔˆ¤¤¤°(€€€€€€€ÍÑÈ¡Ù…±Õ•l‰•á¥Ñ}ÁÉ•‘¥Ñ½É}¹…µ”‰t¤(€€€€€€€¥˜Ù…±Õ”¹•Ð ‰•á¥Ñ}ÁÉ•‘¥Ñ½É}¹…µ”ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€•±Í”9½¹”°(€€€€€€€½¹‘¥Ñ¥½¸¡ÍÑÈ¡Ù…±Õ•l‰•á¥Ñ}½¹‘¥Ñ¥½¸‰t¤¤(€€€€€€€¥˜Ù…±Õ”¹•Ð ‰•á¥Ñ}½¹‘¥Ñ¥½¸ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€•±Í”9½¹”°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰•á¥Ñ}±½Ý•É}‰½Õ¹‰t¤¤(€€€€€€€¥˜Ù…±Õ”¹•Ð ‰•á¥Ñ}±½Ý•É}‰½Õ¹ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€•±Í”9½¹”°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰•á¥Ñ}ÕÁÁ•É}‰½Õ¹‰t¤¤(€€€€€€€¥˜Ù…±Õ”¹•Ð ‰•á¥Ñ}ÕÁÁ•É}‰½Õ¹ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€•±Í”9½¹”°(€€€€€€€ÑÕÁ±”¡ÍÑÈ¡¥Ñ•´¤™½È¥Ñ•´¥¸Í½ÕÉ•}¥‘Ì¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰•¹•É…Ñ¥½¹}½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸ˆ°€Ä¤¤¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ”¹•Ð ‰ÅÕ…±¥™¥…Ñ¥½¹}½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸ˆ°€Ä¤¤¤°(€€€€€€€½¹Ñ•áÑ}ÁÉ•‘¥Ñ½É}¹…µ”ô (€€€€€€€€€€€ÍÑÈ¡Ù…±Õ•l‰½¹Ñ•áÑ}ÁÉ•‘¥Ñ½É}¹…µ”‰t¤(€€€€€€€€€€€¥˜Ù…±Õ”¹•Ð ‰½¹Ñ•áÑ}ÁÉ•‘¥Ñ½É}¹…µ”ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€€€€€•±Í”9½¹”(€€€€€€€€¤°(€€€€€€€½¹Ñ•áÑ}ÁÉ•‘¥Ñ½É}Ù•ÉÍ¥½¸ô (€€€€€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰½¹Ñ•áÑ}ÁÉ•‘¥Ñ½É}Ù•ÉÍ¥½¸‰t¤¤(€€€€€€€€€€€¥˜Ù…±Õ”¹•Ð ‰½¹Ñ•áÑ}ÁÉ•‘¥Ñ½É}Ù•ÉÍ¥½¸ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€€€€€•±Í”9½¹”(€€€€€€€€¤°(€€€€€€€½¹Ñ•áÑ}É•¥µ”ô (€€€€€€€€€€€ÍÑÈ¡Ù…±Õ•l‰½¹Ñ•áÑ}É•¥µ”‰t¤(€€€€€€€€€€€¥˜Ù…±Õ”¹•Ð ‰½¹Ñ•áÑ}É•¥µ”ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€€€€€•±Í”9½¹”(€€€€€€€€¤°(€€€€€€€½¹Ñ•áÑ}±½Ý•É}‰½Õ¹ô (€€€€€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰½¹Ñ•áÑ}±½Ý•É}‰½Õ¹‰t¤¤(€€€€€€€€€€€¥˜Ù…±Õ”¹•Ð ‰½¹Ñ•áÑ}±½Ý•É}‰½Õ¹ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€€€€€•±Í”9½¹”(€€€€€€€€¤°(€€€€€€€½¹Ñ•áÑ}ÕÁÁ•É}‰½Õ¹ô (€€€€€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰½¹Ñ•áÑ}ÕÁÁ•É}‰½Õ¹‰t¤¤(€€€€€€€€€€€¥˜Ù…±Õ”¹•Ð ‰½¹Ñ•áÑ}ÕÁÁ•É}‰½Õ¹ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€€€€€•±Í”9½¹”(€€€€€€€€¤°(€€€€¤(()‘•˜}É•…‘}É…¹­¥¹œ¡Ù…±Õ”è½‰©•Ð¤€´ø‘•Õ¥‘•‘I…¹­¥¹œð9½¹”è(€€€¥˜¹½Ð¥Í¥¹ÍÑ…¹”¡Ù…±Õ”°‘¥Ð¤è(€€€€€€€É•ÑÕÉ¸9½¹”(€€€É•ÑÕÉ¸‘•Õ¥‘•‘I…¹­¥¹œ (€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰µ•‘¥…¹}Ù…±¥‘…Ñ¥½¹}É•ÑÕÉ¸‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰Ý½ÉÍÑ}Ù…±¥‘…Ñ¥½¹}É•ÑÕÉ¸‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰µ…á¥µÕµ}‘É…Ý‘½Ý¸‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰É•ÑÕÉ¹}½Ù•É}‘É…Ý‘½Ý¸‰t¤¤(€€€€€€€¥˜Ù…±Õ”¹•Ð ‰É•ÑÕÉ¹}½Ù•É}‘É…Ý‘½Ý¸ˆ¤¥Ì¹½Ð9½¹”(€€€€€€€•±Í”9½¹”°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰ÑÉ…‘•}½Õ¹Ð‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰Ñ½Ñ…±}™••Ì‰t¤¤°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰½ÍÑ}•™™¥¥•¹ä‰t¤¤(€€€€€€€¥˜Ù…±Õ”¹•Ð ‰½ÍÑ}•™™¥¥•¹äˆ¤¥Ì¹½Ð9½¹”(€€€€€€€•±Í”9½¹”°(€€€€€€€•¥µ…°¡ÍÑÈ¡Ù…±Õ•l‰Á½Í¥Ñ¥Ù•}Ý¥¹‘½Ý}É…Ñ¥¼‰t¤¤°(€€€€€€€¥¹Ð¡ÍÑÈ¡Ù…±Õ•l‰Á½Í¥Ñ¥Ù•}Ý¥¹‘½Ý}½Õ¹Ð‰t¤¤°(€€€€€€€ÍÑÈ¡Ù…±Õ•l‰…¹‘¥‘…Ñ•}™¥¹•ÉÁÉ¥¹Ð‰t¤°(€€€€¤
+            item.segment_to,
+            item.content_fingerprint,
+            _read_metric(item.metrics),
+        )
+    return reusable
+
+
+def _reused_execution(
+    run: EdgeGuidedRunRecord, result: EdgeGuidedEvaluationResult
+) -> EdgeGuidedExecution:
+    return EdgeGuidedExecution(
+        run.id,
+        run.experiment_key,
+        True,
+        result,
+        result.evaluated_count,
+        0,
+        int(result.funnel.get("edges_evaluated", 0))
+        + result.evaluated_count * run.windows_available,
+        run.predictive_edge_run_id,
+    )
+
+
+async def persist_edge_guided_result(
+    *,
+    session: AsyncSession,
+    experiment_key: str,
+    predictive_edge_run_id: UUID,
+    instrument: Instrument,
+    range_start: datetime,
+    range_end: datetime,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    decision_interval: timedelta,
+    started_at: datetime,
+    result: EdgeGuidedEvaluationResult,
+    reuse_key: str | None = None,
+    dataset_revision: dict[str, object] | None = None,
+) -> EdgeGuidedExecution:
+    existing = await session.scalar(
+        select(EdgeGuidedRunRecord)
+        .where(EdgeGuidedRunRecord.experiment_key == experiment_key)
+        .with_for_update()
+    )
+    if existing is not None:
+        valid_result = (
+            await _load_valid_result(session, existing)
+            if existing.status == "completed"
+            else None
+        )
+        if valid_result is not None:
+            return _reused_execution(existing, valid_result)
+        await session.execute(
+            delete(EdgeGuidedRunRecord).where(EdgeGuidedRunRecord.id == existing.id)
+        )
+        try:
+            await session.flush()
+        except Exception:
+            await session.rollback()
+            raise
+    run_id = uuid4()
+    session.add(
+        EdgeGuidedRunRecord(
+            id=run_id,
+            experiment_key=experiment_key,
+            reuse_key=reuse_key,
+            dataset_revision=_json(dataset_revision)
+            if dataset_revision is not None
+            else None,
+            predictive_edge_run_id=predictive_edge_run_id,
+            status="completed",
+            dataset_fingerprint=result.dataset_fingerprint,
+            asset=instrument.asset.value,
+            provider=instrument.provider.value,
+            market_type=instrument.market_type.value,
+            interval=instrument.interval.value,
+            range_start=range_start,
+            range_end=range_end,
+            initial_cash=initial_cash,
+            account_currency=simulation.account_currency,
+            fee_rate=simulation.fee_rate,
+            slippage_rate=simulation.slippage_rate,
+            decision_interval_seconds=int(decision_interval.total_seconds()),
+            maximum_candidates=result.maximum_candidates,
+            algorithm_version=EDGE_GUIDED_PERSISTENCE_CONTRACT_VERSION,
+            qualification_contract_version=result.qualification_contract_version,
+            generated_count=result.generated_count,
+            evaluated_count=result.evaluated_count,
+            windows_available=result.windows_available,
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            research_outcome=result.outcome.value,
+            outcome_explanation=result.outcome_explanation,
+            funnel=_json(result.funnel),
+            timings=_json(result.timings),
+        )
+    )
+    # Explicit flushes preserve FK insertion order without introducing ORM
+    # relationships solely for persistence orchestration.
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        reused = await find_reusable_edge_guided_run(session, experiment_key)
+        if reused is None:
+            raise
+        return reused
+    except Exception:
+        await session.rollback()
+        raise
+    for evidence in result.stage_evidence:
+        session.add(
+            EdgeGuidedStageEvidenceRecord(
+                id=uuid4(),
+                run_id=run_id,
+                cache_key=evidence.cache_key,
+                candidate_fingerprint=evidence.candidate_fingerprint,
+                stage=evidence.stage.value,
+                window_ordinal=evidence.window_ordinal,
+                segment_from=evidence.segment_from,
+                segment_to=evidence.segment_to,
+                content_fingerprint=evidence.content_fingerprint,
+                metrics=_metric(evidence.metrics),
+            )
+        )
+    for evaluation in result.evaluations:
+        candidate_id = uuid4()
+        session.add(
+            EdgeGuidedCandidateRecord(
+                id=candidate_id,
+                run_id=run_id,
+                candidate_fingerprint=evaluation.candidate.candidate_fingerprint,
+                source_hypothesis_id=evaluation.candidate.source_hypothesis_id,
+                predictor_name=evaluation.candidate.predictor_name,
+                predictor_version=evaluation.candidate.predictor_version,
+                condition=evaluation.candidate.condition.value,
+                bin_lower_bound=evaluation.candidate.lower_bound,
+                bin_upper_bound=evaluation.candidate.upper_bound,
+                suggested_action=evaluation.candidate.suggested_action.value,
+                horizon_seconds=int(evaluation.candidate.horizon.total_seconds()),
+                direction_mapping=evaluation.candidate.direction_mapping.value,
+                score_model_name=evaluation.candidate.score_model_name,
+                score_model_version=evaluation.candidate.score_model_version,
+                strategy_name=evaluation.candidate.strategy_name,
+                strategy_version=evaluation.candidate.strategy_version,
+                strategy_configuration_version=(
+                    evaluation.candidate.strategy_configuration_version
+                ),
+                candidate={
+                    **_candidate_payload(evaluation.candidate),
+                    "ranking": _json(asdict(evaluation.ranking))
+                    if evaluation.ranking is not None
+                    else None,
+                },
+                status=evaluation.status.value,
+                explanation=evaluation.explanation,
+                rejection_reasons=[item.value for item in evaluation.rejection_reasons],
+                valid_window_count=evaluation.valid_window_count,
+                confirmed_window_count=evaluation.confirmed_window_count,
+                rejected_validation_window_count=evaluation.rejected_validation_window_count,
+                rejected_test_window_count=evaluation.rejected_test_window_count,
+                training_metrics=_metric(evaluation.training),
+                validation_metrics=_metric(evaluation.validation),
+                test_metrics=(
+                    _metric(evaluation.test) if evaluation.test is not None else None
+                ),
+                unconditional_benchmark=evaluation.unconditional_benchmark,
+            )
+        )
+        try:
+            await session.flush()
+        except Exception:
+            await session.rollback()
+            raise
+        for window in evaluation.windows:
+            session.add(
+                EdgeGuidedWindowRecord(
+                    id=uuid4(),
+                    candidate_evaluation_id=candidate_id,
+                    window_ordinal=window.window_ordinal,
+                    cache_key=window.cache_key or None,
+                    volatility_threshold=window.volatility_threshold,
+                    training_metrics=_metric(window.training),
+                    validation_metrics=_metric(window.validation),
+                    test_metrics=_metric(window.test) if window.test else None,
+                    validation_passed=window.validation_passed,
+                    test_confirmed=window.test_confirmed,
+                    rejection_reasons=[item.value for item in window.rejection_reasons],
+                )
+            )
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        reused = await find_reusable_edge_guided_run(session, experiment_key)
+        if reused is None:
+            raise
+        return reused
+    except Exception:
+        await session.rollback()
+        raise
+    return EdgeGuidedExecution(
+        run_id,
+        experiment_key,
+        False,
+        result,
+        0,
+        result.evaluated_count,
+        0,
+        predictive_edge_run_id,
+    )
+
+
+async def _load_result(
+    session: AsyncSession, run: EdgeGuidedRunRecord
+) -> EdgeGuidedEvaluationResult:
+    records = (
+        await session.scalars(
+            select(EdgeGuidedCandidateRecord)
+            .where(EdgeGuidedCandidateRecord.run_id == run.id)
+            .order_by(EdgeGuidedCandidateRecord.candidate_fingerprint)
+        )
+    ).all()
+    stage_records = (
+        await session.scalars(
+            select(EdgeGuidedStageEvidenceRecord)
+            .where(EdgeGuidedStageEvidenceRecord.run_id == run.id)
+            .order_by(EdgeGuidedStageEvidenceRecord.cache_key)
+        )
+    ).all()
+    candidate_ids = tuple(record.id for record in records)
+    window_records = (
+        (
+            await session.scalars(
+                select(EdgeGuidedWindowRecord)
+                .where(
+                    EdgeGuidedWindowRecord.candidate_evaluation_id.in_(candidate_ids)
+                )
+                .order_by(
+                    EdgeGuidedWindowRecord.candidate_evaluation_id,
+                    EdgeGuidedWindowRecord.window_ordinal,
+                )
+            )
+        ).all()
+        if candidate_ids
+        else []
+    )
+    windows_by_candidate: dict[UUID, list[EdgeGuidedWindowRecord]] = {}
+    for window_record in window_records:
+        windows_by_candidate.setdefault(
+            window_record.candidate_evaluation_id, []
+        ).append(window_record)
+    evaluations = []
+    for record in records:
+        windows = windows_by_candidate.get(record.id, [])
+        candidate = _candidate(record.candidate)
+        evaluations.append(
+            EdgeGuidedCandidateEvaluation(
+                candidate,
+                _read_metric(record.training_metrics),
+                _read_metric(record.validation_metrics),
+                _read_metric(record.test_metrics) if record.test_metrics else None,
+                tuple(
+                    EdgeGuidedWindowEvaluation(
+                        item.window_ordinal,
+                        item.volatility_threshold,
+                        _read_metric(item.training_metrics),
+                        _read_metric(item.validation_metrics),
+                        _read_metric(item.test_metrics) if item.test_metrics else None,
+                        item.validation_passed,
+                        item.test_confirmed,
+                        tuple(
+                            EdgeGuidedRejectionReason(value)
+                            for value in item.rejection_reasons
+                        ),
+                        item.cache_key or "",
+                    )
+                    for item in windows
+                ),
+                record.valid_window_count,
+                record.confirmed_window_count,
+                record.rejected_validation_window_count,
+                record.rejected_test_window_count,
+                record.unconditional_benchmark,
+                EdgeGuidedCandidateStatus(record.status),
+                record.explanation,
+                tuple(
+                    EdgeGuidedRejectionReason(value)
+                    for value in record.rejection_reasons
+                ),
+                _read_ranking(record.candidate.get("ranking")),
+            )
+        )
+    return EdgeGuidedEvaluationResult(
+        dataset_fingerprint=run.dataset_fingerprint,
+        generated_count=run.generated_count,
+        evaluated_count=run.evaluated_count,
+        maximum_candidates=run.maximum_candidates,
+        windows_available=run.windows_available,
+        evaluations=tuple(evaluations),
+        outcome=ResearchOutcome(run.research_outcome)
+        if run.research_outcome
+        else ResearchOutcome.NO_PREDICTIVE_EDGE,
+        outcome_explanation=run.outcome_explanation
+        or "Legacy research run without an outcome explanation.",
+        funnel={key: int(str(value)) for key, value in (run.funnel or {}).items()},
+        timings={
+            key: Decimal(str(value)) for key, value in (run.timings or {}).items()
+        },
+        qualification_contract_version=run.qualification_contract_version,
+        stage_evidence=tuple(
+            EdgeGuidedStageEvidence(
+                item.cache_key,
+                item.candidate_fingerprint,
+                RefinementSegmentName(item.stage),
+                item.window_ordinal,
+                item.segment_from,
+                item.segment_to,
+                item.content_fingerprint,
+                _read_metric(item.metrics),
+            )
+            for item in stage_records
+        ),
+    )
+
+
+async def _load_valid_result(
+    session: AsyncSession, run: EdgeGuidedRunRecord
+) -> EdgeGuidedEvaluationResult | None:
+    if run.qualification_contract_version != EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION:
+        return None
+    if run.generated_count < run.evaluated_count:
+        return None
+    result = await _load_result(session, run)
+    if len(result.evaluations) != run.evaluated_count:
+        return None
+    if run.evaluated_count == 0:
+        return result if not result.evaluations else None
+    for evaluation in result.evaluations:
+        windows = evaluation.windows
+        if len(windows) != (
+            evaluation.valid_window_count + evaluation.rejected_validation_window_count
+        ):
+            return None
+        ordinals = tuple(item.window_ordinal for item in windows)
+        if len(set(ordinals)) != len(ordinals):
+            return None
+        confirmed = sum(item.test_confirmed for item in windows)
+        rejected_validation = sum(not item.validation_passed for item in windows)
+        rejected_test = sum(
+            item.validation_passed and not item.test_confirmed for item in windows
+        )
+        if (
+            confirmed != evaluation.confirmed_window_count
+            or rejected_validation != evaluation.rejected_validation_window_count
+            or rejected_test != evaluation.rejected_test_window_count
+        ):
+            return None
+    return result
+
+
+def _json(value: object) -> dict[str, object]:
+    result = json.loads(json.dumps(value, default=str))
+    if not isinstance(result, dict):
+        raise ValueError("edge-guided value must be an object")
+    return result
+
+
+def _metric(value: EdgeGuidedSegmentEvaluation) -> dict[str, object]:
+    return _json(asdict(value))
+
+
+def _candidate_payload(value: EdgeGuidedCandidate) -> dict[str, object]:
+    payload = asdict(value)
+    payload["horizon_seconds"] = int(value.horizon.total_seconds())
+    payload["decision_interval_seconds"] = int(value.decision_interval.total_seconds())
+    payload["cadence_seconds"] = int(value.cadence.total_seconds())
+    payload["minimum_holding_seconds"] = int(
+        value.minimum_holding_period.total_seconds()
+    )
+    payload["maximum_holding_seconds"] = int(
+        value.maximum_holding_period.total_seconds()
+    )
+    payload["cooldown_seconds"] = int(value.cooldown.total_seconds())
+    del payload["horizon"]
+    del payload["decision_interval"]
+    del payload["cadence"]
+    del payload["minimum_holding_period"]
+    del payload["maximum_holding_period"]
+    del payload["cooldown"]
+    return _json(payload)
+
+
+def _read_metric(value: dict[str, object]) -> EdgeGuidedSegmentEvaluation:
+    return EdgeGuidedSegmentEvaluation(
+        RefinementSegmentName(str(value["segment"])),
+        Decimal(str(value["total_return"])),
+        Decimal(str(value["max_drawdown"])),
+        int(str(value["trade_count"])),
+        Decimal(str(value["fees_paid"])),
+        Decimal(str(value["return_difference_from_production"])),
+        Decimal(str(value["return_difference_from_buy_and_hold"])),
+    )
+
+
+def _candidate(value: dict[str, object]) -> EdgeGuidedCandidate:
+    source_ids = value.get("source_hypothesis_ids", [])
+    if not isinstance(source_ids, list):
+        source_ids = []
+    return EdgeGuidedCandidate(
+        str(value["candidate_fingerprint"]),
+        str(value["source_edge_fingerprint"]),
+        str(value["source_hypothesis_id"]),
+        str(value["predictor_name"]),
+        int(str(value["predictor_version"])),
+        int(str(value["hypothesis_contract_version"])),
+        Condition(str(value["condition"])),
+        Decimal(str(value["lower_bound"]))
+        if value["lower_bound"] is not None
+        else None,
+        Decimal(str(value["upper_bound"]))
+        if value["upper_bound"] is not None
+        else None,
+        SuggestedAction(str(value["suggested_action"])),
+        timedelta(seconds=int(str(value["horizon_seconds"]))),
+        timedelta(seconds=int(str(value["decision_interval_seconds"]))),
+        DirectionMapping(str(value["direction_mapping"])),
+        str(value["score_model_name"]),
+        int(str(value["score_model_version"])),
+        str(value["strategy_name"]),
+        int(str(value["strategy_version"])),
+        int(str(value["strategy_configuration_version"])),
+        str(value["account_currency"]),
+        Decimal(str(value["fee_rate"])),
+        Decimal(str(value["slippage_rate"])),
+        CandidateFamily(str(value.get("candidate_family", "exit_or_avoid_overlay"))),
+        EntryRule(str(value.get("entry_rule", "production_baseline"))),
+        ExitRule(str(value.get("exit_rule", "defensive_overlay"))),
+        timedelta(
+            seconds=int(
+                str(value.get("cadence_seconds", value["decision_interval_seconds"]))
+            )
+        ),
+        timedelta(seconds=int(str(value.get("minimum_holding_seconds", 0)))),
+        timedelta(seconds=int(str(value.get("maximum_holding_seconds", 0)))),
+        timedelta(seconds=int(str(value.get("cooldown_seconds", 0)))),
+        Decimal(str(value.get("target_allocation_percentage", "15"))),
+        str(value["exit_predictor_name"])
+        if value.get("exit_predictor_name") is not None
+        else None,
+        Condition(str(value["exit_condition"]))
+        if value.get("exit_condition") is not None
+        else None,
+        Decimal(str(value["exit_lower_bound"]))
+        if value.get("exit_lower_bound") is not None
+        else None,
+        Decimal(str(value["exit_upper_bound"]))
+        if value.get("exit_upper_bound") is not None
+        else None,
+        tuple(str(item) for item in source_ids),
+        int(str(value.get("generation_contract_version", 1))),
+        int(str(value.get("qualification_contract_version", 1))),
+        context_predictor_name=(
+            str(value["context_predictor_name"])
+            if value.get("context_predictor_name") is not None
+            else None
+        ),
+        context_predictor_version=(
+            int(str(value["context_predictor_version"]))
+            if value.get("context_predictor_version") is not None
+            else None
+        ),
+        context_regime=(
+            str(value["context_regime"])
+            if value.get("context_regime") is not None
+            else None
+        ),
+        context_lower_bound=(
+            Decimal(str(value["context_lower_bound"]))
+            if value.get("context_lower_bound") is not None
+            else None
+        ),
+        context_upper_bound=(
+            Decimal(str(value["context_upper_bound"]))
+            if value.get("context_upper_bound") is not None
+            else None
+        ),
+    )
+
+
+def _read_ranking(value: object) -> EdgeGuidedRanking | None:
+    if not isinstance(value, dict):
+        return None
+    return EdgeGuidedRanking(
+        Decimal(str(value["median_validation_return"])),
+        Decimal(str(value["worst_validation_return"])),
+        Decimal(str(value["maximum_drawdown"])),
+        Decimal(str(value["return_over_drawdown"]))
+        if value.get("return_over_drawdown") is not None
+        else None,
+        int(str(value["trade_count"])),
+        Decimal(str(value["total_fees"])),
+        Decimal(str(value["cost_efficiency"]))
+        if value.get("cost_efficiency") is not None
+        else None,
+        Decimal(str(value["positive_window_ratio"])),
+        int(str(value["positive_window_count"])),
+        str(value["candidate_fingerprint"]),
+    )

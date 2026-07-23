@@ -413,4 +413,1222 @@ def generate_edge_guided_candidates(
             "target_allocation_percentage": allocation,
             "exit_predictor_name": exit_edge.predictor_name if exit_edge else None,
             "exit_condition": exit_edge.condition.value if exit_edge else None,
-            "exit_lower_bound": exit_edge.lower_bound if exit_edge el×MôòÚ$z{-®éÜj×Åö66ƒ¢FV6–ÖÂÀ¢6–×VÆF–öã¢6–×VÆF–öä6öæf–wW&F–öâÀ¢föÆF–Æ—G•÷F‡&W6†öÆC¢FV6–ÖÂÀ¢&WW6&ÆU÷7FvUöWf–FVæ6S¢F–7E·7G"ÂVFvTwV–FVE7FvTWf–FVæ6UÒÀ¢7FvUöWf–FVæ6S¢F–7E·7G"ÂVFvTwV–FVE7FvTWf–FVæ6UÒÀ¢&WW6VEö¶W—3¢6WE·7G%ÒÀ¢6ö×WFVEö¶W—3¢6WE·7G%ÒÀ¢’ÓâVFvTwV–FVE6VvÖVçDWfÇVF–öã ¢6öçFVçEöf–ævW'&–çBÒ÷7FvUö6öçFVçEöf–ævW'&–çB†ÖG&—‚¢66†Uö¶W’ÒVFvUöwV–FVE÷7FvUö66†Uö¶W’€¢6æF–FFRÂv–æF÷rÂ6VvÖVçBÂ6öçFVçEöf–ævW'&–ç@¢¢66†VBÒ&WW6&ÆU÷7FvUöWf–FVæ6RævWB†66†Uö¶W’¢–b66†VB—2æ÷BæöæS ¢&WW6VEö¶W—2æFB†66†Uö¶W’¢7FvUöWf–FVæ6U¶66†Uö¶W•ÒÒ&WÆ6R†66†VBÂv–æF÷uö÷&F–æÃ×v–æF÷ræ÷&F–æÂ¢&WGW&â66†VBæÖWG&–70¢ÖWG&–72ÒöWfÇVFU÷6VvÖVçB€¢FF6WBÀ¢ÖG&—‚À¢6VvÖVçBÀ¢6æF–FFRÀ¢–æ—F–Åö66‚À¢6–×VÆF–öâÀ¢ö6æF–FFUö7F–öåöf–ÇFW"†6æF–FFRÂföÆF–Æ—G•÷F‡&W6†öÆB’À¢¢&÷VæG2Ò°¢&Vf–æVÖVçE6VvÖVçDæÖRåE$”ä”äs¢‡v–æF÷rçG&–æ–æuög&öÒÂv–æF÷rçG&–æ–æu÷Fò’À¢&Vf–æVÖVçE6VvÖVçDæÖRådÄ”DD”ôã¢€¢v–æF÷rçfÆ–FF–öåög&öÒÀ¢v–æF÷rçfÆ–FF–öå÷FòÀ¢’À¢&Vf–æVÖVçE6VvÖVçDæÖRåDU5C¢‡v–æF÷rçFW7Eög&öÒÂv–æF÷rçFW7E÷Fò’À¢Õ·6VvÖVçEÐ¢7FvUöWf–FVæ6U¶66†Uö¶W•ÒÒVFvTwV–FVE7FvTWf–FVæ6R€¢66†Uö¶W’À¢6æF–FFRæ6æF–FFUöf–ævW'&–çBÀ¢6VvÖVçBÀ¢v–æF÷ræ÷&F–æÂÀ¢&÷VæG5³ÒÀ¢&÷VæG5³ÒÀ¢6öçFVçEöf–ævW'&–çBÀ¢ÖWG&–72À¢¢6ö×WFVEö¶W—2æFB†66†Uö¶W’¢&WGW&âÖWG&–70  ¦FVb÷7FvUö6öçFVçEöf–ævW'&–çB†ÖG&—ƒ¢†—7F÷&–6ÄfVGW&TÖG&—‚’Óâ7G# ¢&WGW&âöf–ævW'&–çB‡²'&÷w2#¢GWÆR†6F–7B‡&÷r’f÷"&÷r–âÖG&—‚ç&÷w2—Ò  ¦FVbövw&VvFU÷6VvÖVçB€¢v–æF÷w3¢GWÆU´VFvTwV–FVEv–æF÷tWfÇVF–öâÂââåÒÀ¢6VvÖVçC¢&Vf–æVÖVçE6VvÖVçDæÖRÀ¢’ÓâVFvTwV–FVE6VvÖVçDWfÇVF–öã ¢fÇVW2ÒGWÆR€¢fÇVP¢f÷"—FVÒ–âv–æF÷w0¢f÷"fÇVR–â€¢—FVÒçG&–æ–æp¢–b6VvÖVçB—2&Vf–æVÖVçE6VvÖVçDæÖRåE$”ä”äp¢VÇ6R—FVÒçfÆ–FF–öà¢–b6VvÖVçB—2&Vf–æVÖVçE6VvÖVçDæÖRådÄ”DD”ôà¢VÇ6R—FVÒçFW7BÀ¢¢–bfÇVR—2æ÷BæöæP¢¢–bæ÷BfÇVW3 ¢&WGW&âVFvTwV–FVE6VvÖVçDWfÇVF–öâ€¢6VvÖVçBÂFV6–ÖÂƒ’ÂFV6–ÖÂƒ’ÂÂFV6–ÖÂƒ’ÂFV6–ÖÂƒ’ÂFV6–ÖÂƒ¢¢6÷VçBÒFV6–ÖÂ†ÆVâ‡fÇVW2’¢&WGW&âVFvTwV–FVE6VvÖVçDWfÇVF–öâ€¢6VvÖVçBÀ¢7VÒ‚†—FVÒçF÷FÅ÷&WGW&âf÷"—FVÒ–âfÇVW2’ÂFV6–ÖÂƒ’’ò6÷VçBÀ¢7VÒ‚†—FVÒæÖ…öG&vF÷vâf÷"—FVÒ–âfÇVW2’ÂFV6–ÖÂƒ’’ò6÷VçBÀ¢7VÒ†—FVÒçG&FUö6÷VçBf÷"—FVÒ–âfÇVW2’À¢7VÒ‚†—FVÒæfVW5÷–Bf÷"—FVÒ–âfÇVW2’ÂFV6–ÖÂƒ’’À¢7VÒ‚†—FVÒç&WGW&åöF–ffW&Væ6Uög&öÕ÷&öGV7F–öâf÷"—FVÒ–âfÇVW2’ÂFV6–ÖÂƒ’¢ò6÷VçBÀ¢7VÒ‚†—FVÒç&WGW&åöF–ffW&Væ6Uög&öÕö'W•öæEö†öÆBf÷"—FVÒ–âfÇVW2’ÂFV6–ÖÂƒ’¢ò6÷VçBÀ¢  ¦FVbövw&VvFUö÷F–öæÅ÷FW7B€¢v–æF÷w3¢GWÆU´VFvTwV–FVEv–æF÷tWfÇVF–öâÂââåÒÀ¢’ÓâVFvTwV–FVE6VvÖVçDWfÇVF–öâÂæöæS ¢–bæ÷Bç’†—FVÒçFW7B—2æ÷BæöæRf÷"—FVÒ–âv–æF÷w2“ ¢&WGW&âæöæP¢&WGW&âövw&VvFU÷6VvÖVçB‡v–æF÷w2Â&Vf–æVÖVçE6VvÖVçDæÖRåDU5B  ¦FVb÷&æ¶–ær€¢v–æF÷w3¢GWÆU´VFvTwV–FVEv–æF÷tWfÇVF–öâÂââåÒÂf–ævW'&–çC¢7G ¢’ÓâVFvTwV–FVE&æ¶–æs ¢&WGW&ç2ÒGWÆR‡6÷'FVB†—FVÒçfÆ–FF–öâçF÷FÅ÷&WGW&âf÷"—FVÒ–âv–æF÷w2’¢ÖVF–âÒ€¢&WGW&ç5¶ÆVâ‡&WGW&ç2’òò%Ð¢–bÆVâ‡&WGW&ç2’R ¢VÇ6R‡&WGW&ç5¶ÆVâ‡&WGW&ç2’òò"ÒÒ²&WGW&ç5¶ÆVâ‡&WGW&ç2’òò%Ò’òFV6–ÖÂƒ"¢–b&WGW&ç0¢VÇ6RFV6–ÖÂƒ¢¢v÷'7BÒÖ–â‡&WGW&ç2ÂFVfVÇCÔFV6–ÖÂƒ’¢G&vF÷vâÒÖ‚€¢†—FVÒçfÆ–FF–öâæÖ…öG&vF÷vâf÷"—FVÒ–âv–æF÷w2’ÂFVfVÇCÔFV6–ÖÂƒ¢¢G&FW2Ò7VÒ†—FVÒçfÆ–FF–öâçG&FUö6÷VçBf÷"—FVÒ–âv–æF÷w2¢fVW2Ò7VÒ‚†—FVÒçfÆ–FF–öâæfVW5÷–Bf÷"—FVÒ–âv–æF÷w2’ÂFV6–ÖÂƒ’¢÷6—F—fRÒ7VÒ‡fÇVRâf÷"fÇVR–â&WGW&ç2¢&F–òÒFV6–ÖÂ‡÷6—F—fR’òFV6–ÖÂ†ÆVâ‡&WGW&ç2’’–b&WGW&ç2VÇ6RFV6–ÖÂƒ¢&WGW&âVFvTwV–FVE&æ¶–ær€¢ÖVF–âÀ¢v÷'7BÀ¢G&vF÷vâÀ¢ÖVF–âòG&vF÷vâ–bG&vF÷vââVÇ6RæöæRÀ¢G&FW2À¢fVW2À¢ÖVF–âòfVW2–bfVW2âVÇ6RæöæRÀ¢&F–òÀ¢÷6—F—fRÀ¢f–ævW'&–çBÀ¢  ¦FVbVFvUöwV–FVE÷7VÖÖ'’‡&W7VÇC¢VFvTwV–FVDWfÇVF–öå&W7VÇB’ÓâF–7E·7G"Âö&¦V7EÓ ¢""%&WGW&â7G'V7GW&VB¥4ôâ×6fR¦ö"7VÖÖ'’v—F‚FV6–ÖÂ7G&–æw2â""  ¢fÇVRÒ§6öâæÆöG2†§6öâæGV×2†6F–7B‡&W7VÇB’ÂFVfVÇC×7G"’¢–bæ÷B—6–ç7Fæ6R‡fÇVRÂF–7B“ ¢&—6RVFvTwV–FVD6æF–FFTW'&÷"‚&VFvRÖwV–FVB7VÖÖ'’×W7B&Râö&¦V7B"¢fÇVRç÷‚'7FvUöWf–FVæ6R"ÂæöæR¢&WGW&âfÇVP  ¦FVb÷v–æF÷u÷6VvÖVçE÷&V¦V7F–öå÷&V6öç2€¢fÇVS¢VFvTwV–FVE6VvÖVçDWfÇVF–öâÂ6VvÖVçC¢&Vf–æVÖVçE6VvÖVçDæÖP¢’ÓâGWÆU´VFvTwV–FVE&V¦V7F–öå&V6öâÂââåÓ ¢&V6öç3¢Æ—7E´VFvTwV–FVE&V¦V7F–öå&V6öåÒÒµÐ¢–bæ÷BfÇVRç7Vff–6–VçE÷G&FW3 ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâä”å5Tdd”4”TåEõE$DU2¢–bæ÷BfÇVRç÷6—F—fUöæWE÷&WGW&ã ¢&V6öç2æVæB€¢VFvTwV–FVE&V¦V7F–öå&V6öâääôåõõ4•D•dUõdÄ”DD”ôåõ$UEU$à¢–b6VvÖVçB—2&Vf–æVÖVçE6VvÖVçDæÖRådÄ”DD”ôà¢VÇ6RVFvTwV–FVE&V¦V7F–öå&V6öâääôåõõ4•D•dUõDU5Eõ$UEU$à¢¢–bæ÷BfÇVRæ&VG5÷&öGV7F–öã ¢&V6öç2æVæB€¢VFvTwV–FVE&V¦V7F–öå&V6öâäD”EôäõEô$TEõ$ôET5D”ôåõdÄ”DD”ôà¢–b6VvÖVçB—2&Vf–æVÖVçE6VvÖVçDæÖRådÄ”DD”ôà¢VÇ6RVFvTwV–FVE&V¦V7F–öå&V6öâäD”EôäõEô$TEõ$ôET5D”ôåõDU5@¢¢–bæ÷BfÇVRç&—6µö66WF&ÆS ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâäU„4U54•dUôE$tDõtâ¢&WGW&â÷7F&ÆU÷&V6öç2‡GWÆR‡&V6öç2’  ¦FVbö6æF–FFU÷&V¦V7F–öå÷&V6öç2€¢¢À¢G&–æ–æs¢VFvTwV–FVE6VvÖVçDWfÇVF–öâÀ¢fÆ–FF–öã¢VFvTwV–FVE6VvÖVçDWfÇVF–öâÀ¢FW7C¢VFvTwV–FVE6VvÖVçDWfÇVF–öâÂæöæRÀ¢fÆ–C¢–çBÀ¢6öæf—&ÖVC¢–çBÀ¢&F–ó¢FV6–ÖÂÀ¢F‡&W6†öÆG3¢Wf–FVæ6UF‡&W6†öÆG2À¢’ÓâGWÆU´VFvTwV–FVE&V¦V7F–öå&V6öâÂââåÓ ¢&V6öç3¢Æ—7E´VFvTwV–FVE&V¦V7F–öå&V6öåÒÒµÐ¢–bæ÷BÆÂ†—FVÒç7Vff–6–VçE÷G&FW2f÷"—FVÒ–â‡G&–æ–ærÂfÆ–FF–öâ’“ ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâä”å5Tdd”4”TåEõE$DU2¢f÷"fÇVRÂ&V6öâ–â€¢‡G&–æ–ærÂVFvTwV–FVE&V¦V7F–öå&V6öâääôåõõ4•D•dUõE$”ä”äuõ$UEU$â’À¢‡fÆ–FF–öâÂVFvTwV–FVE&V¦V7F–öå&V6öâääôåõõ4•D•dUõdÄ”DD”ôåõ$UEU$â’À¢“ ¢–bæ÷BfÇVRç÷6—F—fUöæWE÷&WGW&ã ¢&V6öç2æVæB‡&V6öâ¢–bæ÷BfÆ–FF–öâæ&VG5÷&öGV7F–öã ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâäD”EôäõEô$TEõ$ôET5D”ôåõdÄ”DD”ôâ¢–bæ÷BÆÂ†—FVÒç&—6µö66WF&ÆRf÷"—FVÒ–â‡G&–æ–ærÂfÆ–FF–öâ’“ ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâäU„4U54•dUôE$tDõtâ¢–bfÆ–BÂF‡&W6†öÆG2æÖ–æ–×VÕ÷v–æF÷w3 ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâä”å5Tdd”4”TåEõdÄ”Eõt”äDõu2¢fÆ–FF–öå÷76VBÒæ÷B÷fÆ–FF–öå÷7FvUöf–ÆVB€¢G&–æ–æs×G&–æ–ærÀ¢fÆ–FF–öã×fÆ–FF–öâÀ¢fÆ–C×fÆ–BÀ¢F‡&W6†öÆG3×F‡&W6†öÆG2À¢¢–bfÆ–FF–öå÷76VC ¢–bFW7B—2æöæR÷"æ÷BFW7Bç7Vff–6–VçE÷G&FW3 ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâä”å5Tdd”4”TåEõE$DU2¢–bFW7B—2æ÷BæöæRæBæ÷BFW7Bç÷6—F—fUöæWE÷&WGW&ã ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâääôåõõ4•D•dUõDU5Eõ$UEU$â¢–bFW7B—2æ÷BæöæRæBæ÷BFW7Bæ&VG5÷&öGV7F–öã ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâäD”EôäõEô$TEõ$ôET5D”ôåõDU5B¢–bFW7B—2æ÷BæöæRæBæ÷BFW7Bç&—6µö66WF&ÆS ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâäU„4U54•dUôE$tDõtâ¢–b6öæf—&ÖVBÂF‡&W6†öÆG2æÖ–æ–×VÕ÷v–æF÷w3 ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâä”å5Tdd”4”TåEô4ôäd•$ÔTEõt”äDõu2¢–bfÆ–BæB&F–òÂF‡&W6†öÆG2æÖ–æ–×VÕ÷7F&ÆUöF—&V7F–öå÷&F–ó ¢&V6öç2æVæB„VFvTwV–FVE&V¦V7F–öå&V6öâåTå5D$ÄUô5$õ55õt”äDõu2¢&WGW&â÷7F&ÆU÷&V6öç2‡GWÆR‡&V6öç2’  ¦FVb÷7F&ÆU÷&V6öç2€¢&V6öç3¢GWÆU´VFvTwV–FVE&V¦V7F–öå&V6öâÂââåÒÀ¢’ÓâGWÆU´VFvTwV–FVE&V¦V7F–öå&V6öâÂââåÓ ¢&WGW&âGWÆR†F–7Bæg&öÖ¶W—2‡&V6öç2’  ¦FVb÷fÆ–FF–öå÷7FvUöf–ÆVB€¢¢À¢G&–æ–æs¢VFvTwV–FVE6VvÖVçDWfÇVF–öâÀ¢fÆ–FF–öã¢VFvTwV–FVE6VvÖVçDWfÇVF–öâÀ¢fÆ–C¢–çBÀ¢F‡&W6†öÆG3¢Wf–FVæ6UF‡&W6†öÆG2À¢’Óâ&ööÃ ¢&WGW&â€¢æ÷BG&–æ–ærç7Vff–6–VçE÷G&FW0¢÷"æ÷BG&–æ–ærç÷6—F—fUöæWE÷&WGW&à¢÷"æ÷BG&–æ–ærç&—6µö66WF&ÆP¢÷"æ÷BfÆ–FF–öâç7Vff–6–VçE÷G&FW0¢÷"æ÷BfÆ–FF–öâç÷6—F—fUöæWE÷&WGW&à¢÷"æ÷BfÆ–FF–öâæ&VG5÷&öGV7F–öà¢÷"æ÷BfÆ–FF–öâç&—6µö66WF&ÆP¢÷"fÆ–BÂF‡&W6†öÆG2æÖ–æ–×VÕ÷v–æF÷w0¢  ¦FVb÷&V¦V7F–öåöW‡ÆæF–öâ€¢&V6öç3¢GWÆU´VFvTwV–FVE&V¦V7F–öå&V6öâÂââåÒÀ¢’Óâ7G# ¢Æ&VÇ2Ò°¢VFvTwV–FVE&V¦V7F–öå&V6öâä”å5Tdd”4”TåEõE$DU3¢&–ç7Vff–6–VçBG&F–ær7F—f—G’"À¢VFvTwV–FVE&V¦V7F–öå&V6öâääôåõõ4•D•dUõE$”ä”äuõ$UEU$ã¢€¢&æöâ×÷6—F—fRG&–æ–ær&WGW&â ¢’À¢VFvTwV–FVE&V¦V7F–öå&V6öâääôåõõ4•D•dUõdÄ”DD”ôåõ$UEU$ã¢€¢&æöâ×÷6—F—fRfÆ–FF–öâ&WGW&â ¢’À¢VFvTwV–FVE&V¦V7F–öå&V6öâääôåõõ4•D•dUõDU5Eõ$UEU$ã¢&æöâ×÷6—F—fRFW7B&WGW&â"À¢VFvTwV–FVE&V¦V7F–öå&V6öâäD”EôäõEô$TEõ$ôET5D”ôåõdÄ”DD”ôã¢€¢'fÆ–FF–öâF–Bæ÷B7G&–7FÇ’&VB&öGV7F–öâ ¢’À¢VFvTwV–FVE&V¦V7F–öå&V6öâäD”EôäõEô$TEõ$ôET5D”ôåõDU5C¢€¢'FW7BF–Bæ÷B7G&–7FÇ’&VB&öGV7F–öâ ¢’À¢VFvTwV–FVE&V¦V7F–öå&V6öâäU„4U54•dUôE$tDõtã¢€¢&G&vF÷vâW†6VVFVBF†RW†—7F–ær&—6²Æ–Ö—B ¢’À¢VFvTwV–FVE&V¦V7F–öå&V6öâä”å5Tdd”4”TåEõdÄ”Eõt”äDõu3¢€¢&–ç7Vff–6–VçBfÆ–FF–öâv–æF÷w2 ¢’À¢VFvTwV–FVE&V¦V7F–öå&V6öâä”å5Tdd”4”TåEô4ôäd•$ÔTEõt”äDõu3¢€¢&–ç7Vff–6–VçB6öæf—&ÖVBFW7Bv–æF÷w2 ¢’À¢VFvTwV–FVE&V¦V7F–öå&V6öâåTå5D$ÄUô5$õ55õt”äDõu3¢€¢&–ç7Vff–6–VçB7F&–Æ—G’7&÷72v–æF÷w2 ¢’À¢Ð¢&WGW&â€¢$6æF–FFR&V¦V7FVC¢"²#²"æ¦ö–â†Æ&VÇ5·&V6öåÒf÷"&V6öâ–â&V6öç2’²"â ¢  ¦FVb÷fÆ–Eö‡—÷F†W6—2‡fÇVS¢7G&FVw”‡—÷F†W6—2’Óâ&ööÃ ¢&WGW&âæ÷B€¢‡fÇVRæÆ÷vW%ö&÷VæB—2æöæRæBfÇVRçWW%ö&÷VæB—2æöæR¢÷"€¢fÇVRæÆ÷vW%ö&÷VæB—2æ÷BæöæP¢æBfÇVRçWW%ö&÷VæB—2æ÷BæöæP¢æBfÇVRæÆ÷vW%ö&÷VæBãÒfÇVRçWW%ö&÷Væ@¢¢  ¦FVböV6öæöÖ–6ÆÇ•÷f–&ÆR€¢fÇVS¢7G&FVw”‡—÷F†W6—2Â6–×VÆF–öã¢6–×VÆF–öä6öæf–wW&F–öà¢’Óâ&ööÃ ¢w&÷72ÒfÇVRæW‡V7FVEöw&÷75÷&WGW&à¢æWBÒfÇVRæW‡V7FVEöæWE÷&WGW&à¢–bw&÷72—2æöæR÷"æWB—2æöæS ¢&WGW&âfÇ6P¢VçG'•ö×VÇF—Æ–W"Ò„FV6–ÖÂƒ’²6–×VÆF–öâç6Æ—vU÷&FR’¢€¢FV6–ÖÂƒ’²6–×VÆF–öâæfVU÷&FP¢¢W†—Eö×VÇF—Æ–W"Ò„FV6–ÖÂƒ’Ò6–×VÆF–öâç6Æ—vU÷&FR’¢€¢FV6–ÖÂƒ’Ò6–×VÆF–öâæfVU÷&FP¢¢&÷VæE÷G&—ö6÷7BÒVçG'•ö×VÇF—Æ–W"òW†—Eö×VÇF—Æ–W"ÒFV6–ÖÂƒ¢&WGW&âw&÷72â&÷VæE÷G&—ö6÷7B²T4ôäôÔ”5ôTDtUôÔ$t”âæBæWBâT4ôäôÔ”5ôTDtUôÔ$t”à  ¦FVbö‡—÷F†W6—5÷&æ²‡fÇVS¢7G&FVw”‡—÷F†W6—2’ÓâGWÆU´FV6–ÖÂÂFV6–ÖÂÂ7G%Ó ¢V6öæöÖ–5÷fÇVRÒ€¢fÇVRæW‡V7FVEöæWE÷&WGW&à¢–bfÇVRç7VvvW7FVEö7F–öâ—27VvvW7FVD7F–öâäÄôäuôTåE%¢VÇ6RfÇVRæW‡V7FVEöfö–FVEöÆ÷70¢’÷"FV6–ÖÂƒ¢&WGW&â‚ÖV6öæöÖ–5÷fÇVRÂ×fÇVRç7F&–Æ—G•÷&F–òÂfÇVRæ‡—÷F†W6—5ö–B  ¦FVbö6ö×F–&ÆUö6FVæ6W2††÷&—¦öã¢F–ÖVFVÇF’ÓâGWÆU·F–ÖVFVÇFÂââåÓ ¢6ö×F–&ÆRÒGWÆR‡fÇVRf÷"fÇVR–â4äD”DDUô4DTä4U2–bfÇVRÃÒ†÷&—¦öâ¢&WGW&â6ö×F–&ÆU²Ó#¥Ò–b6ö×F–&ÆRVÇ6R„4äD”DDUô4DTä4U5³ÒÂ  ¦FVbö6æF–FFU÷&æ²‡fÇVS¢VFvTwV–FVD6æF–FFR’ÓâGWÆU¶–çBÂ7G%Ó ¢÷&FW"Ò°¢6æF–FFTfÖ–Ç’äTDtUôTåE%•õD”ÔTEôU„•C¢À¢6æF–FFTfÖ–Ç’äTDtUôTåE%•õ4”täÅôU„•C¢À¢6æF–FFTfÖ–Ç’äTDtUôTåE%•ô$4TÄ”äUôU„•C¢"À¢6æF–FFTfÖ–Ç’äU„•Eôõ%ôdô”EôõdU$Ä“¢2À¢Ð¢&WGW&â÷&FW%·fÇVRæ6æF–FFUöfÖ–Ç•ÒÂfÇVRæ6æF–FFUöf–ævW'&–ç@  ¦FVbö6æF–FFUöÖF6†W2€¢&÷s¢†—7F÷&–6ÄfVGW&U&÷rÀ¢¢À¢&VF–7F÷%öæÖS¢7G"À¢6öæF—F–öã¢6öæF—F–öâÀ¢Æ÷vW%ö&÷VæC¢FV6–ÖÂÂæöæRÀ¢WW%ö&÷VæC¢FV6–ÖÂÂæöæRÀ¢föÆF–Æ—G•÷F‡&W6†öÆC¢FV6–ÖÂÀ¢’Óâ&ööÃ ¢–bæ÷B&VF–7F÷%öæÖS ¢&WGW&âfÇ6P¢fÇVRÒ&VF–7F—fUöVFvU÷fÇVR‡&÷rÂ&VF–7F÷%öæÖR¢&WGW&â€¢†Æ÷vW%ö&÷VæB—2æöæR÷"fÇVRâÆ÷vW%ö&÷VæB¢æB‡WW%ö&÷VæB—2æöæR÷"fÇVRÃÒWW%ö&÷VæB¢æB&VF–7F—fUöVFvUö6öæF—F–öåöÖF6†W2€¢&÷rÂ6öæF—F–öâÂföÆF–Æ—G•÷F‡&W6†öÆC×föÆF–Æ—G•÷F‡&W6†öÆ@¢¢  ¦FVbö6æF–FFUö6öçFW‡EöÖF6†W2€¢&÷s¢†—7F÷&–6ÄfVGW&U&÷rÂ6æF–FFS¢VFvTwV–FVD6æF–FFP¢’Óâ&ööÃ ¢–b6æF–FFRæ6öçFW‡E÷&VF–7F÷%öæÖR—2æöæS ¢&WGW&âG'VP¢fÇVRÒ&VF–7F—fUöVFvU÷fÇVR‡&÷rÂ6æF–FFRæ6öçFW‡E÷&VF–7F÷%öæÖR¢&WGW&â€¢6æF–FFRæ6öçFW‡EöÆ÷vW%ö&÷VæB—2æöæR÷"fÇVRãÒ6æF–FFRæ6öçFW‡EöÆ÷vW%ö&÷Væ@¢’æB€¢6æF–FFRæ6öçFW‡E÷WW%ö&÷VæB—2æöæR÷"fÇVRÃÒ6æF–FFRæ6öçFW‡E÷WW%ö&÷Væ@¢  ¦FVb÷&W6V&6…ö÷WF6öÖR€¢WfÇVF–öç3¢GWÆU´VFvTwV–FVD6æF–FFTWfÇVF–öâÂââåÒÀ¢VFvW5öf÷VæC¢&ööÂÀ¢6æF–FFW5övVæW&FVC¢&ööÂÀ¢’Óâ&W6V&6„÷WF6öÖS ¢–bç’†—FVÒç7FGW2—2VFvTwV–FVD6æF–FFU7FGW2ä4ôäd•$ÔTBf÷"—FVÒ–âWfÇVF–öç2“ ¢&WGW&â&W6V&6„÷WF6öÖRä4ôäd•$ÔTEô4äD”DDU5ôdõTä@¢–bç’€¢—FVÒç7FGW2—2VFvTwV–FVD6æF–FFU7FGW2å$T¤T5DTEõDU5Bf÷"—FVÒ–âWfÇVF–öç0¢“ ¢&WGW&â&W6V&6„÷WF6öÖRä4äD”DDU5õ$T¤T5DTEõDU5@¢–bWfÇVF–öç3 ¢&WGW&â&W6V&6„÷WF6öÖRä4äD”DDU5õ$T¤T5DTEõdÄ”DD”ôà¢–bVFvW5öf÷VæBæBæ÷B6æF–FFW5övVæW&FVC ¢&WGW&â&W6V&6„÷WF6öÖRäTDtU5ôäõEôT4ôäôÔ”0¢&WGW&â&W6V&6„÷WF6öÖRääõõ$TD”5D•dUôTDtP  ¦FVbö÷WF6öÖUöW‡ÆæF–öâ†÷WF6öÖS¢&W6V&6„÷WF6öÖR’Óâ7G# ¢&WGW&â°¢&W6V&6„÷WF6öÖRä4ôäd•$ÔTEô4äD”DDU5ôdõTäC¢€¢$BÆV7BöæR6ö×ÆWFR7G&FVw’76VB—6öÆFVBfÆ–FF–öâæBFW7Bâ ¢’À¢&W6V&6„÷WF6öÖRä4äD”DDU5õ$T¤T5DTEõdÄ”DD”ôã¢€¢$6ö×ÆWFR7G&FVv–W2vW&RvVæW&FVB'WBf–ÆVBfÆ–FF–öã²FW7Bv2æ÷B ¢'W6VBFòF§W7BF†VÒâ ¢’À¢&W6V&6„÷WF6öÖRä4äD”DDU5õ$T¤T5DTEõDU5C¢€¢$6æF–FFW2vW&R&öf—F&ÆR–âfÆ–FF–öâ'WBf–ÆVB—6öÆFVBFW7Bâ ¢’À¢&W6V&6„÷WF6öÖRääõõ$TD”5D•dUôTDtS¢€¢$æò7F&ÆR&VF–7F—fRVFvRv2FWFV7FVBv—F‚F†R7W'&VçBWf–FVæ6Râ ¢’À¢&W6V&6„÷WF6öÖRäTDtU5ôäõEôT4ôäôÔ”3¢€¢%GFW&ç2vW&RFWFV7FVBÂ'WBW‡V7FVBÖ÷fVÖVçBF–Bæ÷B6÷fW"&÷VæB×G&— ¢&6÷7G2æBF†RfW'6–öæVBÖ&v–ââ ¢’À¢&W6V&6„÷WF6öÖRä”å5Tdd”4”TåEôô45U%$Tä4U3¢€¢$6æF–FFRWf–FVæ6RF–Bæ÷Bö67W"ögFVâVæ÷Vv‚f÷"WfÇVF–öââ ¢’À¢&W6V&6„÷WF6öÖRä”å5Tdd”4”TåEôDD¢%F†R&WVW7FVB†—7F÷'’v2–ç7Vff–6–VçBâ"À¢&W6V&6„÷WF6öÖRäd”ÄTC¢%&W6V&6‚f–ÆVB&V6W6Röbâ÷W&F–öæÂW'&÷"â"À¢Õ¶÷WF6öÖUÐ  ¦FVböf–ævW'&–çB‡–ÆöC¢F–7E·7G"Âö&¦V7EÒ’Óâ7G# ¢Væ6öFVBÒ§6öâæGV×2‡–ÆöBÂ6÷'Eö¶W—3ÕG'VRÂ6W&F÷'3Ò‚"Â"Â#¢"’ÂFVfVÇC×7G"¢&WGW&â†6†Æ–"ç6†#Sb†Væ6öFVBæVæ6öFR‚’’æ†W†F–vW7B‚ 
+            "exit_lower_bound": exit_edge.lower_bound if exit_edge else None,
+            "exit_upper_bound": exit_edge.upper_bound if exit_edge else None,
+            "direction_mapping": hypothesis.direction_mapping.value,
+            "context_predictor_name": hypothesis.context_predictor_name,
+            "context_predictor_version": hypothesis.context_predictor_version,
+            "context_regime": hypothesis.context_regime,
+            "context_lower_bound": hypothesis.context_lower_bound,
+            "context_upper_bound": hypothesis.context_upper_bound,
+            "score_model_name": MODEL_NAME,
+            "score_model_version": MODEL_VERSION,
+            "strategy_name": STRATEGY_NAME,
+            "strategy_version": STRATEGY_VERSION,
+            "strategy_configuration_version": CONFIGURATION_VERSION,
+            "account_currency": simulation.account_currency,
+            "fee_rate": simulation.fee_rate,
+            "slippage_rate": simulation.slippage_rate,
+        }
+        fingerprint = _fingerprint(payload)
+        candidates.append(
+            EdgeGuidedCandidate(
+                fingerprint,
+                hypothesis.hypothesis_id,
+                hypothesis.hypothesis_id,
+                hypothesis.predictor_name,
+                hypothesis.predictor_version,
+                hypothesis.hypothesis_contract_version,
+                hypothesis.condition,
+                hypothesis.lower_bound,
+                hypothesis.upper_bound,
+                hypothesis.suggested_action,
+                hypothesis.horizon,
+                cadence,
+                hypothesis.direction_mapping,
+                MODEL_NAME,
+                MODEL_VERSION,
+                STRATEGY_NAME,
+                STRATEGY_VERSION,
+                CONFIGURATION_VERSION,
+                simulation.account_currency,
+                simulation.fee_rate,
+                simulation.slippage_rate,
+                family,
+                EntryRule.PRODUCTION_BASELINE
+                if family is CandidateFamily.EXIT_OR_AVOID_OVERLAY
+                else EntryRule.EDGE_MATCH,
+                exit_rule,
+                cadence,
+                holding,
+                max(holding, hypothesis.minimum_holding_period_to),
+                cadence,
+                allocation,
+                exit_edge.predictor_name if exit_edge else None,
+                exit_edge.condition if exit_edge else None,
+                exit_edge.lower_bound if exit_edge else None,
+                exit_edge.upper_bound if exit_edge else None,
+                source_ids,
+                context_predictor_name=hypothesis.context_predictor_name,
+                context_predictor_version=hypothesis.context_predictor_version,
+                context_regime=hypothesis.context_regime,
+                context_lower_bound=hypothesis.context_lower_bound,
+                context_upper_bound=hypothesis.context_upper_bound,
+            )
+        )
+    unique = {item.candidate_fingerprint: item for item in candidates}
+    # Generate and economically pre-screen broadly first. Stratification prevents
+    # family ordering or one prolific hypothesis from consuming the whole budget.
+    # maximum_candidates is intentionally applied by the staged evaluator.
+    return _stratified_generated_candidates(tuple(unique.values()))
+
+
+def _stratified_generated_candidates(
+    candidates: tuple[EdgeGuidedCandidate, ...],
+) -> tuple[EdgeGuidedCandidate, ...]:
+    family_order = tuple(CandidateFamily)
+    family_queues = {
+        family: list(
+            _round_robin_hypotheses(
+                tuple(item for item in candidates if item.candidate_family is family)
+            )
+        )
+        for family in family_order
+    }
+    selected: list[EdgeGuidedCandidate] = []
+    while len(selected) < MAX_GENERATED_STRATEGIES and any(family_queues.values()):
+        for family in family_order:
+            queue = family_queues[family]
+            if queue and len(selected) < MAX_GENERATED_STRATEGIES:
+                selected.append(queue.pop(0))
+    return tuple(selected)
+
+
+def _round_robin_hypotheses(
+    candidates: tuple[EdgeGuidedCandidate, ...],
+) -> tuple[EdgeGuidedCandidate, ...]:
+    grouped: dict[str, list[EdgeGuidedCandidate]] = {}
+    for candidate in candidates:
+        grouped.setdefault(candidate.source_hypothesis_id, []).append(candidate)
+    for hypothesis_index, hypothesis_id in enumerate(sorted(grouped)):
+        values = grouped[hypothesis_id]
+        values.sort(
+            key=lambda item: (
+                (
+                    TARGET_ALLOCATIONS.index(item.target_allocation_percentage)
+                    - CANDIDATE_CADENCES.index(item.cadence)
+                )
+                % len(TARGET_ALLOCATIONS),
+                CANDIDATE_CADENCES.index(item.cadence),
+                item.exit_predictor_name or "",
+                item.candidate_fingerprint,
+            )
+        )
+        if values:
+            offset = hypothesis_index % min(len(values), len(CANDIDATE_CADENCES))
+            grouped[hypothesis_id] = values[offset:] + values[:offset]
+    ordered: list[EdgeGuidedCandidate] = []
+    hypothesis_ids = sorted(grouped)
+    while any(grouped.values()):
+        for hypothesis_id in hypothesis_ids:
+            values = grouped[hypothesis_id]
+            if values:
+                ordered.append(values.pop(0))
+    return tuple(ordered)
+
+
+def apply_edge_guided_action(
+    *,
+    candidate: EdgeGuidedCandidate,
+    row: HistoricalFeatureRow,
+    position_is_open: bool,
+    baseline_action: StrategyAction,
+    volatility_threshold: Decimal,
+) -> StrategyAction:
+    """Apply one frozen bin rule without introducing short exposure."""
+
+    value = predictive_edge_value(row, candidate.predictor_name)
+    inside = (
+        (candidate.lower_bound is None or value > candidate.lower_bound)
+        and (candidate.upper_bound is None or value <= candidate.upper_bound)
+        and predictive_edge_condition_matches(
+            row,
+            candidate.condition,
+            volatility_threshold=volatility_threshold,
+        )
+        and _candidate_context_matches(row, candidate)
+    )
+    if candidate.suggested_action is SuggestedAction.LONG_ENTRY:
+        if position_is_open:
+            return baseline_action
+        if baseline_action is StrategyAction.OPEN_POSITION:
+            return StrategyAction.OPEN_POSITION if inside else StrategyAction.NO_ACTION
+        return baseline_action
+    if candidate.suggested_action is SuggestedAction.EXIT_OR_AVOID and inside:
+        return StrategyAction.SELL_ALL if position_is_open else StrategyAction.NO_ACTION
+    return baseline_action
+
+
+def _candidate_action_filter(
+    candidate: EdgeGuidedCandidate,
+    volatility_threshold: Decimal,
+) -> DecisionActionFilter:
+    entry_boundary: datetime | None = None
+    last_exit_boundary: datetime | None = None
+
+    def apply(
+        row: HistoricalFeatureRow,
+        position_is_open: bool,
+        baseline_action: StrategyAction,
+    ) -> StrategyAction | SimulationDecisionOverride:
+        nonlocal entry_boundary, last_exit_boundary
+        boundary = row.candle_open_time + timedelta(minutes=5)
+        if (boundary - datetime(1970, 1, 1, tzinfo=UTC)) % candidate.cadence:
+            return baseline_action
+        entry_matches = _candidate_matches(
+            row,
+            predictor_name=candidate.predictor_name,
+            condition=candidate.condition,
+            lower_bound=candidate.lower_bound,
+            upper_bound=candidate.upper_bound,
+            volatility_threshold=volatility_threshold,
+        ) and _candidate_context_matches(row, candidate)
+
+        if candidate.candidate_family is CandidateFamily.EXIT_OR_AVOID_OVERLAY:
+            return apply_edge_guided_action(
+                candidate=candidate,
+                row=row,
+                position_is_open=position_is_open,
+                baseline_action=baseline_action,
+                volatility_threshold=volatility_threshold,
+            )
+        if position_is_open:
+            if entry_boundary is None:
+                entry_boundary = boundary
+            held = boundary - entry_boundary
+            should_exit = (
+                (
+                    candidate.exit_rule is ExitRule.TIMED
+                    and held >= candidate.maximum_holding_period
+                )
+                or (
+                    candidate.exit_rule is ExitRule.PRODUCTION_BASELINE
+                    and baseline_action is StrategyAction.SELL_ALL
+                    and held >= candidate.minimum_holding_period
+                )
+                or (
+                    candidate.exit_rule is ExitRule.EDGE_MATCH
+                    and held >= candidate.minimum_holding_period
+                    and _candidate_matches(
+                        row,
+                        predictor_name=candidate.exit_predictor_name or "",
+                        condition=candidate.exit_condition or Condition.ALL,
+                        lower_bound=candidate.exit_lower_bound,
+                        upper_bound=candidate.exit_upper_bound,
+                        volatility_threshold=volatility_threshold,
+                    )
+                )
+            )
+            if should_exit:
+                last_exit_boundary = boundary
+                entry_boundary = None
+                return SimulationDecisionOverride(
+                    StrategyAction.SELL_ALL,
+                    applied_rule=candidate.exit_rule.value,
+                    explanation="The frozen complete Strategy exit rule matched.",
+                )
+            return StrategyAction.NO_ACTION
+        cooldown_complete = (
+            last_exit_boundary is None
+            or boundary - last_exit_boundary >= candidate.cooldown
+        )
+        if entry_matches and cooldown_complete:
+            entry_boundary = boundary
+            return SimulationDecisionOverride(
+                StrategyAction.OPEN_POSITION,
+                candidate.target_allocation_percentage,
+                candidate.entry_rule.value,
+                "The frozen edge entry rule matched independently of production.",
+            )
+        return StrategyAction.NO_ACTION
+
+    return apply
+
+
+def evaluate_edge_guided_candidates(
+    *,
+    dataset: HistoricalDataset,
+    feature_matrix: HistoricalFeatureMatrix,
+    hypotheses: tuple[StrategyHypothesis, ...],
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    decision_interval: timedelta = DEFAULT_DECISION_INTERVAL,
+    maximum_candidates: int = DEFAULT_MAX_EDGE_GUIDED_CANDIDATES,
+    windows: tuple[WalkForwardWindow, ...],
+    thresholds: EvidenceThresholds,
+    reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence] | None = None,
+) -> EdgeGuidedEvaluationResult:
+    """Evaluate frozen candidates through the existing isolated walk-forward windows."""
+
+    candidates = generate_edge_guided_candidates(
+        hypotheses=hypotheses,
+        simulation=simulation,
+        decision_interval=decision_interval,
+        maximum_candidates=maximum_candidates,
+    )
+    cache = dict(reusable_stage_evidence or {})
+    evidence: dict[str, EdgeGuidedStageEvidence] = dict(cache)
+    reused_keys: set[str] = set()
+    computed_keys: set[str] = set()
+    training_results = tuple(
+        (
+            candidate,
+            _evaluate_candidate_stage(
+                dataset=dataset,
+                feature_matrix=feature_matrix,
+                windows=windows,
+                candidate=candidate,
+                initial_cash=initial_cash,
+                simulation=simulation,
+                decision_interval=decision_interval,
+                segment=RefinementSegmentName.TRAINING,
+                reusable_stage_evidence=cache,
+                stage_evidence=evidence,
+                reused_keys=reused_keys,
+                computed_keys=computed_keys,
+            ),
+        )
+        for candidate in candidates
+    )
+    training_retained = tuple(
+        sorted(
+            (
+                item
+                for item in training_results
+                if _stage_qualifies(item[1], RefinementSegmentName.TRAINING)
+            ),
+            key=lambda item: _segment_rank(item[1], item[0].candidate_fingerprint),
+        )[:MAX_TRAINING_RETAINED]
+    )
+    validation_results = tuple(
+        (
+            candidate,
+            training,
+            _evaluate_candidate_stage(
+                dataset=dataset,
+                feature_matrix=feature_matrix,
+                windows=windows,
+                candidate=candidate,
+                initial_cash=initial_cash,
+                simulation=simulation,
+                decision_interval=decision_interval,
+                segment=RefinementSegmentName.VALIDATION,
+                reusable_stage_evidence=cache,
+                stage_evidence=evidence,
+                reused_keys=reused_keys,
+                computed_keys=computed_keys,
+            ),
+        )
+        for candidate, training in training_retained
+    )
+    validation_qualified = tuple(
+        item
+        for item in validation_results
+        if _stage_qualifies(item[1], RefinementSegmentName.TRAINING)
+        and _stage_qualifies(item[2], RefinementSegmentName.VALIDATION)
+    )
+    validation_retained = tuple(
+        sorted(
+            validation_qualified,
+            key=lambda item: _segment_rank(item[2], item[0].candidate_fingerprint),
+        )[:MAX_VALIDATION_RETAINED]
+    )
+    test_candidates = validation_retained[: min(MAX_TEST_EVALUATED, maximum_candidates)]
+    evaluations: list[EdgeGuidedCandidateEvaluation] = []
+    for candidate, _, _ in test_candidates:
+        window_results = _evaluate_candidate_windows(
+            dataset=dataset,
+            feature_matrix=feature_matrix,
+            windows=windows,
+            candidate=candidate,
+            initial_cash=initial_cash,
+            simulation=simulation,
+            decision_interval=decision_interval,
+            thresholds=thresholds,
+            reusable_stage_evidence=cache,
+            stage_evidence=evidence,
+            reused_keys=reused_keys,
+            computed_keys=computed_keys,
+        )
+        confirmed = sum(item.test_confirmed for item in window_results)
+        validation_passed_count = sum(item.validation_passed for item in window_results)
+        rejected_validation = len(window_results) - validation_passed_count
+        rejected_test = sum(
+            item.validation_passed and not item.test_confirmed
+            for item in window_results
+        )
+        ratio = (
+            Decimal(confirmed) / Decimal(validation_passed_count)
+            if validation_passed_count
+            else Decimal(0)
+        )
+        training = _aggregate_segment(window_results, RefinementSegmentName.TRAINING)
+        validation = _aggregate_segment(
+            window_results, RefinementSegmentName.VALIDATION
+        )
+        test = _aggregate_optional_test(window_results)
+        validation_failed = _validation_stage_failed(
+            training=training,
+            validation=validation,
+            valid=validation_passed_count,
+            thresholds=thresholds,
+        )
+        reasons = _candidate_rejection_reasons(
+            training=training,
+            validation=validation,
+            test=test,
+            valid=validation_passed_count,
+            confirmed=confirmed,
+            ratio=ratio,
+            thresholds=thresholds,
+        )
+        if not reasons:
+            status = EdgeGuidedCandidateStatus.CONFIRMED
+            explanation = (
+                "The frozen candidate had positive net returns, sufficient trading "
+                "activity, acceptable risk, and strictly beat production across the "
+                "required isolated walk-forward evidence. Buy-and-hold remains an "
+                "independent comparison."
+            )
+        elif validation_failed:
+            status = EdgeGuidedCandidateStatus.REJECTED_VALIDATION
+        else:
+            status = EdgeGuidedCandidateStatus.REJECTED_TEST
+        if reasons:
+            explanation = (
+                _rejection_explanation(reasons)
+                + " Isolated test was not executed because validation failed."
+                if validation_failed
+                else _rejection_explanation(reasons)
+            )
+        evaluations.append(
+            EdgeGuidedCandidateEvaluation(
+                candidate,
+                training,
+                validation,
+                test,
+                window_results,
+                validation_passed_count,
+                confirmed,
+                rejected_validation,
+                rejected_test,
+                "always_up"
+                if candidate.suggested_action is SuggestedAction.LONG_ENTRY
+                else "always_down",
+                status,
+                explanation,
+                reasons,
+                _ranking(window_results, candidate.candidate_fingerprint),
+            )
+        )
+    tested_fingerprints = {item.candidate.candidate_fingerprint for item in evaluations}
+    for candidate, training, validation in validation_results:
+        if candidate.candidate_fingerprint in tested_fingerprints:
+            continue
+        if _stage_qualifies(
+            training, RefinementSegmentName.TRAINING
+        ) and _stage_qualifies(validation, RefinementSegmentName.VALIDATION):
+            # Qualified candidates below the isolated-test budget are intentionally
+            # represented only by funnel counters; they are not test rejections.
+            continue
+        reasons = _candidate_rejection_reasons(
+            training=training,
+            validation=validation,
+            test=None,
+            valid=0,
+            confirmed=0,
+            ratio=Decimal(0),
+            thresholds=thresholds,
+        )
+        evaluations.append(
+            EdgeGuidedCandidateEvaluation(
+                candidate,
+                training,
+                validation,
+                None,
+                (),
+                0,
+                0,
+                0,
+                0,
+                "always_up"
+                if candidate.suggested_action is SuggestedAction.LONG_ENTRY
+                else "always_down",
+                EdgeGuidedCandidateStatus.REJECTED_VALIDATION,
+                _rejection_explanation(reasons)
+                + " Isolated test was not executed because validation failed.",
+                reasons,
+                None,
+            )
+        )
+    evaluations = evaluations[:maximum_candidates]
+    outcome = _research_outcome(tuple(evaluations), bool(hypotheses), bool(candidates))
+    return EdgeGuidedEvaluationResult(
+        dataset.fingerprint,
+        len(candidates),
+        len(evaluations),
+        maximum_candidates,
+        len(windows),
+        tuple(evaluations),
+        outcome,
+        _outcome_explanation(outcome),
+        {
+            "hypotheses_generated": len(hypotheses),
+            "complete_strategies_generated": len(candidates),
+            "generated_count": len(candidates),
+            "training_evaluated_count": len(training_results),
+            "training_retained_count": len(training_retained),
+            "validation_evaluated_count": len(validation_results),
+            "validation_retained_count": len(validation_retained),
+            "test_evaluated_count": sum(item.test is not None for item in evaluations),
+            "training_screened": len(training_results),
+            "validation_evaluated": len(validation_results),
+            "test_evaluated": sum(item.test is not None for item in evaluations),
+            "confirmed_candidates": sum(
+                item.status is EdgeGuidedCandidateStatus.CONFIRMED
+                for item in evaluations
+            ),
+            "windows_reused": len(reused_keys),
+            "windows_computed": len(computed_keys),
+            **{
+                f"{stage.value}_windows_reused": sum(
+                    item.stage is stage and key in reused_keys
+                    for key, item in evidence.items()
+                )
+                for stage in EDGE_GUIDED_STAGES
+            },
+            **{
+                f"{stage.value}_windows_computed": sum(
+                    item.stage is stage and key in computed_keys
+                    for key, item in evidence.items()
+                )
+                for stage in EDGE_GUIDED_STAGES
+            },
+        },
+        stage_evidence=tuple(
+            evidence[key]
+            for key in sorted(evidence)
+            if key in computed_keys or key in reused_keys
+        ),
+    )
+
+
+def _evaluate_candidate_stage(
+    *,
+    dataset: HistoricalDataset,
+    feature_matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    candidate: EdgeGuidedCandidate,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    decision_interval: timedelta,
+    segment: RefinementSegmentName,
+    reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    reused_keys: set[str],
+    computed_keys: set[str],
+) -> EdgeGuidedSegmentEvaluation:
+    values: list[EdgeGuidedSegmentEvaluation] = []
+    for window in windows:
+        matrices = build_window_matrices(
+            feature_matrix, window, decision_interval=decision_interval
+        )
+        matrix = (
+            matrices.training
+            if segment is RefinementSegmentName.TRAINING
+            else matrices.validation
+        )
+        if not matrix.rows or not matrices.training.rows:
+            continue
+        volatility_threshold = predictive_edge_volatility_threshold(
+            matrices.training.rows
+        )
+        values.append(
+            _evaluate_or_reuse_stage(
+                dataset=dataset,
+                matrix=matrix,
+                window=window,
+                segment=segment,
+                candidate=candidate,
+                initial_cash=initial_cash,
+                simulation=simulation,
+                volatility_threshold=volatility_threshold,
+                reusable_stage_evidence=reusable_stage_evidence,
+                stage_evidence=stage_evidence,
+                reused_keys=reused_keys,
+                computed_keys=computed_keys,
+            )
+        )
+    return _aggregate_values(tuple(values), segment)
+
+
+def _aggregate_values(
+    values: tuple[EdgeGuidedSegmentEvaluation, ...],
+    segment: RefinementSegmentName,
+) -> EdgeGuidedSegmentEvaluation:
+    if not values:
+        return EdgeGuidedSegmentEvaluation(
+            segment, Decimal(0), Decimal(0), 0, Decimal(0), Decimal(0), Decimal(0)
+        )
+    count = Decimal(len(values))
+    return EdgeGuidedSegmentEvaluation(
+        segment,
+        sum((item.total_return for item in values), Decimal(0)) / count,
+        sum((item.max_drawdown for item in values), Decimal(0)) / count,
+        sum(item.trade_count for item in values),
+        sum((item.fees_paid for item in values), Decimal(0)),
+        sum((item.return_difference_from_production for item in values), Decimal(0))
+        / count,
+        sum((item.return_difference_from_buy_and_hold for item in values), Decimal(0))
+        / count,
+    )
+
+
+def _stage_qualifies(
+    value: EdgeGuidedSegmentEvaluation, stage: RefinementSegmentName
+) -> bool:
+    qualifies = (
+        value.sufficient_trades and value.positive_net_return and value.risk_acceptable
+    )
+    return qualifies and (
+        stage is not RefinementSegmentName.VALIDATION or value.beats_production
+    )
+
+
+def _segment_rank(
+    value: EdgeGuidedSegmentEvaluation, fingerprint: str
+) -> tuple[Decimal, Decimal, int, str]:
+    return (-value.total_return, value.max_drawdown, -value.trade_count, fingerprint)
+
+
+def _evaluate_candidate_windows(
+    *,
+    dataset: HistoricalDataset,
+    feature_matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    candidate: EdgeGuidedCandidate,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    decision_interval: timedelta,
+    thresholds: EvidenceThresholds,
+    reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    reused_keys: set[str],
+    computed_keys: set[str],
+) -> tuple[EdgeGuidedWindowEvaluation, ...]:
+    prepared: list[
+        tuple[
+            WalkForwardWindow,
+            HistoricalFeatureMatrix | None,
+            Decimal,
+            EdgeGuidedSegmentEvaluation,
+            EdgeGuidedSegmentEvaluation,
+            tuple[EdgeGuidedRejectionReason, ...],
+        ]
+    ] = []
+    for window in windows:
+        matrices = build_window_matrices(
+            feature_matrix, window, decision_interval=decision_interval
+        )
+        if not all(
+            matrix.rows
+            for matrix in (matrices.training, matrices.validation, matrices.test)
+        ):
+            continue
+        volatility_threshold = predictive_edge_volatility_threshold(
+            matrices.training.rows
+        )
+        training = _evaluate_or_reuse_stage(
+            dataset=dataset,
+            matrix=matrices.training,
+            window=window,
+            segment=RefinementSegmentName.TRAINING,
+            candidate=candidate,
+            initial_cash=initial_cash,
+            simulation=simulation,
+            volatility_threshold=volatility_threshold,
+            reusable_stage_evidence=reusable_stage_evidence,
+            stage_evidence=stage_evidence,
+            reused_keys=reused_keys,
+            computed_keys=computed_keys,
+        )
+        validation = _evaluate_or_reuse_stage(
+            dataset=dataset,
+            matrix=matrices.validation,
+            window=window,
+            segment=RefinementSegmentName.VALIDATION,
+            candidate=candidate,
+            initial_cash=initial_cash,
+            simulation=simulation,
+            volatility_threshold=volatility_threshold,
+            reusable_stage_evidence=reusable_stage_evidence,
+            stage_evidence=stage_evidence,
+            reused_keys=reused_keys,
+            computed_keys=computed_keys,
+        )
+        validation_reasons = _window_segment_rejection_reasons(
+            validation, RefinementSegmentName.VALIDATION
+        )
+        prepared.append(
+            (
+                window,
+                matrices.test,
+                volatility_threshold,
+                training,
+                validation,
+                validation_reasons,
+            )
+        )
+    validation_count = sum(not item[5] for item in prepared)
+    allow_test = validation_count >= thresholds.minimum_windows
+    results: list[EdgeGuidedWindowEvaluation] = []
+    for (
+        window,
+        test_matrix,
+        volatility_threshold,
+        training,
+        validation,
+        validation_reasons,
+    ) in prepared:
+        validation_passed = not validation_reasons
+        test = (
+            _evaluate_or_reuse_stage(
+                dataset=dataset,
+                matrix=test_matrix,
+                window=window,
+                segment=RefinementSegmentName.TEST,
+                candidate=candidate,
+                initial_cash=initial_cash,
+                simulation=simulation,
+                volatility_threshold=volatility_threshold,
+                reusable_stage_evidence=reusable_stage_evidence,
+                stage_evidence=stage_evidence,
+                reused_keys=reused_keys,
+                computed_keys=computed_keys,
+            )
+            if validation_passed and allow_test and test_matrix is not None
+            else None
+        )
+        test_confirmed = test is not None and not _window_segment_rejection_reasons(
+            test, RefinementSegmentName.TEST
+        )
+        window_reasons = validation_reasons
+        if test is not None:
+            window_reasons = _stable_reasons(
+                (
+                    *window_reasons,
+                    *_window_segment_rejection_reasons(
+                        test, RefinementSegmentName.TEST
+                    ),
+                )
+            )
+        results.append(
+            EdgeGuidedWindowEvaluation(
+                window.ordinal,
+                volatility_threshold,
+                training,
+                validation,
+                test,
+                validation_passed,
+                test_confirmed,
+                window_reasons,
+                "",
+            )
+        )
+    return tuple(results)
+
+
+def edge_guided_stage_cache_key(
+    candidate: EdgeGuidedCandidate,
+    window: WalkForwardWindow,
+    stage: RefinementSegmentName,
+    content_fingerprint: str,
+) -> str:
+    """Identify immutable candidate evidence for one exact stage segment."""
+
+    bounds = {
+        RefinementSegmentName.TRAINING: (window.training_from, window.training_to),
+        RefinementSegmentName.VALIDATION: (
+            window.validation_from,
+            window.validation_to,
+        ),
+        RefinementSegmentName.TEST: (window.test_from, window.test_to),
+    }[stage]
+
+    return _fingerprint(
+        {
+            "candidate_fingerprint": candidate.candidate_fingerprint,
+            "stage": stage.value,
+            "segment": bounds,
+            "content_fingerprint": content_fingerprint,
+            "ranking_contract_version": EDGE_GUIDED_RANKING_CONTRACT_VERSION,
+            "qualification_contract_version": (
+                EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION
+            ),
+        }
+    )
+
+
+def _evaluate_segment(
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    segment: RefinementSegmentName,
+    candidate: EdgeGuidedCandidate,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    action_filter: DecisionActionFilter,
+) -> EdgeGuidedSegmentEvaluation:
+    production = simulate_historical_feature_matrix(
+        dataset=dataset,
+        feature_matrix=matrix,
+        initial_cash=initial_cash,
+        fee_rate=simulation.fee_rate,
+        slippage_rate=simulation.slippage_rate,
+        decision_interval=candidate.decision_interval,
+    )
+    buy_and_hold = simulate_buy_and_hold(
+        matrix,
+        segment,
+        dataset.identity.instrument,
+        initial_cash,
+        simulation,
+    )
+    result = simulate_historical_feature_matrix(
+        dataset=dataset,
+        feature_matrix=matrix,
+        initial_cash=initial_cash,
+        fee_rate=candidate.fee_rate,
+        slippage_rate=candidate.slippage_rate,
+        decision_interval=candidate.decision_interval,
+        decision_action_filter=action_filter,
+    )
+    return EdgeGuidedSegmentEvaluation(
+        segment,
+        result.total_return,
+        result.max_drawdown,
+        result.trade_count,
+        result.fees_paid,
+        result.total_return - production.total_return,
+        result.total_return - buy_and_hold.total_return,
+    )
+
+
+def _evaluate_or_reuse_stage(
+    *,
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    window: WalkForwardWindow,
+    segment: RefinementSegmentName,
+    candidate: EdgeGuidedCandidate,
+    initial_cash: Decimal,
+    simulation: SimulationConfiguration,
+    volatility_threshold: Decimal,
+    reusable_stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    stage_evidence: dict[str, EdgeGuidedStageEvidence],
+    reused_keys: set[str],
+    computed_keys: set[str],
+) -> EdgeGuidedSegmentEvaluation:
+    content_fingerprint = _stage_content_fingerprint(matrix)
+    cache_key = edge_guided_stage_cache_key(
+        candidate, window, segment, content_fingerprint
+    )
+    cached = reusable_stage_evidence.get(cache_key)
+    if cached is not None:
+        reused_keys.add(cache_key)
+        stage_evidence[cache_key] = replace(cached, window_ordinal=window.ordinal)
+        return cached.metrics
+    metrics = _evaluate_segment(
+        dataset,
+        matrix,
+        segment,
+        candidate,
+        initial_cash,
+        simulation,
+        _candidate_action_filter(candidate, volatility_threshold),
+    )
+    bounds = {
+        RefinementSegmentName.TRAINING: (window.training_from, window.training_to),
+        RefinementSegmentName.VALIDATION: (
+            window.validation_from,
+            window.validation_to,
+        ),
+        RefinementSegmentName.TEST: (window.test_from, window.test_to),
+    }[segment]
+    stage_evidence[cache_key] = EdgeGuidedStageEvidence(
+        cache_key,
+        candidate.candidate_fingerprint,
+        segment,
+        window.ordinal,
+        bounds[0],
+        bounds[1],
+        content_fingerprint,
+        metrics,
+    )
+    computed_keys.add(cache_key)
+    return metrics
+
+
+def _stage_content_fingerprint(matrix: HistoricalFeatureMatrix) -> str:
+    return _fingerprint({"rows": tuple(asdict(row) for row in matrix.rows)})
+
+
+def _aggregate_segment(
+    windows: tuple[EdgeGuidedWindowEvaluation, ...],
+    segment: RefinementSegmentName,
+) -> EdgeGuidedSegmentEvaluation:
+    values = tuple(
+        value
+        for item in windows
+        for value in (
+            item.training
+            if segment is RefinementSegmentName.TRAINING
+            else item.validation
+            if segment is RefinementSegmentName.VALIDATION
+            else item.test,
+        )
+        if value is not None
+    )
+    if not values:
+        return EdgeGuidedSegmentEvaluation(
+            segment, Decimal(0), Decimal(0), 0, Decimal(0), Decimal(0), Decimal(0)
+        )
+    count = Decimal(len(values))
+    return EdgeGuidedSegmentEvaluation(
+        segment,
+        sum((item.total_return for item in values), Decimal(0)) / count,
+        sum((item.max_drawdown for item in values), Decimal(0)) / count,
+        sum(item.trade_count for item in values),
+        sum((item.fees_paid for item in values), Decimal(0)),
+        sum((item.return_difference_from_production for item in values), Decimal(0))
+        / count,
+        sum((item.return_difference_from_buy_and_hold for item in values), Decimal(0))
+        / count,
+    )
+
+
+def _aggregate_optional_test(
+    windows: tuple[EdgeGuidedWindowEvaluation, ...],
+) -> EdgeGuidedSegmentEvaluation | None:
+    if not any(item.test is not None for item in windows):
+        return None
+    return _aggregate_segment(windows, RefinementSegmentName.TEST)
+
+
+def _ranking(
+    windows: tuple[EdgeGuidedWindowEvaluation, ...], fingerprint: str
+) -> EdgeGuidedRanking:
+    returns = tuple(sorted(item.validation.total_return for item in windows))
+    median = (
+        returns[len(returns) // 2]
+        if len(returns) % 2
+        else (returns[len(returns) // 2 - 1] + returns[len(returns) // 2]) / Decimal(2)
+        if returns
+        else Decimal(0)
+    )
+    worst = min(returns, default=Decimal(0))
+    drawdown = max(
+        (item.validation.max_drawdown for item in windows), default=Decimal(0)
+    )
+    trades = sum(item.validation.trade_count for item in windows)
+    fees = sum((item.validation.fees_paid for item in windows), Decimal(0))
+    positive = sum(value > 0 for value in returns)
+    ratio = Decimal(positive) / Decimal(len(returns)) if returns else Decimal(0)
+    return EdgeGuidedRanking(
+        median,
+        worst,
+        drawdown,
+        median / drawdown if drawdown > 0 else None,
+        trades,
+        fees,
+        median / fees if fees > 0 else None,
+        ratio,
+        positive,
+        fingerprint,
+    )
+
+
+def edge_guided_summary(result: EdgeGuidedEvaluationResult) -> dict[str, object]:
+    """Return a structured JSON-safe job summary with Decimal strings."""
+
+    value = json.loads(json.dumps(asdict(result), default=str))
+    if not isinstance(value, dict):
+        raise EdgeGuidedCandidateError("edge-guided summary must be an object")
+    value.pop("stage_evidence", None)
+    return value
+
+
+def _window_segment_rejection_reasons(
+    value: EdgeGuidedSegmentEvaluation, segment: RefinementSegmentName
+) -> tuple[EdgeGuidedRejectionReason, ...]:
+    reasons: list[EdgeGuidedRejectionReason] = []
+    if not value.sufficient_trades:
+        reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_TRADES)
+    if not value.positive_net_return:
+        reasons.append(
+            EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN
+            if segment is RefinementSegmentName.VALIDATION
+            else EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN
+        )
+    if not value.beats_production:
+        reasons.append(
+            EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION
+            if segment is RefinementSegmentName.VALIDATION
+            else EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST
+        )
+    if not value.risk_acceptable:
+        reasons.append(EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN)
+    return _stable_reasons(tuple(reasons))
+
+
+def _candidate_rejection_reasons(
+    *,
+    training: EdgeGuidedSegmentEvaluation,
+    validation: EdgeGuidedSegmentEvaluation,
+    test: EdgeGuidedSegmentEvaluation | None,
+    valid: int,
+    confirmed: int,
+    ratio: Decimal,
+    thresholds: EvidenceThresholds,
+) -> tuple[EdgeGuidedRejectionReason, ...]:
+    reasons: list[EdgeGuidedRejectionReason] = []
+    if not all(item.sufficient_trades for item in (training, validation)):
+        reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_TRADES)
+    for value, reason in (
+        (training, EdgeGuidedRejectionReason.NON_POSITIVE_TRAINING_RETURN),
+        (validation, EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN),
+    ):
+        if not value.positive_net_return:
+            reasons.append(reason)
+    if not validation.beats_production:
+        reasons.append(EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION)
+    if not all(item.risk_acceptable for item in (training, validation)):
+        reasons.append(EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN)
+    if valid < thresholds.minimum_windows:
+        reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_VALID_WINDOWS)
+    validation_passed = not _validation_stage_failed(
+        training=training,
+        validation=validation,
+        valid=valid,
+        thresholds=thresholds,
+    )
+    if validation_passed:
+        if test is None or not test.sufficient_trades:
+            reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_TRADES)
+        if test is not None and not test.positive_net_return:
+            reasons.append(EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN)
+        if test is not None and not test.beats_production:
+            reasons.append(EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST)
+        if test is not None and not test.risk_acceptable:
+            reasons.append(EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN)
+        if confirmed < thresholds.minimum_windows:
+            reasons.append(EdgeGuidedRejectionReason.INSUFFICIENT_CONFIRMED_WINDOWS)
+        if valid and ratio < thresholds.minimum_stable_direction_ratio:
+            reasons.append(EdgeGuidedRejectionReason.UNSTABLE_ACROSS_WINDOWS)
+    return _stable_reasons(tuple(reasons))
+
+
+def _stable_reasons(
+    reasons: tuple[EdgeGuidedRejectionReason, ...],
+) -> tuple[EdgeGuidedRejectionReason, ...]:
+    return tuple(dict.fromkeys(reasons))
+
+
+def _validation_stage_failed(
+    *,
+    training: EdgeGuidedSegmentEvaluation,
+    validation: EdgeGuidedSegmentEvaluation,
+    valid: int,
+    thresholds: EvidenceThresholds,
+) -> bool:
+    return (
+        not training.sufficient_trades
+        or not training.positive_net_return
+        or not training.risk_acceptable
+        or not validation.sufficient_trades
+        or not validation.positive_net_return
+        or not validation.beats_production
+        or not validation.risk_acceptable
+        or valid < thresholds.minimum_windows
+    )
+
+
+def _rejection_explanation(
+    reasons: tuple[EdgeGuidedRejectionReason, ...],
+) -> str:
+    labels = {
+        EdgeGuidedRejectionReason.INSUFFICIENT_TRADES: "insufficient trading activity",
+        EdgeGuidedRejectionReason.NON_POSITIVE_TRAINING_RETURN: (
+            "non-positive training return"
+        ),
+        EdgeGuidedRejectionReason.NON_POSITIVE_VALIDATION_RETURN: (
+            "non-positive validation return"
+        ),
+        EdgeGuidedRejectionReason.NON_POSITIVE_TEST_RETURN: "non-positive test return",
+        EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_VALIDATION: (
+            "validation did not strictly beat production"
+        ),
+        EdgeGuidedRejectionReason.DID_NOT_BEAT_PRODUCTION_TEST: (
+            "test did not strictly beat production"
+        ),
+        EdgeGuidedRejectionReason.EXCESSIVE_DRAWDOWN: (
+            "drawdown exceeded the existing risk limit"
+        ),
+        EdgeGuidedRejectionReason.INSUFFICIENT_VALID_WINDOWS: (
+            "insufficient validation windows"
+        ),
+        EdgeGuidedRejectionReason.INSUFFICIENT_CONFIRMED_WINDOWS: (
+            "insufficient confirmed test windows"
+        ),
+        EdgeGuidedRejectionReason.UNSTABLE_ACROSS_WINDOWS: (
+            "insufficient stability across windows"
+        ),
+    }
+    return (
+        "Candidate rejected: " + "; ".join(labels[reason] for reason in reasons) + "."
+    )
+
+
+def _valid_hypothesis(value: StrategyHypothesis) -> bool:
+    return not (
+        (value.lower_bound is None and value.upper_bound is None)
+        or (
+            value.lower_bound is not None
+            and value.upper_bound is not None
+            and value.lower_bound >= value.upper_bound
+        )
+    )
+
+
+def _economically_viable(
+    value: StrategyHypothesis, simulation: SimulationConfiguration
+) -> bool:
+    gross = value.expected_gross_return
+    net = value.expected_net_return
+    if gross is None or net is None:
+        return False
+    entry_multiplier = (Decimal(1) + simulation.slippage_rate) * (
+        Decimal(1) + simulation.fee_rate
+    )
+    exit_multiplier = (Decimal(1) - simulation.slippage_rate) * (
+        Decimal(1) - simulation.fee_rate
+    )
+    round_trip_cost = entry_multiplier / exit_multiplier - Decimal(1)
+    return gross > round_trip_cost + ECONOMIC_EDGE_MARGIN and net > ECONOMIC_EDGE_MARGIN
+
+
+def _hypothesis_rank(value: StrategyHypothesis) -> tuple[Decimal, Decimal, str]:
+    economic_value = (
+        value.expected_net_return
+        if value.suggested_action is SuggestedAction.LONG_ENTRY
+        else value.expected_avoided_loss
+    ) or Decimal(0)
+    return (-economic_value, -value.stability_ratio, value.hypothesis_id)
+
+
+def _compatible_cadences(horizon: timedelta) -> tuple[timedelta, ...]:
+    compatible = tuple(value for value in CANDIDATE_CADENCES if value <= horizon)
+    return compatible[-2:] if compatible else (CANDIDATE_CADENCES[0],)
+
+
+def _candidate_rank(value: EdgeGuidedCandidate) -> tuple[int, str]:
+    order = {
+        CandidateFamily.EDGE_ENTRY_TIMED_EXIT: 0,
+        CandidateFamily.EDGE_ENTRY_SIGNAL_EXIT: 1,
+        CandidateFamily.EDGE_ENTRY_BASELINE_EXIT: 2,
+        CandidateFamily.EXIT_OR_AVOID_OVERLAY: 3,
+    }
+    return order[value.candidate_family], value.candidate_fingerprint
+
+
+def _candidate_matches(
+    row: HistoricalFeatureRow,
+    *,
+    predictor_name: str,
+    condition: Condition,
+    lower_bound: Decimal | None,
+    upper_bound: Decimal | None,
+    volatility_threshold: Decimal,
+) -> bool:
+    if not predictor_name:
+        return False
+    value = predictive_edge_value(row, predictor_name)
+    return (
+        (lower_bound is None or value > lower_bound)
+        and (upper_bound is None or value <= upper_bound)
+        and predictive_edge_condition_matches(
+            row, condition, volatility_threshold=volatility_threshold
+        )
+    )
+
+
+def _candidate_context_matches(
+    row: HistoricalFeatureRow, candidate: EdgeGuidedCandidate
+) -> bool:
+    if candidate.context_predictor_name is None:
+        return True
+    value = predictive_edge_value(row, candidate.context_predictor_name)
+    return (
+        candidate.context_lower_bound is None or value >= candidate.context_lower_bound
+    ) and (
+        candidate.context_upper_bound is None or value <= candidate.context_upper_bound
+    )
+
+
+def _research_outcome(
+    evaluations: tuple[EdgeGuidedCandidateEvaluation, ...],
+    edges_found: bool,
+    candidates_generated: bool,
+) -> ResearchOutcome:
+    if any(item.status is EdgeGuidedCandidateStatus.CONFIRMED for item in evaluations):
+        return ResearchOutcome.CONFIRMED_CANDIDATES_FOUND
+    if any(
+        item.status is EdgeGuidedCandidateStatus.REJECTED_TEST for item in evaluations
+    ):
+        return ResearchOutcome.CANDIDATES_REJECTED_TEST
+    if evaluations:
+        return ResearchOutcome.CANDIDATES_REJECTED_VALIDATION
+    if edges_found and not candidates_generated:
+        return ResearchOutcome.EDGES_NOT_ECONOMIC
+    return ResearchOutcome.NO_PREDICTIVE_EDGE
+
+
+def _outcome_explanation(outcome: ResearchOutcome) -> str:
+    return {
+        ResearchOutcome.CONFIRMED_CANDIDATES_FOUND: (
+            "At least one complete Strategy passed isolated validation and test."
+        ),
+        ResearchOutcome.CANDIDATES_REJECTED_VALIDATION: (
+            "Complete Strategies were generated but failed validation; test was not "
+            "used to adjust them."
+        ),
+        ResearchOutcome.CANDIDATES_REJECTED_TEST: (
+            "Candidates were profitable in validation but failed isolated test."
+        ),
+        ResearchOutcome.NO_PREDICTIVE_EDGE: (
+            "No stable predictive edge was detected with the current evidence."
+        ),
+        ResearchOutcome.EDGES_NOT_ECONOMIC: (
+            "Patterns were detected, but expected movement did not cover round-trip "
+            "costs and the versioned margin."
+        ),
+        ResearchOutcome.INSUFFICIENT_OCCURRENCES: (
+            "Candidate evidence did not occur often enough for evaluation."
+        ),
+        ResearchOutcome.INSUFFICIENT_DATA: "The requested history was insufficient.",
+        ResearchOutcome.FAILED: "Research failed because of an operational error.",
+    }[outcome]
+
+
+def _fingerprint(payload: dict[str, object]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()
