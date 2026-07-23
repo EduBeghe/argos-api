@@ -176,6 +176,11 @@ class StrategyHypothesisResponse(BaseModel):
     evidence_status: EvidenceStatus
     rationale: str
     limitations: str
+    context_predictor_name: str | None = None
+    context_predictor_version: int | None = None
+    context_regime: str | None = None
+    context_lower_bound: Decimal | None = None
+    context_upper_bound: Decimal | None = None
 
 
 class StrategyHypothesisPageResponse(BaseModel):
@@ -222,6 +227,8 @@ class PredictiveEdgeDiagnosticResponse(BaseModel):
     stage_timings: dict[str, str]
     computed_counts: dict[str, int]
     reused_counts: dict[str, int]
+    regime_conditioned_conclusion: str | None = None
+    regime_conditioned_stage_counters: dict[str, object] | None = None
 
 
 class PredictiveEdgeNearMissResponse(BaseModel):

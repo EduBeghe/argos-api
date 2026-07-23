@@ -391,6 +391,11 @@ class StrategyHypothesisRecord(Base):
     evidence_status: Mapped[str] = mapped_column(String(48), nullable=False)
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
     limitations: Mapped[str] = mapped_column(Text, nullable=False)
+    context_predictor_name: Mapped[str | None] = mapped_column(String(64))
+    context_predictor_version: Mapped[int | None] = mapped_column(Integer)
+    context_regime: Mapped[str | None] = mapped_column(String(32))
+    context_lower_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    context_upper_bound: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
 
 
 class PredictiveEdgeBenchmarkRecord(Base):
@@ -460,6 +465,10 @@ class PredictiveEdgeRunDiagnosticRecord(Base):
     stage_timings: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False)
     computed_counts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
     reused_counts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
+    regime_conditioned_conclusion: Mapped[str | None] = mapped_column(String(64))
+    regime_conditioned_stage_counters: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB
+    )
 
 
 class PredictiveEdgeNearMissRecord(Base):

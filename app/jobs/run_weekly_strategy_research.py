@@ -137,8 +137,15 @@ async def run(
                                     "strategy_research_outcome": (
                                         item.execution.result.outcome.value
                                     ),
-                                    "predictive_edge_conclusion": item.diagnostics.get(
-                                        "diagnostic_conclusion"
+                                    "predictive_edge_v4_conclusion": (
+                                        item.diagnostics.get(
+                                            "predictive_edge_v4_conclusion"
+                                        )
+                                    ),
+                                    "regime_conditioned_v41_conclusion": (
+                                        item.diagnostics.get(
+                                            "regime_conditioned_v41_conclusion"
+                                        )
                                     ),
                                     "diagnostic_url": (
                                         "/optimization/predictive-edge-runs/"

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
@@ -24,6 +24,7 @@ class HistoricalFeatureRow:
     return_1: Decimal
     return_12: Decimal
     relative_volume_20: Decimal
+    research_values: dict[str, Decimal] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

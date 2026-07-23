@@ -16,12 +16,19 @@ from app.optimization.feature_matrix import (
     HistoricalFeatureMatrix,
     HistoricalFeatureRow,
 )
-from app.optimization.predictive_edges import SuggestedAction
+from app.optimization.predictive_edge_v4 import DISCOVERY_CADENCES, DISCOVERY_HORIZONS
+from app.optimization.predictive_edges import (
+    Condition,
+    DirectionMapping,
+    EvidenceStatus,
+    StrategyHypothesis,
+    SuggestedAction,
+)
 from app.optimization.walk_forward import WalkForwardWindow
 from app.paper.config import SimulationConfiguration
 
-PREDICTIVE_EDGE_V41_CONTRACT_VERSION = 41
-DERIVED_PREDICTOR_VERSION = 1
+PREDICTIVE_EDGE_V41_CONTRACT_VERSION = 42
+DERIVED_PREDICTOR_VERSION = 2
 DIRECTIONAL_RELATIONSHIP_LIMIT = 24
 CONTEXT_RELATIONSHIP_LIMIT = 8
 INTERACTION_GENERATION_LIMIT = 192
@@ -32,6 +39,8 @@ LOOKBACKS = (12, 48, 288)
 MINIMUM_OBSERVATIONS = 8
 MINIMUM_HIT_IMPROVEMENT = Decimal("0.01")
 ECONOMIC_MARGIN = Decimal("0.0001")
+MINIMUM_CONFIRMATION_WINDOWS = 3
+DIRECTIONAL_BIN_COUNT = 3
 
 
 class PredictorRole(StrEnum):
@@ -92,6 +101,16 @@ class FrozenRegime:
 
 
 @dataclass(frozen=True, slots=True)
+class DirectionalScreen:
+    predictor: str
+    version: int
+    cadence: timedelta
+    horizon: timedelta
+    score: Decimal
+    fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
 class PhaseEvidence:
     observations: int
     gross_movement: Decimal | None
@@ -116,6 +135,10 @@ class RegimeConditionedRelationship:
     cadence: timedelta
     horizon: timedelta
     frozen_regime: FrozenRegime
+    selected_bin: int
+    directional_lower_bound: Decimal | None
+    directional_upper_bound: Decimal | None
+    direction_mapping: DirectionMapping
     action: SuggestedAction
     profile: str
     training: PhaseEvidence
@@ -144,13 +167,14 @@ class V41StageCounters:
 
 @dataclass(frozen=True, slots=True)
 class PredictiveEdgeV41Result:
-    directional_relationships: tuple[str, ...]
+    directional_relationships: tuple[DirectionalScreen, ...]
     context_relationships: tuple[str, ...]
     interactions: tuple[RegimeConditionedRelationship, ...]
     candidates: tuple[V41Candidate, ...]
     actionable_near_misses: tuple[V41Candidate, ...]
     diagnostic_near_misses: tuple[str, ...]
     confirmed_candidates: tuple[V41Candidate, ...]
+    hypotheses: tuple[StrategyHypothesis, ...]
     conclusion: V41Conclusion
     stage_a1: V41StageCounters
     stage_a2: V41StageCounters
@@ -265,6 +289,35 @@ def build_derived_feature_rows(
     return tuple(result)
 
 
+def enrich_feature_matrix(
+    matrix: HistoricalFeatureMatrix,
+) -> HistoricalFeatureMatrix:
+    """Attach research-only derived values for the edge-guided simulation path."""
+
+    derived = {
+        item.candle_open_time: item.values
+        for item in build_derived_feature_rows(matrix)
+    }
+    return HistoricalFeatureMatrix(
+        matrix.dataset_fingerprint,
+        tuple(
+            HistoricalFeatureRow(
+                row.candle_open_time,
+                row.close_price,
+                row.ema_20,
+                row.ema_50,
+                row.rsi_14,
+                row.atr_14,
+                row.return_1,
+                row.return_12,
+                row.relative_volume_20,
+                derived.get(row.candle_open_time, {}),
+            )
+            for row in matrix.rows
+        ),
+    )
+
+
 def analyze_predictive_edges_v41(
     *,
     matrix: HistoricalFeatureMatrix,
@@ -291,17 +344,9 @@ def analyze_predictive_edges_v41(
         "rsi_regime",
         "rolling_breakout_position_288",
     )
-    directional_rank, a1_computed, a1_reused = _screen_predictors_cached(
-        values_by_time,
-        matrix,
-        windows,
-        directional,
-        True,
-        cache,
-        writes,
-        force_recompute,
+    directional_rank, a1_computed, a1_reused = _screen_directional_relationships(
+        values_by_time, matrix, windows, directional, cache, writes, force_recompute
     )
-    directional_rank = directional_rank[:DIRECTIONAL_RELATIONSHIP_LIMIT]
     context_rank, a2_computed, a2_reused = _screen_predictors_cached(
         values_by_time,
         matrix,
@@ -322,64 +367,83 @@ def analyze_predictive_edges_v41(
     interactions: list[RegimeConditionedRelationship] = []
     for direction, context in generated_pairs:
         frozen = _freeze_regimes(values_by_time, windows, context)
+        selected_bin, lower, upper, mapping, action = _freeze_directional_rule(
+            values_by_time, matrix, windows, direction
+        )
         baseline = _evaluate(
-            values_by_time, matrix, windows, direction, None, "training", simulation
+            values_by_time,
+            matrix,
+            windows,
+            direction.predictor,
+            None,
+            "training",
+            simulation,
+            action,
+            direction.cadence,
+            direction.horizon,
+            lower,
+            upper,
         )
         for regime in frozen:
-            action = SuggestedAction.LONG_ENTRY
+            if len(interactions) >= INTERACTION_GENERATION_LIMIT:
+                break
             evidence, stage_computed, stage_reused = _evaluate_cached(
                 values_by_time,
                 matrix,
                 windows,
-                direction,
+                direction.predictor,
                 context,
                 regime,
                 "training",
                 simulation,
                 action,
+                direction.cadence,
+                direction.horizon,
+                lower,
+                upper,
                 cache,
                 writes,
                 force_recompute,
             )
             computed += stage_computed
             reused += stage_reused
-            action = (
-                SuggestedAction.LONG_ENTRY
-                if (evidence.gross_movement or Decimal(0)) >= 0
-                else SuggestedAction.EXIT_OR_AVOID
-            )
-            if action is SuggestedAction.EXIT_OR_AVOID:
-                evidence = _evaluate(
-                    values_by_time,
-                    matrix,
-                    windows,
-                    direction,
-                    regime,
-                    "training",
-                    simulation,
-                    action,
-                )
             improvement = (evidence.net_movement or Decimal(0)) - (
                 baseline.net_movement or Decimal(0)
             )
             interactions.append(
                 RegimeConditionedRelationship(
-                    direction,
-                    _predictor_version(direction),
+                    direction.predictor,
+                    direction.version,
                     context,
                     _predictor_version(context),
                     regime.regime,
-                    timedelta(minutes=30),
-                    timedelta(minutes=30),
+                    direction.cadence,
+                    direction.horizon,
                     regime,
+                    selected_bin,
+                    lower,
+                    upper,
+                    mapping,
                     action,
                     "balanced_v41",
                     evidence,
                     baseline,
                     improvement,
-                    _fingerprint(direction, context, regime, action, "balanced_v41"),
+                    _fingerprint(
+                        direction,
+                        context,
+                        regime.fingerprint,
+                        selected_bin,
+                        lower,
+                        upper,
+                        mapping,
+                        action,
+                        "balanced_v41",
+                    ),
                 )
             )
+        if len(interactions) >= INTERACTION_GENERATION_LIMIT:
+            break
     retained = _diversified_interactions(tuple(interactions))
     validation_values: list[V41Candidate] = []
     validation_computed = validation_reused = 0
@@ -394,6 +458,10 @@ def analyze_predictive_edges_v41(
             "validation",
             simulation,
             relationship.action,
+            relationship.cadence,
+            relationship.horizon,
+            relationship.directional_lower_bound,
+            relationship.directional_upper_bound,
             cache,
             writes,
             force_recompute,
@@ -420,513 +488,4 @@ def analyze_predictive_edges_v41(
     selected_ids = {item.relationship.fingerprint for item in selected_candidates}
     final: list[V41Candidate] = []
     test_computed = test_reused = 0
-    for candidate in validation_values:
-        if candidate.relationship.fingerprint not in selected_ids:
-            final.append(candidate)
-            continue
-        relationship = candidate.relationship
-        test, stage_computed, stage_reused = _evaluate_cached(
-            values_by_time,
-            matrix,
-            windows,
-            relationship.directional_predictor,
-            relationship.context_predictor,
-            relationship.frozen_regime,
-            "test",
-            simulation,
-            relationship.action,
-            cache,
-            writes,
-            force_recompute,
-        )
-        test_computed += stage_computed
-        test_reused += stage_reused
-        final.append(
-            V41Candidate(
-                relationship,
-                candidate.validation,
-                test,
-                True,
-                test.passes,
-                None if test.passes else _rejection(test, relationship),
-            )
-        )
-    confirmed = tuple(item for item in final if item.confirmed)
-    actionable = tuple(
-        sorted(
-            (item for item in final if not item.selected_for_test),
-            key=_candidate_rank,
-        )[:50]
-    )
-    diagnostic = tuple(context_rank)
-    conclusion = _conclusion(tuple(final), confirmed)
-    return PredictiveEdgeV41Result(
-        directional_rank,
-        context_rank,
-        retained,
-        tuple(final),
-        actionable,
-        diagnostic,
-        confirmed,
-        conclusion,
-        V41StageCounters(
-            len(directional), a1_computed, a1_reused, len(directional_rank)
-        ),
-        V41StageCounters(len(contexts), a2_computed, a2_reused, len(context_rank)),
-        V41StageCounters(len(interactions), computed, reused, len(retained)),
-        V41StageCounters(
-            len(validation_values),
-            validation_computed,
-            validation_reused,
-            len(selected_candidates),
-        ),
-        V41StageCounters(
-            len(selected_candidates), test_computed, test_reused, len(confirmed)
-        ),
-        writes,
-    )
-
-
-def _base_values(row: HistoricalFeatureRow) -> dict[str, Decimal]:
-    ema20 = _ratio(row.close_price, row.ema_20)
-    ema50 = _ratio(row.close_price, row.ema_50)
-    spread = _ratio(row.ema_20, row.ema_50)
-    rsi_centered = (row.rsi_14 - Decimal(50)) / Decimal(50)
-    return {
-        "ema_20_relative": ema20,
-        "ema_50_relative": ema50,
-        "rsi_14": rsi_centered,
-        "return_1": row.return_1,
-        "return_12": row.return_12,
-        "trend_component": spread,
-        "rsi_contribution": rsi_centered,
-        "return_1_contribution": row.return_1,
-        "return_12_contribution": row.return_12,
-        "directional_score": spread + rsi_centered + row.return_1 + row.return_12,
-        "overall_score": spread + rsi_centered + row.return_1 + row.return_12,
-        "atr_14_relative": row.atr_14 / row.close_price
-        if row.close_price
-        else Decimal(0),
-        "relative_volume_20": row.relative_volume_20,
-        "volume_confirmation": row.relative_volume_20,
-        "trend_regime": spread,
-        "rsi_regime": rsi_centered,
-    }
-
-
-def _ratio(current: Decimal, previous: Decimal) -> Decimal:
-    return Decimal(0) if previous == 0 else current / previous - Decimal(1)
-
-
-def _screen_predictors_cached(
-    values: dict[datetime, dict[str, Decimal]],
-    matrix: HistoricalFeatureMatrix,
-    windows: tuple[WalkForwardWindow, ...],
-    names: tuple[str, ...],
-    directional: bool,
-    cache: dict[str, PhaseEvidence],
-    writes: dict[str, PhaseEvidence],
-    force_recompute: bool,
-) -> tuple[tuple[str, ...], int, int]:
-    prices = {row.candle_open_time: row.close_price for row in matrix.rows}
-    ordered = sorted(prices)
-    next_price = {
-        ordered[index]: prices[ordered[index + 1]] for index in range(len(ordered) - 1)
-    }
-    scored: list[tuple[Decimal, str]] = []
-    computed = reused = 0
-    slice_identity = tuple(
-        (
-            window.training_from,
-            window.training_to,
-            _slice_fingerprint(matrix, window.training_from, window.training_to),
-        )
-        for window in windows
-    )
-    for name in names:
-        pairs = [
-            (row[name], next_price[at] / prices[at] - 1)
-            for at, row in values.items()
-            if name in row
-            and at in next_price
-            and any(
-                window.training_from <= at < window.training_to for window in windows
-            )
-        ]
-        if not pairs:
-            continue
-        key = _fingerprint("screen", name, directional, slice_identity)
-        if not force_recompute and key in cache:
-            cached_score = cache[key].gross_movement
-            score = cached_score if cached_score is not None else Decimal(0)
-            reused += 1
-        else:
-            score = _screen_score(tuple(pairs), directional)
-            writes[key] = PhaseEvidence(
-                len(pairs),
-                score,
-                score,
-                score,
-                None,
-                None,
-                None,
-                None,
-                True,
-                True,
-                True,
-            )
-            computed += 1
-        scored.append((score, name))
-    return (
-        tuple(name for _, name in sorted(scored, key=lambda item: (-item[0], item[1]))),
-        computed,
-        reused,
-    )
-
-
-def _screen_score(
-    pairs: tuple[tuple[Decimal, Decimal], ...], directional: bool
-) -> Decimal:
-    if directional:
-        mean_x = sum((x for x, _ in pairs), Decimal(0)) / Decimal(len(pairs))
-        mean_y = sum((y for _, y in pairs), Decimal(0)) / Decimal(len(pairs))
-        return abs(
-            sum(((x - mean_x) * (y - mean_y) for x, y in pairs), Decimal(0))
-        ) * Decimal(str(sqrt(len(pairs))))
-    overall = sum((abs(y) for _, y in pairs), Decimal(0)) / Decimal(len(pairs))
-    ordered_pairs = sorted(pairs)
-    tail = ordered_pairs[len(ordered_pairs) * 2 // 3 :]
-    return (
-        abs(sum((abs(y) for _, y in tail), Decimal(0)) / Decimal(len(tail)) - overall)
-        if tail
-        else Decimal(0)
-    )
-
-
-def _freeze_regimes(
-    values: dict[datetime, dict[str, Decimal]],
-    windows: tuple[WalkForwardWindow, ...],
-    context: str,
-) -> tuple[FrozenRegime, ...]:
-    training = sorted(
-        row[context]
-        for at, row in values.items()
-        if context in row
-        and any(window.training_from <= at < window.training_to for window in windows)
-    )
-    if len(training) < 3:
-        return ()
-    lower, upper = training[len(training) // 3], training[(len(training) * 2) // 3]
-    names = (ContextRegime.LOW, ContextRegime.NORMAL, ContextRegime.HIGH)
-    if context == "trend_regime":
-        names = (ContextRegime.BEARISH, ContextRegime.NEUTRAL, ContextRegime.BULLISH)
-    elif context == "rolling_breakout_position_288":
-        names = (ContextRegime.LOWER, ContextRegime.MIDDLE, ContextRegime.UPPER)
-    return tuple(
-        FrozenRegime(
-            context,
-            _predictor_version(context),
-            name,
-            None if index == 0 else lower if index == 1 else upper,
-            lower if index == 0 else upper if index == 1 else None,
-            len(training),
-            _fingerprint(context, name, lower, upper),
-        )
-        for index, name in enumerate(names)
-    )
-
-
-def _evaluate(
-    values: dict[datetime, dict[str, Decimal]],
-    matrix: HistoricalFeatureMatrix,
-    windows: tuple[WalkForwardWindow, ...],
-    predictor: str,
-    regime: FrozenRegime | None,
-    phase: str,
-    simulation: SimulationConfiguration,
-    action: SuggestedAction | None = None,
-) -> PhaseEvidence:
-    prices = {row.candle_open_time: row.close_price for row in matrix.rows}
-    ordered = sorted(prices)
-    next_price = {ordered[i]: prices[ordered[i + 1]] for i in range(len(ordered) - 1)}
-    returns: list[Decimal] = []
-    hits: list[Decimal] = []
-    for at, row in values.items():
-        if (
-            predictor not in row
-            or at not in next_price
-            or not any(
-                getattr(window, f"{phase}_from") <= at < getattr(window, f"{phase}_to")
-                for window in windows
-            )
-        ):
-            continue
-        if regime is not None and not _inside(
-            row.get(regime.context_predictor), regime
-        ):
-            continue
-        gross = next_price[at] / prices[at] - 1
-        returns.append(gross)
-        predicted_up = row[predictor] >= 0
-        hits.append(Decimal(predicted_up == (gross >= 0)))
-    if not returns:
-        return PhaseEvidence(
-            0, None, None, None, None, None, None, None, False, False, False
-        )
-    gross = sum(returns, Decimal(0)) / Decimal(len(returns))
-    selected_action = action or (
-        SuggestedAction.LONG_ENTRY if gross >= 0 else SuggestedAction.EXIT_OR_AVOID
-    )
-    aligned = gross if selected_action is SuggestedAction.LONG_ENTRY else -gross
-    cost = Decimal(2) * (simulation.fee_rate + simulation.slippage_rate)
-    net = aligned - cost
-    hit = sum(hits, Decimal(0)) / Decimal(len(hits))
-    up_rate = sum((Decimal(value >= 0) for value in returns), Decimal(0)) / Decimal(
-        len(returns)
-    )
-    benchmark = max(up_rate, Decimal(1) - up_rate)
-    improvement = hit - benchmark
-    mean = gross
-    variance = sum(((item - mean) ** 2 for item in returns), Decimal(0)) / Decimal(
-        max(1, len(returns) - 1)
-    )
-    standard_error = Decimal(str(sqrt(float(variance / Decimal(len(returns))))))
-    stable = len(returns) >= MINIMUM_OBSERVATIONS and hit > Decimal("0.50")
-    economic = net >= ECONOMIC_MARGIN
-    return PhaseEvidence(
-        len(returns),
-        gross,
-        aligned,
-        net,
-        hit,
-        benchmark,
-        improvement,
-        standard_error,
-        stable,
-        economic,
-        stable and economic and improvement >= MINIMUM_HIT_IMPROVEMENT,
-    )
-
-
-def _evaluate_cached(
-    values: dict[datetime, dict[str, Decimal]],
-    matrix: HistoricalFeatureMatrix,
-    windows: tuple[WalkForwardWindow, ...],
-    directional: str,
-    context: str,
-    regime: FrozenRegime,
-    phase: str,
-    simulation: SimulationConfiguration,
-    action: SuggestedAction,
-    cache: dict[str, PhaseEvidence],
-    writes: dict[str, PhaseEvidence],
-    force_recompute: bool,
-) -> tuple[PhaseEvidence, int, int]:
-    """Reuse exact completed phase slices and aggregate them deterministically."""
-
-    evidence: list[PhaseEvidence] = []
-    computed = reused = 0
-    for window in windows:
-        key = _cache_key(
-            matrix,
-            (window,),
-            directional,
-            context,
-            regime,
-            phase,
-            simulation,
-        )
-        if not force_recompute and key in cache:
-            value = cache[key]
-            reused += 1
-        else:
-            value = _evaluate(
-                values,
-                matrix,
-                (window,),
-                directional,
-                regime,
-                phase,
-                simulation,
-                action,
-            )
-            writes[key] = value
-            computed += 1
-        evidence.append(value)
-    return _combine_phase_evidence(tuple(evidence)), computed, reused
-
-
-def _combine_phase_evidence(values: tuple[PhaseEvidence, ...]) -> PhaseEvidence:
-    total = sum(item.observations for item in values)
-    if total == 0:
-        return PhaseEvidence(
-            0, None, None, None, None, None, None, None, False, False, False
-        )
-
-    def weighted(name: str) -> Decimal | None:
-        pairs = tuple(
-            (getattr(item, name), item.observations)
-            for item in values
-            if getattr(item, name) is not None and item.observations
-        )
-        if not pairs:
-            return None
-        return sum((value * count for value, count in pairs), Decimal(0)) / Decimal(
-            sum(count for _, count in pairs)
-        )
-
-    gross = weighted("gross_movement")
-    aligned = weighted("aligned_gross_movement")
-    net = weighted("net_movement")
-    hit = weighted("directional_hit_rate")
-    benchmark = weighted("benchmark")
-    improvement = weighted("benchmark_improvement")
-    standard_error = weighted("standard_error")
-    stable = all(item.stable for item in values)
-    economic = net is not None and net >= ECONOMIC_MARGIN
-    passes = (
-        stable
-        and economic
-        and improvement is not None
-        and improvement >= MINIMUM_HIT_IMPROVEMENT
-    )
-    return PhaseEvidence(
-        total,
-        gross,
-        aligned,
-        net,
-        hit,
-        benchmark,
-        improvement,
-        standard_error,
-        stable,
-        economic,
-        passes,
-    )
-
-
-def _inside(value: Decimal | None, regime: FrozenRegime) -> bool:
-    if value is None:
-        return False
-    return (regime.lower_bound is None or value >= regime.lower_bound) and (
-        regime.upper_bound is None or value <= regime.upper_bound
-    )
-
-
-def _diversified_interactions(
-    values: tuple[RegimeConditionedRelationship, ...],
-) -> tuple[RegimeConditionedRelationship, ...]:
-    buckets: dict[tuple[str, str], list[RegimeConditionedRelationship]] = {}
-    for value in sorted(
-        values,
-        key=lambda item: (
-            -item.context_improvement,
-            -(item.training.net_movement or Decimal(0)),
-            item.fingerprint,
-        ),
-    ):
-        buckets.setdefault(
-            (value.directional_predictor, value.context_predictor), []
-        ).append(value)
-    result: list[RegimeConditionedRelationship] = []
-    while len(result) < INTERACTION_RETENTION_LIMIT and any(buckets.values()):
-        for key in sorted(buckets):
-            if buckets[key] and len(result) < INTERACTION_RETENTION_LIMIT:
-                result.append(buckets[key].pop(0))
-    return tuple(result)
-
-
-def _candidate_rank(value: V41Candidate) -> tuple[object, ...]:
-    return (
-        -(value.validation.net_movement or Decimal(0)),
-        -(value.validation.benchmark_improvement or Decimal(0)),
-        value.relationship.fingerprint,
-    )
-
-
-def _rejection(
-    evidence: PhaseEvidence, relationship: RegimeConditionedRelationship
-) -> str:
-    if relationship.context_improvement <= 0:
-        return V41Conclusion.DIRECTIONAL_SIGNAL_NOT_IMPROVED_BY_CONTEXT.value
-    if not evidence.economic:
-        return V41Conclusion.CONTEXT_IMPROVES_SIGNAL_BUT_NOT_ECONOMIC.value
-    if not evidence.stable:
-        return V41Conclusion.ECONOMIC_INTERACTION_BUT_UNSTABLE.value
-    return V41Conclusion.STABLE_INTERACTION_BELOW_BENCHMARK.value
-
-
-def _conclusion(
-    candidates: tuple[V41Candidate, ...], confirmed: tuple[V41Candidate, ...]
-) -> V41Conclusion:
-    if confirmed:
-        return V41Conclusion.REGIME_CONDITIONED_EDGE_CONFIRMED
-    reasons = {item.rejection_reason for item in candidates}
-    for value in (
-        V41Conclusion.CONTEXT_IMPROVES_SIGNAL_BUT_NOT_ECONOMIC,
-        V41Conclusion.ECONOMIC_INTERACTION_BUT_UNSTABLE,
-        V41Conclusion.STABLE_INTERACTION_BELOW_BENCHMARK,
-        V41Conclusion.DIRECTIONAL_SIGNAL_NOT_IMPROVED_BY_CONTEXT,
-    ):
-        if value.value in reasons:
-            return value
-    return V41Conclusion.NO_REGIME_CONDITIONED_EDGE
-
-
-def _predictor_version(name: str) -> int:
-    return (
-        DERIVED_PREDICTOR_VERSION
-        if any(item.name == name for item in DERIVED_PREDICTORS)
-        else 3
-    )
-
-
-def _cache_key(
-    matrix: HistoricalFeatureMatrix,
-    windows: tuple[WalkForwardWindow, ...],
-    directional: str,
-    context: str,
-    regime: FrozenRegime,
-    phase: str,
-    simulation: SimulationConfiguration,
-) -> str:
-    slices = tuple(
-        (
-            getattr(window, f"{phase}_from"),
-            getattr(window, f"{phase}_to"),
-            _slice_fingerprint(
-                matrix, getattr(window, f"{phase}_from"), getattr(window, f"{phase}_to")
-            ),
-        )
-        for window in windows
-    )
-    return _fingerprint(
-        "cache",
-        directional,
-        _predictor_version(directional),
-        context,
-        _predictor_version(context),
-        phase,
-        regime.fingerprint,
-        slices,
-        simulation.fee_rate,
-        simulation.slippage_rate,
-    )
-
-
-def _slice_fingerprint(
-    matrix: HistoricalFeatureMatrix, start: datetime, end: datetime
-) -> str:
-    return _fingerprint(
-        tuple(row for row in matrix.rows if start <= row.candle_open_time < end)
-    )
-
-
-def _fingerprint(*values: object) -> str:
-    encoded = json.dumps(
-        (PREDICTIVE_EDGE_V41_CONTRACT_VERSION, values),
-        default=str,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(encoded.encode()).hexdigest()
+    fã¿}¶‰žËkºwµç@€€™½È…Ð°É½Ü¥¸Ù…±Õ•Ì¹¥Ñ•µÌ ¤(€€€€€€€¥˜½¹Ñ•áÐ¥¸É½Ü(€€€€€€€…¹…¹ä¡Ý¥¹‘½Ü¹ÑÉ…¥¹¥¹}™É½´€ðô…Ð€ðÝ¥¹‘½Ü¹ÑÉ…¥¹¥¹}Ñ¼™½ÈÝ¥¹‘½Ü¥¸Ý¥¹‘½ÝÌ¤(€€€€¤(€€€¥˜±•¸¡ÑÉ…¥¹¥¹œ¤€ð€Ìè(€€€€€€€É•ÑÕÉ¸€ ¤(€€€±½Ý•È°ÕÁÁ•È€ôÑÉ…¥¹¥¹m±•¸¡ÑÉ…¥¹¥¹œ¤€¼¼€Ít°ÑÉ…¥¹¥¹l¡±•¸¡ÑÉ…¥¹¥¹œ¤€¨€È¤€¼¼€Ít(€€€¹…µ•Ì€ô€¡½¹Ñ•áÑI•¥µ”¹1=\°½¹Ñ•áÑI•¥µ”¹9=I50°½¹Ñ•áÑI•¥µ”¹!% ¤(€€€¥˜½¹Ñ•áÐ€ôô€‰ÑÉ•¹‘}É•¥µ”ˆè(€€€€€€€¹…µ•Ì€ô€¡½¹Ñ•áÑI•¥µ”¹	I%M °½¹Ñ•áÑI•¥µ”¹9UQI0°½¹Ñ•áÑI•¥µ”¹	U11%M ¤(€€€•±¥˜½¹Ñ•áÐ€ôô€‰É½±±¥¹}‰É•…­½ÕÑ}Á½Í¥Ñ¥½¹|Èààˆè(€€€€€€€¹…µ•Ì€ô€¡½¹Ñ•áÑI•¥µ”¹1=]H°½¹Ñ•áÑI•¥µ”¹5%1°½¹Ñ•áÑI•¥µ”¹UAAH¤(€€€É•ÑÕÉ¸ÑÕÁ±” (€€€€€€€É½é•¹I•¥µ” (€€€€€€€€€€€½¹Ñ•áÐ°(€€€€€€€€€€€}ÁÉ•‘¥Ñ½É}Ù•ÉÍ¥½¸¡½¹Ñ•áÐ¤°(€€€€€€€€€€€¹…µ”°(€€€€€€€€€€€9½¹”¥˜¥¹‘•à€ôô€À•±Í”±½Ý•È¥˜¥¹‘•à€ôô€Ä•±Í”ÕÁÁ•È°(€€€€€€€€€€€±½Ý•È¥˜¥¹‘•à€ôô€À•±Í”ÕÁÁ•È¥˜¥¹‘•à€ôô€Ä•±Í”9½¹”°(€€€€€€€€€€€±•¸¡ÑÉ…¥¹¥¹œ¤°(€€€€€€€€€€€}™¥¹•ÉÁÉ¥¹Ð¡½¹Ñ•áÐ°¹…µ”°±½Ý•È°ÕÁÁ•È¤°(€€€€€€€€¤(€€€€€€€™½È¥¹‘•à°¹…µ”¥¸•¹Õµ•É…Ñ”¡¹…µ•Ì¤(€€€€¤(()‘•˜}•Ù…±Õ…Ñ” (€€€Ù…±Õ•Ìè‘¥Ñm‘…Ñ•Ñ¥µ”°‘¥ÑmÍÑÈ°•¥µ…±ut°(€€€µ…ÑÉ¥àè!¥ÍÑ½É¥…±•…ÑÕÉ•5…ÑÉ¥à°(€€€Ý¥¹‘½ÝÌèÑÕÁ±•m]…±­½ÉÝ…É‘]¥¹‘½Ü°€¸¸¹t°(€€€ÁÉ•‘¥Ñ½ÈèÍÑÈ°(€€€É•¥µ”èÉ½é•¹I•¥µ”ð9½¹”°(€€€Á¡…Í”èÍÑÈ°(€€€Í¥µÕ±…Ñ¥½¸èM¥µÕ±…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¸°(€€€…Ñ¥½¸èMÕ•ÍÑ•‘Ñ¥½¸ð9½¹”€ô9½¹”°(€€€…‘•¹”èÑ¥µ•‘•±Ñ„€ôÑ¥µ•‘•±Ñ„¡µ¥¹ÕÑ•ÌôÌÀ¤°(€€€¡½É¥é½¸èÑ¥µ•‘•±Ñ„€ôÑ¥µ•‘•±Ñ„¡µ¥¹ÕÑ•ÌôÌÀ¤°(€€€‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹è•¥µ…°ð9½¹”€ô9½¹”°(€€€‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹è•¥µ…°ð9½¹”€ô9½¹”°(¤€´øA¡…Í•Ù¥‘•¹”è(€€€É•ÑÕÉ¹Ìè±¥ÍÑm•¥µ…±t€ômt(€€€¡¥ÑÌè±¥ÍÑm•¥µ…±t€ômt(€€€Õ¹¥Ù•ÉÍ•}É•ÑÕÉ¹Ìè±¥ÍÑm•¥µ…±t€ômt(€€€™½ÈÝ¥¹‘½Ü¥¸Ý¥¹‘½ÝÌè(€€€€€€€™½È…Ð°ÁÉ•‘¥Ñ½É}Ù…±Õ”°É½ÍÌ¥¸}Í…µÁ±•‘}Á…¥ÉÌ (€€€€€€€€€€€Ù…±Õ•Ì°µ…ÑÉ¥à°Ý¥¹‘½Ü°Á¡…Í”°ÁÉ•‘¥Ñ½È°…‘•¹”°¡½É¥é½¸(€€€€€€€€¤è(€€€€€€€€€€€Õ¹¥Ù•ÉÍ•}É•ÑÕÉ¹Ì¹…ÁÁ•¹¡É½ÍÌ¤(€€€€€€€€€€€É½Ü€ôÙ…±Õ•Ím…Ñt(€€€€€€€€€€€¥˜¹½Ð€ (€€€€€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€€€€‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹¥Ì9½¹”(€€€€€€€€€€€€€€€€€€€½ÈÁÉ•‘¥Ñ½É}Ù…±Õ”€ø‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€…¹€ (€€€€€€€€€€€€€€€€€€€‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹¥Ì9½¹”(€€€€€€€€€€€€€€€€€€€½ÈÁÉ•‘¥Ñ½É}Ù…±Õ”€ðô‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤è(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€€€€€¥˜É•¥µ”¥Ì¹½Ð9½¹”…¹¹½Ð}¥¹Í¥‘” (€€€€€€€€€€€€€€€É½Ü¹•Ð¡É•¥µ”¹½¹Ñ•áÑ}ÁÉ•‘¥Ñ½È¤°É•¥µ”(€€€€€€€€€€€€¤è(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€€€€€É•ÑÕÉ¹Ì¹…ÁÁ•¹¡É½ÍÌ¤(€€€€€€€€€€€Í•±•Ñ•‘}…Ñ¥½¸€ô…Ñ¥½¸½ÈMÕ•ÍÑ•‘Ñ¥½¸¹1=9}9QId(€€€€€€€€€€€•áÁ•Ñ•‘}Á½Í¥Ñ¥Ù”€ôÍ•±•Ñ•‘}…Ñ¥½¸¥ÌMÕ•ÍÑ•‘Ñ¥½¸¹1=9}9QId(€€€€€€€€€€€¡¥ÑÌ¹…ÁÁ•¹¡•¥µ…°¡•áÁ•Ñ•‘}Á½Í¥Ñ¥Ù”€ôô€¡É½ÍÌ€øô€À¤¤¤(€€€¥˜¹½ÐÉ•ÑÕÉ¹Ìè(€€€€€€€É•ÑÕÉ¸A¡…Í•Ù¥‘•¹” (€€€€€€€€€€€€À°9½¹”°9½¹”°9½¹”°9½¹”°9½¹”°9½¹”°9½¹”°…±Í”°…±Í”°…±Í”(€€€€€€€€¤(€€€É½ÍÌ€ôÍÕ´¡É•ÑÕÉ¹Ì°•¥µ…° À¤¤€¼•¥µ…°¡±•¸¡É•ÑÕÉ¹Ì¤¤(€€€Í•±•Ñ•‘}…Ñ¥½¸€ô…Ñ¥½¸½È€ (€€€€€€€MÕ•ÍÑ•‘Ñ¥½¸¹1=9}9QId¥˜É½ÍÌ€øô€À•±Í”MÕ•ÍÑ•‘Ñ¥½¸¹a%Q}=I}Y=%(€€€€¤(€€€…±¥¹•€ôÉ½ÍÌ¥˜Í•±•Ñ•‘}…Ñ¥½¸¥ÌMÕ•ÍÑ•‘Ñ¥½¸¹1=9}9QId•±Í”€µÉ½ÍÌ(€€€½ÍÐ€ô•¥µ…° È¤€¨€¡Í¥µÕ±…Ñ¥½¸¹™••}É…Ñ”€¬Í¥µÕ±…Ñ¥½¸¹Í±¥ÁÁ…•}É…Ñ”¤(€€€¹•Ð€ô…±¥¹•€´½ÍÐ(€€€¡¥Ð€ôÍÕ´¡¡¥ÑÌ°•¥µ…° À¤¤€¼•¥µ…°¡±•¸¡¡¥ÑÌ¤¤(€€€ÕÁ}É…Ñ”€ôÍÕ´ (€€€€€€€€¡•¥µ…°¡Ù…±Õ”€øô€À¤™½ÈÙ…±Õ”¥¸Õ¹¥Ù•ÉÍ•}É•ÑÕÉ¹Ì¤°•¥µ…° À¤(€€€€¤€¼•¥µ…°¡±•¸¡Õ¹¥Ù•ÉÍ•}É•ÑÕÉ¹Ì¤¤(€€€‰•¹¡µ…É¬€ôµ…à¡ÕÁ}É…Ñ”°•¥µ…° Ä¤€´ÕÁ}É…Ñ”¤(€€€¥µÁÉ½Ù•µ•¹Ð€ô¡¥Ð€´‰•¹¡µ…É¬(€€€µ•…¸€ôÉ½ÍÌ(€€€Ù…É¥…¹”€ôÍÕ´  ¡¥Ñ•´€´µ•…¸¤€¨¨€È™½È¥Ñ•´¥¸É•ÑÕÉ¹Ì¤°•¥µ…° À¤¤€¼•¥µ…° (€€€€€€€µ…à Ä°±•¸¡É•ÑÕÉ¹Ì¤€´€Ä¤(€€€€¤(€€€ÍÑ…¹‘…É‘}•ÉÉ½È€ô•¥µ…°¡ÍÑÈ¡ÍÅÉÐ¡™±½…Ð¡Ù…É¥…¹”€¼•¥µ…°¡±•¸¡É•ÑÕÉ¹Ì¤¤¤¤¤¤(€€€ÍÑ…‰±”€ô±•¸¡É•ÑÕÉ¹Ì¤€øô5%9%5U5}=	MIYQ%=9L…¹¡¥Ð€ø•¥µ…° ˆÀ¸ÔÀˆ¤(€€€•½¹½µ¥Œ€ô¹•Ð€øô=9=5%}5I%8(€€€É•ÑÕÉ¸A¡…Í•Ù¥‘•¹” (€€€€€€€±•¸¡É•ÑÕÉ¹Ì¤°(€€€€€€€É½ÍÌ°(€€€€€€€…±¥¹•°(€€€€€€€¹•Ð°(€€€€€€€¡¥Ð°(€€€€€€€‰•¹¡µ…É¬°(€€€€€€€¥µÁÉ½Ù•µ•¹Ð°(€€€€€€€ÍÑ…¹‘…É‘}•ÉÉ½È°(€€€€€€€ÍÑ…‰±”°(€€€€€€€•½¹½µ¥Œ°(€€€€€€€ÍÑ…‰±”…¹•½¹½µ¥Œ…¹¥µÁÉ½Ù•µ•¹Ð€øô5%9%5U5}!%Q}%5AI=Y59P°(€€€€¤(()‘•˜}•Ù…±Õ…Ñ•}…¡• (€€€Ù…±Õ•Ìè‘¥Ñm‘…Ñ•Ñ¥µ”°‘¥ÑmÍÑÈ°•¥µ…±ut°(€€€µ…ÑÉ¥àè!¥ÍÑ½É¥…±•…ÑÕÉ•5…ÑÉ¥à°(€€€Ý¥¹‘½ÝÌèÑÕÁ±•m]…±­½ÉÝ…É‘]¥¹‘½Ü°€¸¸¹t°(€€€‘¥É•Ñ¥½¹…°èÍÑÈ°(€€€½¹Ñ•áÐèÍÑÈ°(€€€É•¥µ”èÉ½é•¹I•¥µ”°(€€€Á¡…Í”èÍÑÈ°(€€€Í¥µÕ±…Ñ¥½¸èM¥µÕ±…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¸°(€€€…Ñ¥½¸èMÕ•ÍÑ•‘Ñ¥½¸°(€€€…‘•¹”èÑ¥µ•‘•±Ñ„°(€€€¡½É¥é½¸èÑ¥µ•‘•±Ñ„°(€€€‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹è•¥µ…°ð9½¹”°(€€€‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹è•¥µ…°ð9½¹”°(€€€…¡”è‘¥ÑmÍÑÈ°A¡…Í•Ù¥‘•¹•t°(€€€ÝÉ¥Ñ•Ìè‘¥ÑmÍÑÈ°A¡…Í•Ù¥‘•¹•t°(€€€™½É•}É•½µÁÕÑ”è‰½½°°(¤€´øÑÕÁ±•mA¡…Í•Ù¥‘•¹”°¥¹Ð°¥¹Ñtè(€€€€ˆˆ‰I•ÕÍ”•á…Ð½µÁ±•Ñ•Á¡…Í”Í±¥•Ì…¹…É•…Ñ”Ñ¡•´‘•Ñ•Éµ¥¹¥ÍÑ¥…±±ä¸ˆˆˆ((€€€•Ù¥‘•¹”è±¥ÍÑmA¡…Í•Ù¥‘•¹•t€ômt(€€€½µÁÕÑ•€ôÉ•ÕÍ•€ô€À(€€€™½ÈÝ¥¹‘½Ü¥¸Ý¥¹‘½ÝÌè(€€€€€€€­•ä€ô}…¡•}­•ä (€€€€€€€€€€€µ…ÑÉ¥à°(€€€€€€€€€€€€¡Ý¥¹‘½Ü°¤°(€€€€€€€€€€€‘¥É•Ñ¥½¹…°°(€€€€€€€€€€€½¹Ñ•áÐ°(€€€€€€€€€€€É•¥µ”°(€€€€€€€€€€€Á¡…Í”°(€€€€€€€€€€€Í¥µÕ±…Ñ¥½¸°(€€€€€€€€€€€…‘•¹”°(€€€€€€€€€€€¡½É¥é½¸°(€€€€€€€€€€€‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹°(€€€€€€€€€€€‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹°(€€€€€€€€€€€…Ñ¥½¸°(€€€€€€€€¤(€€€€€€€¥˜¹½Ð™½É•}É•½µÁÕÑ”…¹­•ä¥¸…¡”è(€€€€€€€€€€€Ù…±Õ”€ô…¡•m­•åt(€€€€€€€€€€€É•ÕÍ•€¬ô€Ä(€€€€€€€•±Í”è(€€€€€€€€€€€Ù…±Õ”€ô}•Ù…±Õ…Ñ” (€€€€€€€€€€€€€€€Ù…±Õ•Ì°(€€€€€€€€€€€€€€€µ…ÑÉ¥à°(€€€€€€€€€€€€€€€€¡Ý¥¹‘½Ü°¤°(€€€€€€€€€€€€€€€‘¥É•Ñ¥½¹…°°(€€€€€€€€€€€€€€€É•¥µ”°(€€€€€€€€€€€€€€€Á¡…Í”°(€€€€€€€€€€€€€€€Í¥µÕ±…Ñ¥½¸°(€€€€€€€€€€€€€€€…Ñ¥½¸°(€€€€€€€€€€€€€€€…‘•¹”°(€€€€€€€€€€€€€€€¡½É¥é½¸°(€€€€€€€€€€€€€€€‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹°(€€€€€€€€€€€€€€€‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹°(€€€€€€€€€€€€¤(€€€€€€€€€€€ÝÉ¥Ñ•Ím­•åt€ôÙ…±Õ”(€€€€€€€€€€€½µÁÕÑ•€¬ô€Ä(€€€€€€€•Ù¥‘•¹”¹…ÁÁ•¹¡Ù…±Õ”¤(€€€É•ÑÕÉ¸}½µ‰¥¹•}Á¡…Í•}•Ù¥‘•¹”¡ÑÕÁ±”¡•Ù¥‘•¹”¤¤°½µÁÕÑ•°É•ÕÍ•(()‘•˜}½µ‰¥¹•}Á¡…Í•}•Ù¥‘•¹”¡Ù…±Õ•ÌèÑÕÁ±•mA¡…Í•Ù¥‘•¹”°€¸¸¹t¤€´øA¡…Í•Ù¥‘•¹”è(€€€Ñ½Ñ…°€ôÍÕ´¡¥Ñ•´¹½‰Í•ÉÙ…Ñ¥½¹Ì™½È¥Ñ•´¥¸Ù…±Õ•Ì¤(€€€¥˜Ñ½Ñ…°€ôô€Àè(€€€€€€€É•ÑÕÉ¸A¡…Í•Ù¥‘•¹” (€€€€€€€€€€€€À°9½¹”°9½¹”°9½¹”°9½¹”°9½¹”°9½¹”°9½¹”°…±Í”°…±Í”°…±Í”(€€€€€€€€¤((€€€‘•˜Ý•¥¡Ñ•¡¹…µ”èÍÑÈ¤€´ø•¥µ…°ð9½¹”è(€€€€€€€Á…¥ÉÌ€ôÑÕÁ±” (€€€€€€€€€€€€¡•Ñ…ÑÑÈ¡¥Ñ•´°¹…µ”¤°¥Ñ•´¹½‰Í•ÉÙ…Ñ¥½¹Ì¤(€€€€€€€€€€€™½È¥Ñ•´¥¸Ù…±Õ•Ì(€€€€€€€€€€€¥˜•Ñ…ÑÑÈ¡¥Ñ•´°¹…µ”¤¥Ì¹½Ð9½¹”…¹¥Ñ•´¹½‰Í•ÉÙ…Ñ¥½¹Ì(€€€€€€€€¤(€€€€€€€¥˜¹½ÐÁ…¥ÉÌè(€€€€€€€€€€€É•ÑÕÉ¸9½¹”(€€€€€€€É•ÑÕÉ¸ÍÕ´ ¡Ù…±Õ”€¨½Õ¹Ð™½ÈÙ…±Õ”°½Õ¹Ð¥¸Á…¥ÉÌ¤°•¥µ…° À¤¤€¼•¥µ…° (€€€€€€€€€€€ÍÕ´¡½Õ¹Ð™½È|°½Õ¹Ð¥¸Á…¥ÉÌ¤(€€€€€€€€¤((€€€É½ÍÌ€ôÝ•¥¡Ñ• ‰É½ÍÍ}µ½Ù•µ•¹Ðˆ¤(€€€…±¥¹•€ôÝ•¥¡Ñ• ‰…±¥¹•‘}É½ÍÍ}µ½Ù•µ•¹Ðˆ¤(€€€¹•Ð€ôÝ•¥¡Ñ• ‰¹•Ñ}µ½Ù•µ•¹Ðˆ¤(€€€¡¥Ð€ôÝ•¥¡Ñ• ‰‘¥É•Ñ¥½¹…±}¡¥Ñ}É…Ñ”ˆ¤(€€€‰•¹¡µ…É¬€ôÝ•¥¡Ñ• ‰‰•¹¡µ…É¬ˆ¤(€€€¥µÁÉ½Ù•µ•¹Ð€ôÝ•¥¡Ñ• ‰‰•¹¡µ…É­}¥µÁÉ½Ù•µ•¹Ðˆ¤(€€€ÍÑ…¹‘…É‘}•ÉÉ½È€ôÝ•¥¡Ñ• ‰ÍÑ…¹‘…É‘}•ÉÉ½Èˆ¤(€€€ÕÍ…‰±•}Ý¥¹‘½ÝÌ€ôÑÕÁ±”¡¥Ñ•´™½È¥Ñ•´¥¸Ù…±Õ•Ì¥˜¥Ñ•´¹½‰Í•ÉÙ…Ñ¥½¹Ì¤(€€€ÍÑ…‰±”€ô€ (€€€€€€€±•¸¡ÕÍ…‰±•}Ý¥¹‘½ÝÌ¤€øô5%9%5U5}=9%I5Q%=9}]%9=]L(€€€€€€€…¹…±°¡¥Ñ•´¹ÍÑ…‰±”™½È¥Ñ•´¥¸ÕÍ…‰±•}Ý¥¹‘½ÝÌ¤(€€€€€€€…¹…±° (€€€€€€€€€€€€¡¥Ñ•´¹…±¥¹•‘}É½ÍÍ}µ½Ù•µ•¹Ð½È•¥µ…° À¤¤€ø€À™½È¥Ñ•´¥¸ÕÍ…‰±•}Ý¥¹‘½ÝÌ(€€€€€€€€¤(€€€€¤(€€€•½¹½µ¥Œ€ô¹•Ð¥Ì¹½Ð9½¹”…¹¹•Ð€øô=9=5%}5I%8(€€€Á…ÍÍ•Ì€ô€ (€€€€€€€ÍÑ…‰±”(€€€€€€€…¹•½¹½µ¥Œ(€€€€€€€…¹¥µÁÉ½Ù•µ•¹Ð¥Ì¹½Ð9½¹”(€€€€€€€…¹¥µÁÉ½Ù•µ•¹Ð€øô5%9%5U5}!%Q}%5AI=Y59P(€€€€¤(€€€É•ÑÕÉ¸A¡…Í•Ù¥‘•¹” (€€€€€€€Ñ½Ñ…°°(€€€€€€€É½ÍÌ°(€€€€€€€…±¥¹•°(€€€€€€€¹•Ð°(€€€€€€€¡¥Ð°(€€€€€€€‰•¹¡µ…É¬°(€€€€€€€¥µÁÉ½Ù•µ•¹Ð°(€€€€€€€ÍÑ…¹‘…É‘}•ÉÉ½È°(€€€€€€€ÍÑ…‰±”°(€€€€€€€•½¹½µ¥Œ°(€€€€€€€Á…ÍÍ•Ì°(€€€€¤(()‘•˜}¥¹Í¥‘”¡Ù…±Õ”è•¥µ…°ð9½¹”°É•¥µ”èÉ½é•¹I•¥µ”¤€´ø‰½½°è(€€€¥˜Ù…±Õ”¥Ì9½¹”è(€€€€€€€É•ÑÕÉ¸…±Í”(€€€É•ÑÕÉ¸€¡É•¥µ”¹±½Ý•É}‰½Õ¹¥Ì9½¹”½ÈÙ…±Õ”€øôÉ•¥µ”¹±½Ý•É}‰½Õ¹¤…¹€ (€€€€€€€É•¥µ”¹ÕÁÁ•É}‰½Õ¹¥Ì9½¹”½ÈÙ…±Õ”€ðôÉ•¥µ”¹ÕÁÁ•É}‰½Õ¹(€€€€¤(()‘•˜}‘¥Ù•ÉÍ¥™¥•‘}¥¹Ñ•É…Ñ¥½¹Ì (€€€Ù…±Õ•ÌèÑÕÁ±•mI•¥µ•½¹‘¥Ñ¥½¹•‘I•±…Ñ¥½¹Í¡¥À°€¸¸¹t°(¤€´øÑÕÁ±•mI•¥µ•½¹‘¥Ñ¥½¹•‘I•±…Ñ¥½¹Í¡¥À°€¸¸¹tè(€€€‰Õ­•ÑÌè‘¥ÑmÑÕÁ±•mÍÑÈ°ÍÑÉt°±¥ÍÑmI•¥µ•½¹‘¥Ñ¥½¹•‘I•±…Ñ¥½¹Í¡¥Áut€ôíô(€€€™½ÈÙ…±Õ”¥¸Í½ÉÑ• (€€€€€€€Ù…±Õ•Ì°(€€€€€€€­•äõ±…µ‰‘„¥Ñ•´è€ (€€€€€€€€€€€€µ¥Ñ•´¹½¹Ñ•áÑ}¥µÁÉ½Ù•µ•¹Ð°(€€€€€€€€€€€€´¡¥Ñ•´¹ÑÉ…¥¹¥¹œ¹¹•Ñ}µ½Ù•µ•¹Ð½È•¥µ…° À¤¤°(€€€€€€€€€€€¥Ñ•´¹™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€€¤°(€€€€¤è(€€€€€€€‰Õ­•ÑÌ¹Í•Ñ‘•™…Õ±Ð (€€€€€€€€€€€€¡Ù…±Õ”¹‘¥É•Ñ¥½¹…±}ÁÉ•‘¥Ñ½È°Ù…±Õ”¹½¹Ñ•áÑ}ÁÉ•‘¥Ñ½È¤°mt(€€€€€€€€¤¹…ÁÁ•¹¡Ù…±Õ”¤(€€€É•ÍÕ±Ðè±¥ÍÑmI•¥µ•½¹‘¥Ñ¥½¹•‘I•±…Ñ¥½¹Í¡¥Át€ômt(€€€Ý¡¥±”±•¸¡É•ÍÕ±Ð¤€ð%9QIQ%=9}IQ9Q%=9}1%5%P…¹…¹ä¡‰Õ­•ÑÌ¹Ù…±Õ•Ì ¤¤è(€€€€€€€™½È­•ä¥¸Í½ÉÑ•¡‰Õ­•ÑÌ¤è(€€€€€€€€€€€¥˜‰Õ­•ÑÍm­•åt…¹±•¸¡É•ÍÕ±Ð¤€ð%9QIQ%=9}IQ9Q%=9}1%5%Pè(€€€€€€€€€€€€€€€É•ÍÕ±Ð¹…ÁÁ•¹¡‰Õ­•ÑÍm­•åt¹Á½À À¤¤(€€€É•ÑÕÉ¸ÑÕÁ±”¡É•ÍÕ±Ð¤(()‘•˜}…¹‘¥‘…Ñ•}É…¹¬¡Ù…±Õ”èXÐÅ…¹‘¥‘…Ñ”¤€´øÑÕÁ±•m½‰©•Ð°€¸¸¹tè(€€€É•ÑÕÉ¸€ (€€€€€€€€´¡Ù…±Õ”¹Ù…±¥‘…Ñ¥½¸¹¹•Ñ}µ½Ù•µ•¹Ð½È•¥µ…° À¤¤°(€€€€€€€€´¡Ù…±Õ”¹Ù…±¥‘…Ñ¥½¸¹‰•¹¡µ…É­}¥µÁÉ½Ù•µ•¹Ð½È•¥µ…° À¤¤°(€€€€€€€Ù…±Õ”¹É•±…Ñ¥½¹Í¡¥À¹™¥¹•ÉÁÉ¥¹Ð°(€€€€¤(()‘•˜}É•©•Ñ¥½¸ (€€€•Ù¥‘•¹”èA¡…Í•Ù¥‘•¹”°É•±…Ñ¥½¹Í¡¥ÀèI•¥µ•½¹‘¥Ñ¥½¹•‘I•±…Ñ¥½¹Í¡¥À(¤€´øÍÑÈè(€€€¥˜É•±…Ñ¥½¹Í¡¥À¹½¹Ñ•áÑ}¥µÁÉ½Ù•µ•¹Ð€ðô€Àè(€€€€€€€É•ÑÕÉ¸XÐÅ½¹±ÕÍ¥½¸¹%IQ%=91}M%91}9=Q}%5AI=Y}	e}=9QaP¹Ù…±Õ”(€€€¥˜¹½Ð•Ù¥‘•¹”¹•½¹½µ¥Œè(€€€€€€€É•ÑÕÉ¸XÐÅ½¹±ÕÍ¥½¸¹=9QaQ}%5AI=YM}M%91}	UQ}9=Q}=9=5%¹Ù…±Õ”(€€€¥˜¹½Ð•Ù¥‘•¹”¹ÍÑ…‰±”è(€€€€€€€É•ÑÕÉ¸XÐÅ½¹±ÕÍ¥½¸¹=9=5%}%9QIQ%=9}	UQ}U9MQ	1¹Ù…±Õ”(€€€É•ÑÕÉ¸XÐÅ½¹±ÕÍ¥½¸¹MQ	1}%9QIQ%=9}	1=]}	9!5I,¹Ù…±Õ”(()‘•˜}½¹±ÕÍ¥½¸ (€€€…¹‘¥‘…Ñ•ÌèÑÕÁ±•mXÐÅ…¹‘¥‘…Ñ”°€¸¸¹t°½¹™¥Éµ•èÑÕÁ±•mXÐÅ…¹‘¥‘…Ñ”°€¸¸¹t(¤€´øXÐÅ½¹±ÕÍ¥½¸è(€€€¥˜½¹™¥Éµ•è(€€€€€€€É•ÑÕÉ¸XÐÅ½¹±ÕÍ¥½¸¹I%5}=9%Q%=9}}=9%I5(€€€É•…Í½¹Ì€ôí¥Ñ•´¹É•©•Ñ¥½¹}É•…Í½¸™½È¥Ñ•´¥¸…¹‘¥‘…Ñ•Íô(€€€™½ÈÙ…±Õ”¥¸€ (€€€€€€€XÐÅ½¹±ÕÍ¥½¸¹=9QaQ}%5AI=YM}M%91}	UQ}9=Q}=9=5%°(€€€€€€€XÐÅ½¹±ÕÍ¥½¸¹=9=5%}%9QIQ%=9}	UQ}U9MQ	1°(€€€€€€€XÐÅ½¹±ÕÍ¥½¸¹MQ	1}%9QIQ%=9}	1=]}	9!5I,°(€€€€€€€XÐÅ½¹±ÕÍ¥½¸¹%IQ%=91}M%91}9=Q}%5AI=Y}	e}=9QaP°(€€€€¤è(€€€€€€€¥˜Ù…±Õ”¹Ù…±Õ”¥¸É•…Í½¹Ìè(€€€€€€€€€€€É•ÑÕÉ¸Ù…±Õ”(€€€É•ÑÕÉ¸XÐÅ½¹±ÕÍ¥½¸¹9=}I%5}=9%Q%=9}(()‘•˜}‰Õ¥±‘}¡åÁ½Ñ¡•Í•Ì (€€€½¹™¥Éµ•èÑÕÁ±•mXÐÅ…¹‘¥‘…Ñ”°€¸¸¹t°(€€€Ý¥¹‘½ÝÌèÑÕÁ±•m]…±­½ÉÝ…É‘]¥¹‘½Ü°€¸¸¹t°(¤€´øÑÕÁ±•mMÑÉ…Ñ•å!åÁ½Ñ¡•Í¥Ì°€¸¸¹tè(€€€€ˆˆ‰QÉ…¹Í±…Ñ”½¹™¥Éµ•¥¹Ñ•É…Ñ¥½¹Ì¥¹Ñ¼•á•ÕÑ…‰±”°Ù•ÉÍ¥½¹•¡åÁ½Ñ¡•Í•Ì¸ˆˆˆ((€€€¡åÁ½Ñ¡•Í•Ìè±¥ÍÑmMÑÉ…Ñ•å!åÁ½Ñ¡•Í¥Ít€ômt(€€€™½È…¹‘¥‘…Ñ”¥¸½¹™¥Éµ•è(€€€€€€€É•±…Ñ¥½¹Í¡¥À€ô…¹‘¥‘…Ñ”¹É•±…Ñ¥½¹Í¡¥À(€€€€€€€Ñ•ÍÐ€ô…¹‘¥‘…Ñ”¹Ñ•ÍÐ(€€€€€€€¥˜Ñ•ÍÐ¥Ì9½¹”è(€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€¥‘•¹Ñ¥Ñä€ô}™¥¹•ÉÁÉ¥¹Ð (€€€€€€€€€€€€‰ÍÑÉ…Ñ•äµ¡åÁ½Ñ¡•Í¥Ìˆ°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹…±}ÁÉ•‘¥Ñ½È°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹…±}Ù•ÉÍ¥½¸°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹Í•±•Ñ•‘}‰¥¸°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹}µ…ÁÁ¥¹œ°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹½¹Ñ•áÑ}ÁÉ•‘¥Ñ½È°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹½¹Ñ•áÑ}Ù•ÉÍ¥½¸°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹É•¥µ”°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹™É½é•¹}É•¥µ”¹±½Ý•É}‰½Õ¹°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹™É½é•¹}É•¥µ”¹ÕÁÁ•É}‰½Õ¹°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹…‘•¹”°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹¡½É¥é½¸°(€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹…Ñ¥½¸°(€€€€€€€€¤(€€€€€€€¡åÁ½Ñ¡•Í•Ì¹…ÁÁ•¹ (€€€€€€€€€€€MÑÉ…Ñ•å!åÁ½Ñ¡•Í¥Ì (€€€€€€€€€€€€€€€¥‘•¹Ñ¥Ñä°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹…±}ÁÉ•‘¥Ñ½È°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹…±}Ù•ÉÍ¥½¸°(€€€€€€€€€€€€€€€AI%Q%Y}}XÐÅ}=9QIQ}YIM%=8°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹}µ…ÁÁ¥¹œ°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹Í•±•Ñ•‘}‰¥¸°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹…Ñ¥½¸°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹¡½É¥é½¸°(€€€€€€€€€€€€€€€½¹‘¥Ñ¥½¸¹10°(€€€€€€€€€€€€€€€€¡É•±…Ñ¥½¹Í¡¥À¹Í•±•Ñ•‘}‰¥¸°¤°(€€€€€€€€€€€€€€€Ñ•ÍÐ¹É½ÍÍ}µ½Ù•µ•¹Ð°(€€€€€€€€€€€€€€€Ñ•ÍÐ¹¹•Ñ}µ½Ù•µ•¹Ð(€€€€€€€€€€€€€€€¥˜É•±…Ñ¥½¹Í¡¥À¹…Ñ¥½¸¥ÌMÕ•ÍÑ•‘Ñ¥½¸¹1=9}9QId(€€€€€€€€€€€€€€€•±Í”9½¹”°(€€€€€€€€€€€€€€€Ñ•ÍÐ¹¹•Ñ}µ½Ù•µ•¹Ð(€€€€€€€€€€€€€€€¥˜É•±…Ñ¥½¹Í¡¥À¹…Ñ¥½¸¥ÌMÕ•ÍÑ•‘Ñ¥½¸¹a%Q}=I}Y=%(€€€€€€€€€€€€€€€•±Í”9½¹”°(€€€€€€€€€€€€€€€Ñ•ÍÐ¹‘¥É•Ñ¥½¹…±}¡¥Ñ}É…Ñ”°(€€€€€€€€€€€€€€€•¥µ…°¡±•¸¡Ý¥¹‘½ÝÌ¤¤€¼•¥µ…°¡µ…à Ä°±•¸¡Ý¥¹‘½ÝÌ¤¤¤°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹…‘•¹”°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹¡½É¥é½¸°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹¡½É¥é½¸°(€€€€€€€€€€€€€€€ÑÕÁ±”¡Ý¥¹‘½Ü¹½É‘¥¹…°™½ÈÝ¥¹‘½Ü¥¸Ý¥¹‘½ÝÌ¤°(€€€€€€€€€€€€€€€Ù¥‘•¹•MÑ…ÑÕÌ¹AI=5%M%9}A=M%Q%Y(€€€€€€€€€€€€€€€¥˜É•±…Ñ¥½¹Í¡¥À¹‘¥É•Ñ¥½¹}µ…ÁÁ¥¹œ¥Ì¥É•Ñ¥½¹5…ÁÁ¥¹œ¹A=M%Q%Y(€€€€€€€€€€€€€€€•±Í”Ù¥‘•¹•MÑ…ÑÕÌ¹AI=5%M%9}9Q%Y°(€€€€€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€€€€€‰½¹™¥Éµ•¥¸Ù…±¥‘…Ñ¥½¸…¹¥Í½±…Ñ•Ñ•ÍÐ…É½ÍÌ…Ð±•…ÍÐÑ¡É•”€ˆ(€€€€€€€€€€€€€€€€€€€€‰Ý…±¬µ™½ÉÝ…ÉÝ¥¹‘½ÝÌÕÍ¥¹œ„ÑÉ…¥¹¥¹œµ™É½é•¸‘¥É•Ñ¥½¹…°‰¥¸…¹€ˆ(€€€€€€€€€€€€€€€€€€€€‰½¹Ñ•áÐÉ•¥µ”¸ˆ(€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€€€€€‰I•Í•…É •Ù¥‘•¹”½¹±äì¥Ð‘½•Ì¹½Ð…Ñ¥Ù…Ñ”„MÑÉ…Ñ•ä€ˆ(€€€€€€€€€€€€€€€€€€€€‰…ÕÑ½µ…Ñ¥…±±ä¸ˆ(€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹½¹Ñ•áÑ}ÁÉ•‘¥Ñ½È°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹½¹Ñ•áÑ}Ù•ÉÍ¥½¸°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹É•¥µ”¹Ù…±Õ”°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹™É½é•¹}É•¥µ”¹±½Ý•É}‰½Õ¹°(€€€€€€€€€€€€€€€É•±…Ñ¥½¹Í¡¥À¹™É½é•¹}É•¥µ”¹ÕÁÁ•É}‰½Õ¹°(€€€€€€€€€€€€¤(€€€€€€€€¤(€€€É•ÑÕÉ¸ÑÕÁ±”¡Í½ÉÑ•¡¡åÁ½Ñ¡•Í•Ì°­•äõ±…µ‰‘„¥Ñ•´è¥Ñ•´¹¡åÁ½Ñ¡•Í¥Í}¥¤¤(()‘•˜}ÁÉ•‘¥Ñ½É}Ù•ÉÍ¥½¸¡¹…µ”èÍÑÈ¤€´ø¥¹Ðè(€€€É•ÑÕÉ¸€ (€€€€€€€I%Y}AI%Q=I}YIM%=8(€€€€€€€¥˜…¹ä¡¥Ñ•´¹¹…µ”€ôô¹…µ”™½È¥Ñ•´¥¸I%Y}AI%Q=IL¤(€€€€€€€•±Í”€Ì(€€€€¤(()‘•˜}…¡•}­•ä (€€€µ…ÑÉ¥àè!¥ÍÑ½É¥…±•…ÑÕÉ•5…ÑÉ¥à°(€€€Ý¥¹‘½ÝÌèÑÕÁ±•m]…±­½ÉÝ…É‘]¥¹‘½Ü°€¸¸¹t°(€€€‘¥É•Ñ¥½¹…°èÍÑÈ°(€€€½¹Ñ•áÐèÍÑÈ°(€€€É•¥µ”èÉ½é•¹I•¥µ”°(€€€Á¡…Í”èÍÑÈ°(€€€Í¥µÕ±…Ñ¥½¸èM¥µÕ±…Ñ¥½¹½¹™¥ÕÉ…Ñ¥½¸°(€€€…‘•¹”èÑ¥µ•‘•±Ñ„°(€€€¡½É¥é½¸èÑ¥µ•‘•±Ñ„°(€€€‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹è•¥µ…°ð9½¹”°(€€€‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹è•¥µ…°ð9½¹”°(€€€…Ñ¥½¸èMÕ•ÍÑ•‘Ñ¥½¸°(¤€´øÍÑÈè(€€€Í±¥•Ì€ôÑÕÁ±” (€€€€€€€€ (€€€€€€€€€€€•Ñ…ÑÑÈ¡Ý¥¹‘½Ü°˜‰íÁ¡…Í•õ}™É½´ˆ¤°(€€€€€€€€€€€•Ñ…ÑÑÈ¡Ý¥¹‘½Ü°˜‰íÁ¡…Í•õ}Ñ¼ˆ¤°(€€€€€€€€€€€}Í±¥•}™¥¹•ÉÁÉ¥¹Ð (€€€€€€€€€€€€€€€µ…ÑÉ¥à°•Ñ…ÑÑÈ¡Ý¥¹‘½Ü°˜‰íÁ¡…Í•õ}™É½´ˆ¤°•Ñ…ÑÑÈ¡Ý¥¹‘½Ü°˜‰íÁ¡…Í•õ}Ñ¼ˆ¤(€€€€€€€€€€€€¤°(€€€€€€€€¤(€€€€€€€™½ÈÝ¥¹‘½Ü¥¸Ý¥¹‘½ÝÌ(€€€€¤(€€€É•ÑÕÉ¸}™¥¹•ÉÁÉ¥¹Ð (€€€€€€€€‰…¡”ˆ°(€€€€€€€‘¥É•Ñ¥½¹…°°(€€€€€€€}ÁÉ•‘¥Ñ½É}Ù•ÉÍ¥½¸¡‘¥É•Ñ¥½¹…°¤°(€€€€€€€½¹Ñ•áÐ°(€€€€€€€}ÁÉ•‘¥Ñ½É}Ù•ÉÍ¥½¸¡½¹Ñ•áÐ¤°(€€€€€€€Á¡…Í”°(€€€€€€€É•¥µ”¹™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€…‘•¹”°(€€€€€€€¡½É¥é½¸°(€€€€€€€‘¥É•Ñ¥½¹…±}±½Ý•É}‰½Õ¹°(€€€€€€€‘¥É•Ñ¥½¹…±}ÕÁÁ•É}‰½Õ¹°(€€€€€€€…Ñ¥½¸°(€€€€€€€Í±¥•Ì°(€€€€€€€Í¥µÕ±…Ñ¥½¸¹™••}É…Ñ”°(€€€€€€€Í¥µÕ±…Ñ¥½¸¹Í±¥ÁÁ…•}É…Ñ”°(€€€€¤(()‘•˜}Í±¥•}™¥¹•ÉÁÉ¥¹Ð (€€€µ…ÑÉ¥àè!¥ÍÑ½É¥…±•…ÑÕÉ•5…ÑÉ¥à°ÍÑ…ÉÐè‘…Ñ•Ñ¥µ”°•¹è‘…Ñ•Ñ¥µ”(¤€´øÍÑÈè(€€€É•ÑÕÉ¸}™¥¹•ÉÁÉ¥¹Ð (€€€€€€€ÑÕÁ±”¡É½Ü™½ÈÉ½Ü¥¸µ…ÑÉ¥à¹É½ÝÌ¥˜ÍÑ…ÉÐ€ðôÉ½Ü¹…¹‘±•}½Á•¹}Ñ¥µ”€ð•¹¤(€€€€¤(()‘•˜}™¥¹•ÉÁÉ¥¹Ð ©Ù…±Õ•Ìè½‰©•Ð¤€´øÍÑÈè(€€€•¹½‘•€ô©Í½¸¹‘ÕµÁÌ (€€€€€€€€¡AI%Q%Y}}XÐÅ}=9QIQ}YIM%=8°Ù…±Õ•Ì¤°(€€€€€€€‘•™…Õ±ÐõÍÑÈ°(€€€€€€€Í½ÉÑ}­•åÌõQÉÕ”°(€€€€€€€Í•Á…É…Ñ½ÉÌô ˆ°ˆ°€ˆèˆ¤°(€€€€¤(€€€É•ÑÕÉ¸¡…Í¡±¥ˆ¹Í¡„ÈÔØ¡•¹½‘•¹•¹½‘” ¤¤¹¡•á‘¥•ÍÐ ¤(
