@@ -466,6 +466,10 @@ class PredictiveEdgeNearMissRecord(Base):
     __tablename__ = "predictive_edge_near_misses"
     __table_args__ = (
         UniqueConstraint("run_id", "rank", name="uq_predictive_edge_near_misses_rank"),
+        CheckConstraint(
+            "kind IN ('actionable', 'diagnostic')",
+            name="ck_predictive_edge_near_misses_kind",
+        ),
         Index("ix_predictive_edge_near_misses_run_rank", "run_id", "rank"),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
