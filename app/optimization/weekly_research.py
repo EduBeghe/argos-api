@@ -10,6 +10,17 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.market.catalog import Instrument
+from app.optimization.composite_search import (
+    COMPOSITE_FEATURE_POOL_VERSION,
+    COMPOSITE_SEARCH_ALGORITHM_VERSION,
+    DEFAULT_COMPOSITE_SEARCH_BUDGET,
+    search_composite_features,
+)
+from app.optimization.composite_search_memory import persist_composite_search_result
+from app.optimization.composite_search_read import (
+    CompositeSearchNotFoundError,
+    get_composite_search,
+)
 from app.optimization.edge_guided import (
     EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
     EDGE_GUIDED_RANKING_CONTRACT_VERSION,
@@ -66,7 +77,7 @@ from app.optimization.targeted_refinement_memory import (
 from app.optimization.targeted_refinement_read import get_targeted_refinement
 from app.paper.config import SimulationConfiguration
 
-WEEKLY_RESEARCH_CONTRACT_VERSION = 2
+WEEKLY_RESEARCH_CONTRACT_VERSION = 3
 WEEKLY_RESEARCH_ADVISORY_LOCK = 0x4152474F53524553
 
 
@@ -138,6 +149,9 @@ def weekly_research_reuse_key(
         "predictor_version": PREDICTOR_VERSION,
         "edge_algorithm_version": PREDICTIVE_EDGE_V4_CONTRACT_VERSION,
         "targeted_refinement_contract_version": TARGETED_REFINEMENT_CONTRACT_VERSION,
+        "composite_search_algorithm_version": COMPOSITE_SEARCH_ALGORITHM_VERSION,
+        "composite_feature_pool_version": COMPOSITE_FEATURE_POOL_VERSION,
+        "composite_search_budget": asdict(DEFAULT_COMPOSITE_SEARCH_BUDGET),
         "strategy_contract_version": EDGE_GUIDED_STRATEGY_CONTRACT_VERSION,
         "ranking_contract_version": EDGE_GUIDED_RANKING_CONTRACT_VERSION,
         "qualification_contract_version": EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
@@ -294,6 +308,29 @@ async def execute_weekly_instrument_research(
                             ),
                         }
                     )
+                try:
+                    composite = await get_composite_search(
+                        session, reused.predictive_edge_run_id
+                    )
+                except CompositeSearchNotFoundError:
+                    pass
+                else:
+                    diagnostics.update(
+                        {
+                            "composite_search_run_id": str(composite.id),
+                            "composite_search_conclusion": composite.conclusion,
+                            "composite_search_maximum_depth": (
+                                composite.maximum_depth_reached
+                            ),
+                            "composite_search_total_evaluations": (
+                                composite.total_evaluations
+                            ),
+                            "composite_search_current_work": {
+                                "computed": 0,
+                                "reused": composite.total_evaluations,
+                            },
+                        }
+                    )
             elapsed = perf_counter() - total_started
             return WeeklyInstrumentResearch(
                 identity.instrument,
@@ -425,6 +462,37 @@ async def execute_weekly_instrument_research(
         )
         targeted_persisted = await get_targeted_refinement(
             session, edge_execution.run_id
+        )
+    composite_result = search_composite_features(
+        dataset=dataset,
+        matrix=matrix,
+        windows=windows,
+        simulation=simulation,
+        initial_cash=initial_cash,
+    )
+    composite_run_id = None
+    if persist:
+        if edge_execution is None or edge_execution.run_id is None:
+            raise WeeklyResearchError("predictive evidence was not persisted")
+        composite_key = hashlib.sha256(
+            (
+                f"{reuse_key}:{dataset.fingerprint}:"
+                f"{COMPOSITE_SEARCH_ALGORITHM_VERSION}:"
+                f"{COMPOSITE_FEATURE_POOL_VERSION}:"
+                f"{json.dumps(asdict(DEFAULT_COMPOSITE_SEARCH_BUDGET), sort_keys=True)}"
+            ).encode()
+        ).hexdigest()
+        composite_run_id = await persist_composite_search_result(
+            session=session,
+            predictive_edge_run_id=edge_execution.run_id,
+            experiment_key=composite_key,
+            instrument=identity.instrument,
+            dataset_fingerprint=dataset.fingerprint,
+            range_start=identity.range.start,
+            range_end=identity.range.end,
+            budget=DEFAULT_COMPOSITE_SEARCH_BUDGET,
+            result=composite_result,
+            started_at=boundary,
         )
     edge_elapsed = perf_counter() - edge_started
     candidate_started = perf_counter()
@@ -614,6 +682,19 @@ async def execute_weekly_instrument_research(
             "targeted_current_work": {
                 "evaluations_computed": targeted_result.summary.evaluations_computed,
                 "evaluations_reused": targeted_result.summary.evaluations_reused,
+            },
+            "composite_search_run_id": (
+                str(composite_run_id) if composite_run_id is not None else None
+            ),
+            "composite_search_conclusion": composite_result.conclusion.value,
+            "composite_search_maximum_depth": (composite_result.maximum_depth_reached),
+            "composite_search_total_evaluations": (composite_result.total_evaluations),
+            "composite_search_funnel": [
+                asdict(item) for item in composite_result.funnel_by_depth
+            ],
+            "composite_search_current_work": {
+                "computed": composite_result.computed,
+                "reused": composite_result.reused,
             },
             "regime_conditioned_stage_counters": {
                 "a1": asdict(regime_result.stage_a1),

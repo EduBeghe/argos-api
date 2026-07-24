@@ -103,6 +103,7 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     regime_analyzer = Mock(side_effect=AssertionError("v4.1 analysis executed"))
     targeted_analyzer = Mock(side_effect=AssertionError("targeted analysis executed"))
     candidate_evaluator = Mock(side_effect=AssertionError("candidate simulated"))
+    composite_search = Mock(side_effect=AssertionError("composite search executed"))
     diagnostics = AsyncMock(
         return_value=SimpleNamespace(
             diagnostic_conclusion=SimpleNamespace(value="completed"),
@@ -135,11 +136,20 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
             best_targeted_candidate="best-fingerprint",
         )
     )
+    composite_reader = AsyncMock(
+        return_value=SimpleNamespace(
+            id=uuid4(),
+            conclusion="candidates_rejected_validation",
+            maximum_depth_reached=7,
+            total_evaluations=120,
+        )
+    )
     monkeypatch.setattr(research_module, "read_historical_dataset_revision", revision)
     monkeypatch.setattr(research_module, "find_reusable_weekly_research_run", reusable)
     monkeypatch.setattr(research_module, "read_historical_dataset", dataset_loader)
     monkeypatch.setattr(research_module, "get_predictive_edge_diagnostics", diagnostics)
     monkeypatch.setattr(research_module, "get_targeted_refinement", targeted_reader)
+    monkeypatch.setattr(research_module, "get_composite_search", composite_reader)
     monkeypatch.setattr(
         research_module, "build_historical_feature_matrix", matrix_builder
     )
@@ -153,6 +163,7 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     monkeypatch.setattr(
         research_module, "evaluate_edge_guided_candidates", candidate_evaluator
     )
+    monkeypatch.setattr(research_module, "search_composite_features", composite_search)
 
     session = SimpleNamespace()
     completed = await execute_weekly_instrument_research(
@@ -204,6 +215,7 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     regime_analyzer.assert_not_called()
     targeted_analyzer.assert_not_called()
     candidate_evaluator.assert_not_called()
+    composite_search.assert_not_called()
 
 
 @pytest.mark.asyncio
