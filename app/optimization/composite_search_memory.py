@@ -5,6 +5,8 @@ from typing import cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -72,6 +74,17 @@ class CompositeSearchRunRecord(Base):
     total_evaluations: Mapped[int] = mapped_column(Integer, nullable=False)
     computed: Mapped[int] = mapped_column(Integer, nullable=False)
     reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    budget_exhausted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    cheap_evaluations_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    cheap_evaluations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    training_simulations_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    training_simulations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_simulations_computed: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    validation_simulations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_simulations_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_simulations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
     best_depth: Mapped[int | None] = mapped_column(Integer)
     best_candidate_fingerprint: Mapped[str | None] = mapped_column(String(64))
     dominant_rejection_reason: Mapped[str | None] = mapped_column(String(128))
@@ -90,6 +103,11 @@ class CompositeSearchCandidateRecord(Base):
             "run_id", "candidate_fingerprint", name="uq_composite_search_candidate"
         ),
         Index("ix_composite_search_candidate_filter", "run_id", "depth", "status"),
+        CheckConstraint(
+            "status IN ('retained_training', 'rejected_validation', "
+            "'passed_validation', 'rejected_test', 'confirmed_candidate')",
+            name="ck_composite_search_candidate_status",
+        ),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
     run_id: Mapped[UUID] = mapped_column(
@@ -207,6 +225,15 @@ async def persist_composite_search_result(
             total_evaluations=result.total_evaluations,
             computed=result.computed,
             reused=result.reused,
+            budget_exhausted=result.budget_exhausted,
+            cheap_evaluations_computed=result.cheap_evaluations_computed,
+            cheap_evaluations_reused=result.cheap_evaluations_reused,
+            training_simulations_computed=result.training_simulations_computed,
+            training_simulations_reused=result.training_simulations_reused,
+            validation_simulations_computed=result.validation_simulations_computed,
+            validation_simulations_reused=result.validation_simulations_reused,
+            test_simulations_computed=result.test_simulations_computed,
+            test_simulations_reused=result.test_simulations_reused,
             best_depth=result.best_depth,
             best_candidate_fingerprint=result.best_candidate_fingerprint,
             dominant_rejection_reason=result.dominant_rejection_reason,

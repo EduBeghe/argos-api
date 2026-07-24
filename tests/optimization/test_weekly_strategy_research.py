@@ -103,6 +103,7 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     regime_analyzer = Mock(side_effect=AssertionError("v4.1 analysis executed"))
     targeted_analyzer = Mock(side_effect=AssertionError("targeted analysis executed"))
     candidate_evaluator = Mock(side_effect=AssertionError("candidate simulated"))
+    composite_search = Mock(side_effect=AssertionError("composite search executed"))
     diagnostics = AsyncMock(
         return_value=SimpleNamespace(
             diagnostic_conclusion=SimpleNamespace(value="completed"),
@@ -162,6 +163,7 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     monkeypatch.setattr(
         research_module, "evaluate_edge_guided_candidates", candidate_evaluator
     )
+    monkeypatch.setattr(research_module, "search_composite_features", composite_search)
 
     session = SimpleNamespace()
     completed = await execute_weekly_instrument_research(
@@ -213,6 +215,7 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
     regime_analyzer.assert_not_called()
     targeted_analyzer.assert_not_called()
     candidate_evaluator.assert_not_called()
+    composite_search.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ import app.optimization.composite_search as composite_module
 from app.market.catalog import MARKET_INSTRUMENTS
 from app.optimization.composite_search import (
     COMPOSITE_FEATURE_POOL,
+    CompositeCandidateStatus,
     CompositeMetrics,
     CompositeSearchBudget,
     CompositeSearchError,
@@ -64,6 +65,57 @@ def _window(matrix: HistoricalFeatureMatrix) -> tuple[WalkForwardWindow, ...]:
             selection_fingerprint="selection",
         ),
     )
+
+
+def _economic_matrix() -> tuple[HistoricalFeatureMatrix, tuple[WalkForwardWindow, ...]]:
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    price = Decimal("100")
+    rows: list[HistoricalFeatureRow] = []
+    size = 1440
+    for index in range(size):
+        common = Decimal(1) if (index // 120) % 2 == 0 else Decimal(-1)
+        first_noise = Decimal(10) if index % 2 else Decimal(-10)
+        second_noise = Decimal(10) if (index // 2) % 2 else Decimal(-10)
+        third_noise = -(first_noise + second_noise)
+        first = common + first_noise
+        second = common + second_noise
+        third = common + third_noise
+        aligned = common > 0
+        rows.append(
+            HistoricalFeatureRow(
+                candle_open_time=start + timedelta(minutes=5 * index),
+                close_price=price,
+                ema_20=price * (Decimal(1) + Decimal(index % 7 - 3) / 10000),
+                ema_50=price * (Decimal(1) + Decimal(index % 11 - 5) / 10000),
+                rsi_14=Decimal(45 + index % 11),
+                atr_14=price * (Decimal("0.005") + Decimal(index % 5) / 10000),
+                return_1=first / Decimal(100),
+                return_12=second / Decimal(100),
+                relative_volume_20=Decimal(1) + third / Decimal(100),
+            )
+        )
+        price *= Decimal("1.003") if aligned else Decimal("0.998")
+    matrix = HistoricalFeatureMatrix("economic-dataset", tuple(rows))
+    windows = tuple(
+        WalkForwardWindow(
+            ordinal=ordinal,
+            training_from=rows[offset].candle_open_time,
+            training_to=rows[offset + 240].candle_open_time,
+            validation_from=rows[offset + 240].candle_open_time,
+            validation_to=rows[offset + 360].candle_open_time,
+            test_from=rows[offset + 360].candle_open_time,
+            test_to=(
+                rows[offset + 480].candle_open_time
+                if offset + 480 < len(rows)
+                else rows[-1].candle_open_time + timedelta(minutes=5)
+            ),
+            decision_count=0,
+            dataset_fingerprint=matrix.dataset_fingerprint,
+            selection_fingerprint=f"selection-{ordinal}",
+        )
+        for ordinal, offset in enumerate((0, 480, 960))
+    )
+    return matrix, windows
 
 
 def _simulation() -> SimulationConfiguration:
@@ -332,3 +384,298 @@ def test_validation_rejection_does_not_consult_test(
     assert "validation" in phases
     assert "test" not in phases
     assert all(item.test_metrics is None for item in result.candidates)
+
+
+def test_default_budget_reaches_every_depth_when_parents_are_eligible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _matrix()
+    monkeypatch.setattr(
+        composite_module, "_economic_metrics", lambda **_: _passing_metrics()
+    )
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=_window(matrix),
+        simulation=_simulation(),
+        initial_cash=Decimal("10000"),
+    )
+    assert tuple(item.depth for item in result.funnel_by_depth) == (2, 3, 4, 5, 6, 7)
+    assert result.maximum_depth_reached == 7
+    assert all(item.cheap_evaluations_computed > 0 for item in result.funnel_by_depth)
+    assert result.total_evaluations == (
+        result.cheap_evaluations_computed
+        + result.training_simulations_computed
+        + result.validation_simulations_computed
+        + result.test_simulations_computed
+    )
+
+
+def test_reduced_budget_stops_at_last_real_depth_without_empty_funnel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _matrix()
+    monkeypatch.setattr(
+        composite_module, "_economic_metrics", lambda **_: _passing_metrics()
+    )
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=_window(matrix),
+        simulation=_simulation(),
+        initial_cash=Decimal("10000"),
+        budget=CompositeSearchBudget(
+            beam_width_per_depth=1,
+            maximum_variants_per_subset=1,
+            maximum_cheap_evaluations=2,
+            maximum_training_simulations=1,
+            maximum_validation_per_depth=1,
+            maximum_test_candidates=1,
+            maximum_persisted_candidates=4,
+        ),
+    )
+    assert result.maximum_depth_reached == 2
+    assert tuple(item.depth for item in result.funnel_by_depth) == (2,)
+    assert result.funnel_by_depth[0].cheap_evaluations_computed == 1
+    assert result.budget_exhausted is True
+
+
+def test_validation_pass_without_test_slot_has_explicit_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _matrix()
+    monkeypatch.setattr(
+        composite_module, "_economic_metrics", lambda **_: _passing_metrics()
+    )
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=_window(matrix),
+        simulation=_simulation(),
+        initial_cash=Decimal("10000"),
+        budget=CompositeSearchBudget(
+            beam_width_per_depth=2,
+            maximum_variants_per_subset=1,
+            maximum_cheap_evaluations=24,
+            maximum_training_simulations=12,
+            maximum_validation_per_depth=2,
+            maximum_test_candidates=1,
+            maximum_persisted_candidates=20,
+        ),
+    )
+    statuses = tuple(item.status for item in result.candidates)
+    assert CompositeCandidateStatus.CONFIRMED_CANDIDATE in statuses
+    assert CompositeCandidateStatus.PASSED_VALIDATION in statuses
+    funnel = result.funnel_by_depth[0]
+    assert funnel.validation_retained == 2
+    assert funnel.test_evaluated == 1
+    assert result.test_simulations_computed == 1
+    assert (
+        result.conclusion
+        is composite_module.CompositeSearchConclusion.CONFIRMED_COMPOSITE_CANDIDATES
+    )
+
+
+def test_three_feature_economic_signal_reaches_training_and_validation() -> None:
+    matrix, windows = _economic_matrix()
+    first_training = tuple(
+        row
+        for row in matrix.rows
+        if windows[0].training_from <= row.candle_open_time < windows[0].training_to
+    )
+    assert all(
+        abs(composite_module._association(first_training, name, timedelta(hours=4)))
+        < Decimal("0.10")
+        for name in ("return_1", "return_12", "relative_volume_20")
+    )
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=windows,
+        simulation=SimulationConfiguration(
+            1, "USDT", Decimal("0.0001"), Decimal("0.0001")
+        ),
+        initial_cash=Decimal("10000"),
+        budget=CompositeSearchBudget(
+            beam_width_per_depth=6,
+            maximum_variants_per_subset=2,
+            maximum_cheap_evaluations=180,
+            maximum_training_simulations=36,
+            maximum_validation_per_depth=6,
+            maximum_test_candidates=6,
+            maximum_persisted_candidates=60,
+        ),
+    )
+    depth_three = tuple(
+        item
+        for item in result.candidates
+        if item.depth == 3
+        and {"return_1", "return_12", "relative_volume_20"}
+        <= set(item.candidate.features)
+    )
+    assert depth_three
+    assert any(item.training_metrics.total_return > 0 for item in depth_three)
+    assert any(
+        item.status
+        in {
+            CompositeCandidateStatus.PASSED_VALIDATION,
+            CompositeCandidateStatus.REJECTED_TEST,
+            CompositeCandidateStatus.CONFIRMED_CANDIDATE,
+        }
+        for item in depth_three
+    )
+
+
+def test_real_costs_reject_the_same_gross_composite_signal() -> None:
+    matrix, windows = _economic_matrix()
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=windows,
+        simulation=SimulationConfiguration(1, "USDT", Decimal("0.05"), Decimal("0.05")),
+        initial_cash=Decimal("10000"),
+        budget=CompositeSearchBudget(
+            beam_width_per_depth=6,
+            maximum_variants_per_subset=2,
+            maximum_cheap_evaluations=180,
+            maximum_training_simulations=36,
+            maximum_validation_per_depth=6,
+            maximum_test_candidates=6,
+            maximum_persisted_candidates=60,
+        ),
+    )
+    assert not any(
+        item.status
+        in {
+            CompositeCandidateStatus.PASSED_VALIDATION,
+            CompositeCandidateStatus.CONFIRMED_CANDIDATE,
+        }
+        for item in result.candidates
+    )
+
+
+def test_real_cadence_changes_decisions_and_trades() -> None:
+    matrix, windows = _economic_matrix()
+    price = Decimal("100")
+    cadence_rows: list[HistoricalFeatureRow] = []
+    for index, row in enumerate(matrix.rows):
+        signal = Decimal(1) if (index // 12) % 2 == 0 else Decimal(-1)
+        cadence_rows.append(
+            replace(
+                row,
+                close_price=price,
+                ema_20=price,
+                ema_50=price,
+                atr_14=price * Decimal("0.005"),
+                return_1=signal / Decimal(50),
+                return_12=signal / Decimal(50),
+                relative_volume_20=Decimal(1) + signal / Decimal(50),
+            )
+        )
+        price *= Decimal("1.002") if signal > 0 else Decimal("0.999")
+    matrix = HistoricalFeatureMatrix(matrix.dataset_fingerprint, tuple(cadence_rows))
+    simulation = SimulationConfiguration(
+        1, "USDT", Decimal("0.0001"), Decimal("0.0001")
+    )
+    training_rows = composite_module._phase_rows(matrix, windows, "training")
+    weights = (
+        ("return_1", Decimal(1)),
+        ("return_12", Decimal(1)),
+        ("relative_volume_20", Decimal(1)),
+    )
+    thirty_minutes = build_candidate(
+        weights=weights,
+        training_rows=training_rows,
+        simulation=simulation,
+        cadence=timedelta(minutes=30),
+        horizon=timedelta(minutes=30),
+        entry_threshold=Decimal("0.03"),
+        exit_threshold=Decimal("-0.03"),
+        initial_cash=Decimal("10000"),
+    )
+    four_hours = build_candidate(
+        weights=weights,
+        training_rows=training_rows,
+        simulation=simulation,
+        cadence=timedelta(hours=4),
+        horizon=timedelta(hours=4),
+        entry_threshold=Decimal("0.03"),
+        exit_threshold=Decimal("-0.03"),
+        initial_cash=Decimal("10000"),
+    )
+    common = {
+        "dataset": _dataset(matrix),
+        "matrix": matrix,
+        "windows": windows,
+        "phase": "training",
+        "simulation": simulation,
+        "initial_cash": Decimal("10000"),
+    }
+    fast = composite_module._economic_metrics(candidate=thirty_minutes, **common)
+    slow = composite_module._economic_metrics(candidate=four_hours, **common)
+    assert fast.observations > slow.observations
+    assert fast.trade_count != slow.trade_count
+
+
+def test_validation_and_test_mutation_preserves_training_generation_order() -> None:
+    matrix, windows = _economic_matrix()
+    held_out_ranges = tuple(
+        (window.validation_from, window.test_to) for window in windows
+    )
+    mutated = HistoricalFeatureMatrix(
+        "mutated-held-out",
+        tuple(
+            replace(
+                row,
+                close_price=row.close_price * Decimal("100"),
+                return_1=row.return_1 * Decimal("-50"),
+                return_12=row.return_12 * Decimal("75"),
+                relative_volume_20=row.relative_volume_20 * Decimal("10"),
+            )
+            if any(
+                start <= row.candle_open_time < end for start, end in held_out_ranges
+            )
+            else row
+            for row in matrix.rows
+        ),
+    )
+    simulation = SimulationConfiguration(
+        1, "USDT", Decimal("0.0001"), Decimal("0.0001")
+    )
+    budget = CompositeSearchBudget(
+        beam_width_per_depth=4,
+        maximum_variants_per_subset=2,
+        maximum_cheap_evaluations=120,
+        maximum_training_simulations=24,
+        maximum_validation_per_depth=4,
+        maximum_test_candidates=4,
+        maximum_persisted_candidates=40,
+    )
+
+    def generated(value: HistoricalFeatureMatrix) -> tuple[object, ...]:
+        result = search_composite_features(
+            dataset=_dataset(value),
+            matrix=value,
+            windows=windows,
+            simulation=simulation,
+            initial_cash=Decimal("10000"),
+            budget=budget,
+        )
+        return tuple(
+            (
+                item.depth,
+                item.parent_fingerprint,
+                item.candidate.fingerprint,
+                item.candidate.weights,
+                item.candidate.entry_threshold,
+                item.candidate.exit_threshold,
+                item.candidate.cadence,
+                item.candidate.prediction_horizon,
+                item.candidate.minimum_holding_period,
+                item.candidate.maximum_holding_period,
+                item.candidate.cooldown,
+            )
+            for item in result.candidates
+        )
+
+    assert generated(matrix) == generated(mutated)

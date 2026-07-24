@@ -47,6 +47,7 @@ class CompositeSearchError(ValueError):
 class CompositeCandidateStatus(StrEnum):
     RETAINED_TRAINING = "retained_training"
     REJECTED_VALIDATION = "rejected_validation"
+    PASSED_VALIDATION = "passed_validation"
     REJECTED_TEST = "rejected_test"
     CONFIRMED_CANDIDATE = "confirmed_candidate"
 
@@ -57,6 +58,7 @@ class CompositeSearchConclusion(StrEnum):
     NO_TRAINING_SIGNAL = "no_training_signal"
     TRAINING_SIGNAL_NOT_STABLE = "training_signal_not_stable"
     CANDIDATES_REJECTED_VALIDATION = "candidates_rejected_validation"
+    CANDIDATES_PASSED_VALIDATION = "candidates_passed_validation"
     CANDIDATES_REJECTED_TEST = "candidates_rejected_test"
     CONFIRMED_COMPOSITE_CANDIDATES = "confirmed_composite_candidates"
 
@@ -190,6 +192,15 @@ class CompositeSearchResult:
     total_evaluations: int
     computed: int
     reused: int
+    budget_exhausted: bool
+    cheap_evaluations_computed: int
+    cheap_evaluations_reused: int
+    training_simulations_computed: int
+    training_simulations_reused: int
+    validation_simulations_computed: int
+    validation_simulations_reused: int
+    test_simulations_computed: int
+    test_simulations_reused: int
     best_depth: int | None
     best_candidate_fingerprint: str | None
     dominant_rejection_reason: str | None
@@ -421,675 +432,4 @@ def _cheap_metrics(
         (value if score >= 0 else -value for score, value in observations),
         Decimal(0),
     ) / len(observations)
-    friction = (candidate.fee_rate + candidate.slippage_rate) * 2
-    dispersion = (return_variance / len(observations)).sqrt()
-    return CompositeMetrics(
-        len(observations),
-        correlation.quantize(COMPOSITE_QUANTUM, rounding=ROUND_HALF_EVEN),
-        (Decimal(hits) / len(observations)).quantize(
-            COMPOSITE_QUANTUM, rounding=ROUND_HALF_EVEN
-        ),
-        gross.quantize(COMPOSITE_QUANTUM, rounding=ROUND_HALF_EVEN),
-        (gross - friction).quantize(COMPOSITE_QUANTUM, rounding=ROUND_HALF_EVEN),
-        dispersion.quantize(COMPOSITE_QUANTUM, rounding=ROUND_HALF_EVEN),
-        (Decimal(1) if gross > friction else Decimal(0)),
-    )
-
-
-def _cheap_window_metrics(
-    candidate: CompositeCandidate,
-    matrix: HistoricalFeatureMatrix,
-    windows: tuple[WalkForwardWindow, ...],
-    phase: str,
-) -> CompositeMetrics:
-    usable = tuple(
-        value
-        for window in windows
-        if (
-            value := _cheap_metrics(
-                candidate,
-                _rows_between(
-                    matrix,
-                    getattr(window, f"{phase}_from"),
-                    getattr(window, f"{phase}_to"),
-                ),
-            )
-        ).observations
-    )
-    if not usable:
-        return _cheap_metrics(candidate, ())
-    count = Decimal(len(usable))
-    return CompositeMetrics(
-        sum(item.observations for item in usable),
-        (sum((item.correlation for item in usable), Decimal(0)) / count),
-        (sum((item.directional_hit_rate for item in usable), Decimal(0)) / count),
-        (sum((item.expected_gross_movement for item in usable), Decimal(0)) / count),
-        (sum((item.expected_net_movement for item in usable), Decimal(0)) / count),
-        (sum((item.dispersion for item in usable), Decimal(0)) / count),
-        (sum((item.profitable_window_ratio for item in usable), Decimal(0)) / count),
-    )
-
-
-def _association(
-    rows: tuple[HistoricalFeatureRow, ...], name: str, horizon: timedelta
-) -> Decimal:
-    steps = max(1, int(horizon / timedelta(minutes=5)))
-    pairs = tuple(
-        (
-            feature_value(rows[index], name),
-            rows[index + steps].close_price / rows[index].close_price - 1,
-        )
-        for index in range(max(0, len(rows) - steps))
-    )
-    if len(pairs) < 2:
-        return Decimal(0)
-    mean_x = sum((x for x, _ in pairs), Decimal(0)) / len(pairs)
-    mean_y = sum((y for _, y in pairs), Decimal(0)) / len(pairs)
-    covariance = sum(((x - mean_x) * (y - mean_y) for x, y in pairs), Decimal(0))
-    variance_x = sum(((x - mean_x) ** 2 for x, _ in pairs), Decimal(0))
-    variance_y = sum(((y - mean_y) ** 2 for _, y in pairs), Decimal(0))
-    return (
-        covariance / (variance_x.sqrt() * variance_y.sqrt())
-        if variance_x and variance_y
-        else Decimal(0)
-    )
-
-
-def _training_evidence(
-    matrix: HistoricalFeatureMatrix,
-    windows: tuple[WalkForwardWindow, ...],
-    horizon: timedelta,
-) -> dict[str, Decimal]:
-    by_feature: dict[str, list[Decimal]] = {name: [] for name in COMPOSITE_FEATURE_POOL}
-    for window in windows:
-        rows = _rows_between(matrix, window.training_from, window.training_to)
-        for name in by_feature:
-            value = _association(rows, name, horizon)
-            if value:
-                by_feature[name].append(value)
-    return {
-        name: sum(values, Decimal(0)) / len(values) if values else Decimal(0)
-        for name, values in by_feature.items()
-    }
-
-
-def _weight_variants(
-    features: tuple[str, ...],
-    evidence: dict[str, Decimal],
-    parent: CompositeCandidate | None,
-    limit: int,
-) -> tuple[tuple[tuple[str, Decimal], ...], ...]:
-    signed = tuple(
-        (name, Decimal(1) if evidence[name] >= 0 else Decimal(-1)) for name in features
-    )
-    weighted = tuple(
-        (name, evidence[name] if evidence[name] else value) for name, value in signed
-    )
-    variants: list[tuple[tuple[str, Decimal], ...]] = [signed, weighted]
-    if parent is not None:
-        parent_weights = {item.feature_name: item.weight for item in parent.weights}
-        variants.append(
-            tuple(
-                (
-                    name,
-                    parent_weights[name] * Decimal("0.90")
-                    if name in parent_weights
-                    else (evidence[name] or Decimal("0.10")),
-                )
-                for name in features
-            )
-        )
-    unique: dict[tuple[tuple[str, Decimal], ...], None] = {}
-    for variant in variants:
-        normalized = normalize_weights(variant)
-        unique[tuple((item.feature_name, item.weight) for item in normalized)] = None
-    return tuple(unique)[:limit]
-
-
-_OPERATIONAL_CONFIGURATIONS = (
-    (
-        timedelta(minutes=30),
-        timedelta(minutes=30),
-        Decimal("0.50"),
-        Decimal("-0.10"),
-        timedelta(minutes=30),
-        timedelta(hours=12),
-        timedelta(minutes=30),
-    ),
-    (
-        timedelta(hours=4),
-        timedelta(hours=4),
-        Decimal("0.35"),
-        Decimal("-0.05"),
-        timedelta(hours=4),
-        timedelta(hours=24),
-        timedelta(hours=4),
-    ),
-    (
-        timedelta(hours=8),
-        timedelta(hours=12),
-        Decimal("0.65"),
-        Decimal("0.00"),
-        timedelta(hours=8),
-        timedelta(days=2),
-        timedelta(hours=8),
-    ),
-    (
-        timedelta(hours=12),
-        timedelta(hours=12),
-        Decimal("0.50"),
-        Decimal("-0.20"),
-        timedelta(hours=12),
-        timedelta(days=3),
-        timedelta(hours=12),
-    ),
-)
-
-
-def _candidate_with_window_normalization(
-    candidate: CompositeCandidate, rows: tuple[HistoricalFeatureRow, ...]
-) -> CompositeCandidate:
-    return replace(candidate, normalization=fit_normalization(rows, candidate.features))
-
-
-def _composite_action_filter(candidate: CompositeCandidate):  # type: ignore[no-untyped-def]
-    previous_score: Decimal | None = None
-    opened_at: datetime | None = None
-    last_exit_at: datetime | None = None
-
-    def decide(
-        row: HistoricalFeatureRow,
-        position_is_open: bool,
-        _baseline_action: StrategyAction,
-    ) -> StrategyAction | SimulationDecisionOverride:
-        nonlocal previous_score, opened_at, last_exit_at
-        boundary = row.candle_open_time + timedelta(minutes=5)
-        score = composite_score(candidate, row)
-        entry_crossed = score >= candidate.entry_threshold and (
-            previous_score is None or previous_score < candidate.entry_threshold
-        )
-        exit_crossed = (
-            score <= candidate.exit_threshold
-            and previous_score is not None
-            and previous_score > candidate.exit_threshold
-        )
-        previous_score = score
-        if position_is_open:
-            if opened_at is None:
-                opened_at = boundary
-            held = boundary - opened_at
-            if held >= candidate.maximum_holding_period or (
-                held >= candidate.minimum_holding_period and exit_crossed
-            ):
-                opened_at = None
-                last_exit_at = boundary
-                return SimulationDecisionOverride(
-                    StrategyAction.SELL_ALL,
-                    applied_rule="composite_exit",
-                    explanation="Frozen composite exit or maximum holding rule.",
-                )
-            return StrategyAction.NO_ACTION
-        cooldown_complete = (
-            last_exit_at is None or boundary - last_exit_at >= candidate.cooldown
-        )
-        if entry_crossed and cooldown_complete:
-            opened_at = boundary
-            return SimulationDecisionOverride(
-                StrategyAction.OPEN_POSITION,
-                target_allocation_percentage=Decimal("15.00"),
-                applied_rule="composite_entry",
-                explanation="Frozen composite entry threshold crossed.",
-            )
-        return StrategyAction.NO_ACTION
-
-    return decide
-
-
-def _economic_metrics(
-    *,
-    candidate: CompositeCandidate,
-    dataset: HistoricalDataset,
-    matrix: HistoricalFeatureMatrix,
-    windows: tuple[WalkForwardWindow, ...],
-    phase: str,
-    simulation: SimulationConfiguration,
-    initial_cash: Decimal,
-) -> CompositeMetrics:
-    results: list[HistoricalSimulationResult] = []
-    baseline_returns: list[Decimal] = []
-    buy_hold_returns: list[Decimal] = []
-    for window in windows:
-        training_rows = _rows_between(matrix, window.training_from, window.training_to)
-        phase_rows = _rows_between(
-            matrix, getattr(window, f"{phase}_from"), getattr(window, f"{phase}_to")
-        )
-        if len(training_rows) < 4 or not phase_rows:
-            continue
-        frozen = _candidate_with_window_normalization(candidate, training_rows)
-        try:
-            result = simulate_historical_feature_matrix(
-                dataset=dataset,
-                feature_matrix=HistoricalFeatureMatrix(
-                    matrix.dataset_fingerprint, phase_rows
-                ),
-                initial_cash=initial_cash,
-                fee_rate=simulation.fee_rate,
-                slippage_rate=simulation.slippage_rate,
-                decision_interval=frozen.cadence,
-                decision_action_filter=_composite_action_filter(frozen),
-            )
-            baseline = simulate_historical_feature_matrix(
-                dataset=dataset,
-                feature_matrix=HistoricalFeatureMatrix(
-                    matrix.dataset_fingerprint, phase_rows
-                ),
-                initial_cash=initial_cash,
-                fee_rate=simulation.fee_rate,
-                slippage_rate=simulation.slippage_rate,
-                decision_interval=frozen.cadence,
-            )
-            buy_hold = simulate_buy_and_hold(
-                HistoricalFeatureMatrix(matrix.dataset_fingerprint, phase_rows),
-                RefinementSegmentName.TEST,
-                dataset.identity.instrument,
-                initial_cash,
-                simulation,
-            )
-        except (ValueError, IndexError):
-            continue
-        results.append(result)
-        baseline_returns.append(baseline.total_return)
-        buy_hold_returns.append(buy_hold.total_return)
-    if not results:
-        return _empty_metrics()
-    count = Decimal(len(results))
-    returns = tuple(item.total_return for item in results)
-    mean_return = sum(returns, Decimal(0)) / count
-    mean_baseline = sum(baseline_returns, Decimal(0)) / count
-    mean_buy_hold = sum(buy_hold_returns, Decimal(0)) / count
-    stability = sum((Decimal(1) for value in returns if value > 0), Decimal(0)) / count
-    return CompositeMetrics(
-        observations=sum(item.decision_count for item in results),
-        correlation=Decimal(0),
-        directional_hit_rate=Decimal(0),
-        expected_gross_movement=Decimal(0),
-        expected_net_movement=mean_return,
-        dispersion=(
-            sum(((value - mean_return) ** 2 for value in returns), Decimal(0)) / count
-        ).sqrt(),
-        profitable_window_ratio=stability,
-        usable_window_count=len(results),
-        total_return=mean_return,
-        absolute_pnl=sum((item.absolute_pnl for item in results), Decimal(0)) / count,
-        max_drawdown=max(item.max_drawdown for item in results),
-        trade_count=sum(item.trade_count for item in results),
-        fees_paid=sum((item.fees_paid for item in results), Decimal(0)),
-        final_equity=sum((item.final_equity for item in results), Decimal(0)) / count,
-        production_baseline_return=mean_baseline,
-        excess_return_over_production=mean_return - mean_baseline,
-        buy_and_hold_return=mean_buy_hold,
-        excess_return_over_buy_and_hold=mean_return - mean_buy_hold,
-        return_stability=stability,
-    )
-
-
-def _ranking(
-    candidate: CompositeCandidate, metrics: CompositeMetrics
-) -> CompositeRankingBreakdown:
-    complexity = Decimal(len(candidate.features) - 2) * Decimal("0.01")
-    concentration = max(abs(item.weight) for item in candidate.weights)
-    concentration_penalty = max(Decimal(0), concentration - Decimal("0.60"))
-    stability = metrics.return_stability or (
-        Decimal(1) - min(Decimal(1), metrics.dispersion)
-    )
-    total = (
-        metrics.total_return
-        + metrics.excess_return_over_production
-        + metrics.expected_net_movement
-        + metrics.directional_hit_rate / Decimal(10)
-        + stability
-        - metrics.max_drawdown
-        - metrics.fees_paid / max(metrics.final_equity, Decimal(1))
-        - complexity
-        - concentration_penalty
-    )
-    return CompositeRankingBreakdown(
-        metrics.expected_net_movement,
-        metrics.directional_hit_rate,
-        stability,
-        complexity,
-        concentration_penalty,
-        total.quantize(COMPOSITE_QUANTUM, rounding=ROUND_HALF_EVEN),
-    )
-
-
-def search_composite_features(
-    *,
-    dataset: HistoricalDataset,
-    matrix: HistoricalFeatureMatrix,
-    windows: tuple[WalkForwardWindow, ...],
-    simulation: SimulationConfiguration,
-    initial_cash: Decimal,
-    budget: CompositeSearchBudget = DEFAULT_COMPOSITE_SEARCH_BUDGET,
-) -> CompositeSearchResult:
-    excluded = validate_feature_pool(matrix)
-    pool = tuple(name for name in COMPOSITE_FEATURE_POOL if name not in excluded)
-    if len(pool) < 2 or not windows:
-        return CompositeSearchResult(
-            CompositeSearchConclusion.NO_EVALUABLE_FEATURES,
-            0,
-            pool,
-            excluded,
-            (),
-            (),
-            0,
-            0,
-            0,
-            None,
-            None,
-            "insufficient_evidence",
-        )
-    training_rows = _phase_rows(matrix, windows, "training")
-    evidence = _training_evidence(matrix, windows, timedelta(hours=4))
-    thresholds = EvidenceThresholds()
-    results: list[CompositeCandidateResult] = []
-    funnels: list[CompositeDepthFunnel] = []
-    seen: set[str] = set()
-    cheap_computed = 0
-    training_computed = 0
-    test_computed = 0
-    parents: tuple[CompositeCandidateResult, ...] = ()
-    budget_exhausted = False
-    for depth in range(2, min(7, len(pool)) + 1):
-        proposals: list[tuple[tuple[str, ...], CompositeCandidateResult | None]] = []
-        if depth == 2:
-            proposals = [(subset, None) for subset in combinations(pool, 2)]
-        else:
-            for retained_parent in parents:
-                for name in pool:
-                    if name not in retained_parent.candidate.features:
-                        proposals.append(
-                            (
-                                tuple(
-                                    sorted((*retained_parent.candidate.features, name))
-                                ),
-                                retained_parent,
-                            )
-                        )
-        if not proposals:
-            break
-        proposal_keys: set[tuple[tuple[str, ...], str | None]] = set()
-        unique_proposals: list[
-            tuple[tuple[str, ...], CompositeCandidateResult | None]
-        ] = []
-        for subset, proposal_parent in proposals:
-            key = (
-                subset,
-                proposal_parent.candidate.fingerprint if proposal_parent else None,
-            )
-            if key not in proposal_keys:
-                proposal_keys.add(key)
-                unique_proposals.append((subset, proposal_parent))
-        cheap_ranked: list[tuple[CompositeCandidate, str | None, CompositeMetrics]] = []
-        configurations = 0
-        duplicates = 0
-        for subset, proposal_parent in unique_proposals:
-            if cheap_computed >= budget.maximum_cheap_evaluations:
-                budget_exhausted = True
-                break
-            for weights in _weight_variants(
-                subset,
-                evidence,
-                proposal_parent.candidate if proposal_parent else None,
-                budget.maximum_variants_per_subset,
-            ):
-                for (
-                    cadence,
-                    horizon,
-                    entry,
-                    exit_,
-                    minimum,
-                    maximum,
-                    cooldown,
-                ) in _OPERATIONAL_CONFIGURATIONS:
-                    if cheap_computed >= budget.maximum_cheap_evaluations:
-                        budget_exhausted = True
-                        break
-                    configurations += 1
-                    candidate = build_candidate(
-                        weights=weights,
-                        training_rows=training_rows,
-                        simulation=simulation,
-                        cadence=cadence,
-                        horizon=horizon,
-                        entry_threshold=entry,
-                        exit_threshold=exit_,
-                        minimum_holding_period=minimum,
-                        maximum_holding_period=maximum,
-                        cooldown=cooldown,
-                        initial_cash=initial_cash,
-                    )
-                    if candidate.fingerprint in seen:
-                        duplicates += 1
-                        continue
-                    seen.add(candidate.fingerprint)
-                    cheap_computed += 1
-                    cheap = _cheap_window_metrics(
-                        candidate, matrix, windows, "training"
-                    )
-                    cheap_ranked.append(
-                        (
-                            candidate,
-                            proposal_parent.candidate.fingerprint
-                            if proposal_parent
-                            else None,
-                            cheap,
-                        )
-                    )
-        cheap_ranked.sort(
-            key=lambda value: (
-                -_ranking(value[0], value[2]).total,
-                value[0].fingerprint,
-            )
-        )
-        simulation_slots = min(
-            len(cheap_ranked),
-            budget.beam_width_per_depth * 2,
-            budget.maximum_training_simulations - training_computed,
-        )
-        depth_results: list[CompositeCandidateResult] = []
-        for candidate, parent_fingerprint, _cheap in cheap_ranked[:simulation_slots]:
-            training = _economic_metrics(
-                candidate=candidate,
-                dataset=dataset,
-                matrix=matrix,
-                windows=windows,
-                phase="training",
-                simulation=simulation,
-                initial_cash=initial_cash,
-            )
-            training_computed += 1
-            training_passes = (
-                training.usable_window_count >= thresholds.minimum_windows
-                and training.total_return > 0
-                and training.trade_count >= training.usable_window_count
-                and training.max_drawdown <= Decimal("0.35")
-                and training.return_stability
-                >= thresholds.minimum_stable_direction_ratio
-            )
-            failed = () if training_passes else ("training_economic_qualification",)
-            depth_results.append(
-                CompositeCandidateResult(
-                    candidate,
-                    parent_fingerprint,
-                    depth,
-                    CompositeCandidateStatus.RETAINED_TRAINING,
-                    _ranking(candidate, training),
-                    training,
-                    None,
-                    None,
-                    ("training_economic_qualification",) if training_passes else (),
-                    failed,
-                    failed[0] if failed else None,
-                    Decimal(0) if training_passes else Decimal(1),
-                )
-            )
-        depth_results.sort(
-            key=lambda item: (-item.ranking.total, item.candidate.fingerprint)
-        )
-        parents = tuple(item for item in depth_results if not item.failed_requirements)[
-            : budget.beam_width_per_depth
-        ]
-        validation_limit = min(len(parents), budget.maximum_validation_per_depth)
-        finalized: list[CompositeCandidateResult] = []
-        for item in parents[:validation_limit]:
-            validation = _economic_metrics(
-                candidate=item.candidate,
-                dataset=dataset,
-                matrix=matrix,
-                windows=windows,
-                phase="validation",
-                simulation=simulation,
-                initial_cash=initial_cash,
-            )
-            validation_passes = (
-                validation.usable_window_count >= thresholds.minimum_windows
-                and validation.total_return > 0
-                and validation.trade_count >= validation.usable_window_count
-                and validation.max_drawdown <= Decimal("0.35")
-                and validation.return_stability
-                >= thresholds.minimum_stable_direction_ratio
-                and validation.excess_return_over_production > 0
-            )
-            test = None
-            if validation_passes and test_computed < budget.maximum_test_candidates:
-                test = _economic_metrics(
-                    candidate=item.candidate,
-                    dataset=dataset,
-                    matrix=matrix,
-                    windows=windows,
-                    phase="test",
-                    simulation=simulation,
-                    initial_cash=initial_cash,
-                )
-                test_computed += 1
-            test_confirmed = bool(
-                test
-                and test.usable_window_count >= thresholds.minimum_windows
-                and test.total_return > 0
-                and test.trade_count >= test.usable_window_count
-                and test.max_drawdown <= Decimal("0.35")
-                and test.return_stability >= thresholds.minimum_stable_direction_ratio
-                and test.excess_return_over_production > 0
-            )
-            status = (
-                CompositeCandidateStatus.CONFIRMED_CANDIDATE
-                if test_confirmed
-                else CompositeCandidateStatus.REJECTED_TEST
-                if test is not None
-                else CompositeCandidateStatus.REJECTED_VALIDATION
-            )
-            failed = (
-                ()
-                if test_confirmed
-                else (
-                    ("test_economic_qualification",)
-                    if test
-                    else ("validation_economic_qualification",)
-                )
-            )
-            final_metrics = test or validation
-            finalized.append(
-                CompositeCandidateResult(
-                    item.candidate,
-                    item.parent_fingerprint,
-                    depth,
-                    status,
-                    _ranking(item.candidate, final_metrics),
-                    item.training_metrics,
-                    validation,
-                    test,
-                    item.passed_requirements
-                    + (
-                        ("validation_economic_qualification",)
-                        if validation_passes
-                        else ()
-                    )
-                    + (("test_economic_qualification",) if test_confirmed else ()),
-                    failed,
-                    failed[0] if failed else None,
-                    Decimal(0) if test_confirmed else Decimal(1),
-                )
-            )
-        persisted = tuple(
-            finalized
-            + list(parents[validation_limit:])
-            + [item for item in depth_results if item not in parents]
-        )
-        results.extend(persisted[: budget.maximum_persisted_candidates - len(results)])
-        funnels.append(
-            CompositeDepthFunnel(
-                depth,
-                len(unique_proposals),
-                configurations,
-                duplicates,
-                len(cheap_ranked),
-                0,
-                simulation_slots,
-                0,
-                len(parents),
-                validation_limit,
-                sum(1 for item in finalized if item.test_metrics is not None),
-                sum(1 for item in finalized if item.test_metrics is not None),
-            )
-        )
-        if not parents or training_computed >= budget.maximum_training_simulations:
-            if training_computed >= budget.maximum_training_simulations:
-                budget_exhausted = True
-            break
-    confirmed_candidates = [
-        item
-        for item in results
-        if item.status is CompositeCandidateStatus.CONFIRMED_CANDIDATE
-    ]
-    validation_passed = [item for item in results if item.test_metrics is not None]
-    conclusion = (
-        CompositeSearchConclusion.SEARCH_BUDGET_EXHAUSTED
-        if budget_exhausted and not confirmed_candidates
-        else CompositeSearchConclusion.CONFIRMED_COMPOSITE_CANDIDATES
-        if confirmed_candidates
-        else CompositeSearchConclusion.CANDIDATES_REJECTED_TEST
-        if validation_passed
-        else CompositeSearchConclusion.CANDIDATES_REJECTED_VALIDATION
-        if results
-        else CompositeSearchConclusion.NO_TRAINING_SIGNAL
-    )
-    priority = {
-        CompositeCandidateStatus.CONFIRMED_CANDIDATE: 3,
-        CompositeCandidateStatus.REJECTED_TEST: 2,
-        CompositeCandidateStatus.REJECTED_VALIDATION: 1,
-        CompositeCandidateStatus.RETAINED_TRAINING: 0,
-    }
-    best = max(
-        results,
-        key=lambda item: (
-            priority[item.status],
-            item.ranking.total,
-            item.candidate.fingerprint,
-        ),
-        default=None,
-    )
-    return CompositeSearchResult(
-        conclusion,
-        funnels[-1].depth if funnels else 0,
-        pool,
-        excluded,
-        tuple(funnels),
-        tuple(results),
-        cheap_computed + training_computed + test_computed,
-        cheap_computed + training_computed + test_computed,
-        0,
-        best.depth if best else None,
-        best.candidate.fingerprint if best else None,
-        None if confirmed_candidates else "economic_evidence_not_confirmed",
-    )
+    frictionãÏ4¶‰žËkºwµç\°±•¸¡Á½½°¤¤(€€€™½È‘•ÁÑ ¥¸É…¹” È°µ…á¥µÕµ}‘•ÁÑ €¬€Ä¤è(€€€€€€€ÁÉ½Á½Í…±Ìè±¥ÍÑmÑÕÁ±•mÑÕÁ±•mÍÑÈ°€¸¸¹t°½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•I•ÍÕ±Ðð9½¹•ut€ômt(€€€€€€€¥˜‘•ÁÑ €ôô€Èè(€€€€€€€€€€€ÁÉ½Á½Í…±Ì€ôl¡ÍÕ‰Í•Ð°9½¹”¤™½ÈÍÕ‰Í•Ð¥¸½µ‰¥¹…Ñ¥½¹Ì¡Á½½°°€È¥t(€€€€€€€•±Í”è(€€€€€€€€€€€™½ÈÉ•Ñ…¥¹•‘}Á…É•¹Ð¥¸Á…É•¹ÑÌè(€€€€€€€€€€€€€€€™½È¹…µ”¥¸Á½½°è(€€€€€€€€€€€€€€€€€€€¥˜¹…µ”¹½Ð¥¸É•Ñ…¥¹•‘}Á…É•¹Ð¹…¹‘¥‘…Ñ”¹™•…ÑÕÉ•Ìè(€€€€€€€€€€€€€€€€€€€€€€€ÁÉ½Á½Í…±Ì¹…ÁÁ•¹ (€€€€€€€€€€€€€€€€€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ÑÕÁ±” (€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€Í½ÉÑ•  ©É•Ñ…¥¹•‘}Á…É•¹Ð¹…¹‘¥‘…Ñ”¹™•…ÑÕÉ•Ì°¹…µ”¤¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•Ñ…¥¹•‘}Á…É•¹Ð°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€€€€€€€€€€¤(€€€€€€€¥˜¹½ÐÁÉ½Á½Í…±Ìè(€€€€€€€€€€€‰É•…¬(€€€€€€€ÁÉ½Á½Í…±}­•åÌèÍ•ÑmÑÕÁ±•mÑÕÁ±•mÍÑÈ°€¸¸¹t°ÍÑÈð9½¹•ut€ôÍ•Ð ¤(€€€€€€€Õ¹¥ÅÕ•}ÁÉ½Á½Í…±Ìè±¥ÍÑl(€€€€€€€€€€€ÑÕÁ±•mÑÕÁ±•mÍÑÈ°€¸¸¹t°½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•I•ÍÕ±Ðð9½¹•t(€€€€€€€t€ômt(€€€€€€€™½ÈÍÕ‰Í•Ð°ÁÉ½Á½Í…±}Á…É•¹Ð¥¸ÁÉ½Á½Í…±Ìè(€€€€€€€€€€€­•ä€ô€ (€€€€€€€€€€€€€€€ÍÕ‰Í•Ð°(€€€€€€€€€€€€€€€ÁÉ½Á½Í…±}Á…É•¹Ð¹…¹‘¥‘…Ñ”¹™¥¹•ÉÁÉ¥¹Ð¥˜ÁÉ½Á½Í…±}Á…É•¹Ð•±Í”9½¹”°(€€€€€€€€€€€€¤(€€€€€€€€€€€¥˜­•ä¹½Ð¥¸ÁÉ½Á½Í…±}­•åÌè(€€€€€€€€€€€€€€€ÁÉ½Á½Í…±}­•åÌ¹…‘¡­•ä¤(€€€€€€€€€€€€€€€Õ¹¥ÅÕ•}ÁÉ½Á½Í…±Ì¹…ÁÁ•¹ ¡ÍÕ‰Í•Ð°ÁÉ½Á½Í…±}Á…É•¹Ð¤¤(€€€€€€€Õ¹¥ÅÕ•}ÁÉ½Á½Í…±Ì¹Í½ÉÐ (€€€€€€€€€€€­•äõ±…µ‰‘„Ù…±Õ”è€ (€€€€€€€€€€€€€€€€µÍÕ´ ¡…‰Ì¡•Ù¥‘•¹•m¹…µ•t¤™½È¹…µ”¥¸Ù…±Õ•lÁt¤°•¥µ…° À¤¤°(€€€€€€€€€€€€€€€€´¡Ù…±Õ•lÅt¹É…¹­¥¹œ¹Ñ½Ñ…°¥˜Ù…±Õ•lÅt¥Ì¹½Ð9½¹”•±Í”•¥µ…° À¤¤°(€€€€€€€€€€€€€€€Ù…±Õ•lÁt°(€€€€€€€€€€€€€€€Ù…±Õ•lÅt¹…¹‘¥‘…Ñ”¹™¥¹•ÉÁÉ¥¹Ð¥˜Ù…±Õ•lÅt¥Ì¹½Ð9½¹”•±Í”€ˆˆ°(€€€€€€€€€€€€¤(€€€€€€€€¤(€€€€€€€É•µ…¥¹¥¹}‘•ÁÑ¡Ì€ôµ…á¥µÕµ}‘•ÁÑ €´‘•ÁÑ €¬€Ä(€€€€€€€É•µ…¥¹¥¹}¡•…À€ô‰Õ‘•Ð¹µ…á¥µÕµ}¡•…Á}•Ù…±Õ…Ñ¥½¹Ì€´¡•…Á}½µÁÕÑ•(€€€€€€€¥˜É•µ…¥¹¥¹}¡•…À€ðô€Àè(€€€€€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•€ôQÉÕ”(€€€€€€€€€€€‰É•…¬(€€€€€€€‘•ÁÑ¡}¡•…Á}±¥µ¥Ð€ôµ…à Ä°É•µ…¥¹¥¹}¡•…À€¼¼É•µ…¥¹¥¹}‘•ÁÑ¡Ì¤(€€€€€€€‘•ÁÑ¡}¡•…Á}ÍÑ½À€ô¡•…Á}½µÁÕÑ•€¬‘•ÁÑ¡}¡•…Á}±¥µ¥Ð(€€€€€€€¡•…Á}É…¹­•è±¥ÍÑmÑÕÁ±•m½µÁ½Í¥Ñ•…¹‘¥‘…Ñ”°ÍÑÈð9½¹”°½µÁ½Í¥Ñ•5•ÑÉ¥Íut€ômt(€€€€€€€½¹™¥ÕÉ…Ñ¥½¹Ì€ô€À(€€€€€€€‘ÕÁ±¥…Ñ•Ì€ô€À(€€€€€€€™½ÈÍÕ‰Í•Ð°ÁÉ½Á½Í…±}Á…É•¹Ð¥¸Õ¹¥ÅÕ•}ÁÉ½Á½Í…±Ìè(€€€€€€€€€€€¥˜¡•…Á}½µÁÕÑ•€øô‘•ÁÑ¡}¡•…Á}ÍÑ½Àè(€€€€€€€€€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•€ôQÉÕ”(€€€€€€€€€€€€€€€‰É•…¬(€€€€€€€€€€€™½ÈÝ•¥¡ÑÌ¥¸}Ý•¥¡Ñ}Ù…É¥…¹ÑÌ (€€€€€€€€€€€€€€€ÍÕ‰Í•Ð°(€€€€€€€€€€€€€€€•Ù¥‘•¹”°(€€€€€€€€€€€€€€€ÁÉ½Á½Í…±}Á…É•¹Ð¹…¹‘¥‘…Ñ”¥˜ÁÉ½Á½Í…±}Á…É•¹Ð•±Í”9½¹”°(€€€€€€€€€€€€€€€‰Õ‘•Ð¹µ…á¥µÕµ}Ù…É¥…¹ÑÍ}Á•É}ÍÕ‰Í•Ð°(€€€€€€€€€€€€¤è(€€€€€€€€€€€€€€€™½È€ (€€€€€€€€€€€€€€€€€€€…‘•¹”°(€€€€€€€€€€€€€€€€€€€¡½É¥é½¸°(€€€€€€€€€€€€€€€€€€€•¹ÑÉä°(€€€€€€€€€€€€€€€€€€€•á¥Ñ|°(€€€€€€€€€€€€€€€€€€€µ¥¹¥µÕ´°(€€€€€€€€€€€€€€€€€€€µ…á¥µÕ´°(€€€€€€€€€€€€€€€€€€€½½±‘½Ý¸°(€€€€€€€€€€€€€€€€¤¥¸}=AIQ%=91}=9%UIQ%=9Lè(€€€€€€€€€€€€€€€€€€€¥˜¡•…Á}½µÁÕÑ•€øô‘•ÁÑ¡}¡•…Á}ÍÑ½Àè(€€€€€€€€€€€€€€€€€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•€ôQÉÕ”(€€€€€€€€€€€€€€€€€€€€€€€‰É•…¬(€€€€€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¹Ì€¬ô€Ä(€€€€€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”€ô‰Õ¥±‘}…¹‘¥‘…Ñ” (€€€€€€€€€€€€€€€€€€€€€€€Ý•¥¡ÑÌõÝ•¥¡ÑÌ°(€€€€€€€€€€€€€€€€€€€€€€€ÑÉ…¥¹¥¹}É½ÝÌõÑÉ…¥¹¥¹}É½ÝÌ°(€€€€€€€€€€€€€€€€€€€€€€€Í¥µÕ±…Ñ¥½¸õÍ¥µÕ±…Ñ¥½¸°(€€€€€€€€€€€€€€€€€€€€€€€…‘•¹”õ…‘•¹”°(€€€€€€€€€€€€€€€€€€€€€€€¡½É¥é½¸õ¡½É¥é½¸°(€€€€€€€€€€€€€€€€€€€€€€€•¹ÑÉå}Ñ¡É•Í¡½±õ•¹ÑÉä°(€€€€€€€€€€€€€€€€€€€€€€€•á¥Ñ}Ñ¡É•Í¡½±õ•á¥Ñ|°(€€€€€€€€€€€€€€€€€€€€€€€µ¥¹¥µÕµ}¡½±‘¥¹}Á•É¥½õµ¥¹¥µÕ´°(€€€€€€€€€€€€€€€€€€€€€€€µ…á¥µÕµ}¡½±‘¥¹}Á•É¥½õµ…á¥µÕ´°(€€€€€€€€€€€€€€€€€€€€€€€½½±‘½Ý¸õ½½±‘½Ý¸°(€€€€€€€€€€€€€€€€€€€€€€€¥¹¥Ñ¥…±}…Í õ¥¹¥Ñ¥…±}…Í °(€€€€€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€€€€€¥˜…¹‘¥‘…Ñ”¹™¥¹•ÉÁÉ¥¹Ð¥¸Í••¸è(€€€€€€€€€€€€€€€€€€€€€€€‘ÕÁ±¥…Ñ•Ì€¬ô€Ä(€€€€€€€€€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”(€€€€€€€€€€€€€€€€€€€Í••¸¹…‘¡…¹‘¥‘…Ñ”¹™¥¹•ÉÁÉ¥¹Ð¤(€€€€€€€€€€€€€€€€€€€¡•…Á}½µÁÕÑ•€¬ô€Ä(€€€€€€€€€€€€€€€€€€€¡•…À€ô}¡•…Á}Ý¥¹‘½Ý}µ•ÑÉ¥Ì (€€€€€€€€€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”°µ…ÑÉ¥à°Ý¥¹‘½ÝÌ°€‰ÑÉ…¥¹¥¹œˆ(€€€€€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€€€€€¡•…Á}É…¹­•¹…ÁÁ•¹ (€€€€€€€€€€€€€€€€€€€€€€€€ (€€€€€€€€€€€€€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”°(€€€€€€€€€€€€€€€€€€€€€€€€€€€ÁÉ½Á½Í…±}Á…É•¹Ð¹…¹‘¥‘…Ñ”¹™¥¹•ÉÁÉ¥¹Ð(€€€€€€€€€€€€€€€€€€€€€€€€€€€¥˜ÁÉ½Á½Í…±}Á…É•¹Ð(€€€€€€€€€€€€€€€€€€€€€€€€€€€•±Í”9½¹”°(€€€€€€€€€€€€€€€€€€€€€€€€€€€¡•…À°(€€€€€€€€€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€€€€€€¤(€€€€€€€¡•…Á}É…¹­•¹Í½ÉÐ (€€€€€€€€€€€­•äõ±…µ‰‘„Ù…±Õ”è€ (€€€€€€€€€€€€€€€€µ}É…¹­¥¹œ¡Ù…±Õ•lÁt°Ù…±Õ•lÉt¤¹Ñ½Ñ…°°(€€€€€€€€€€€€€€€Ù…±Õ•lÁt¹™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€€€€€€¤(€€€€€€€€¤(€€€€€€€¥˜¹½Ð¡•…Á}É…¹­•è(€€€€€€€€€€€‰É•…¬(€€€€€€€É•µ…¥¹¥¹}ÑÉ…¥¹¥¹œ€ô‰Õ‘•Ð¹µ…á¥µÕµ}ÑÉ…¥¹¥¹}Í¥µÕ±…Ñ¥½¹Ì€´ÑÉ…¥¹¥¹}½µÁÕÑ•(€€€€€€€¥˜É•µ…¥¹¥¹}ÑÉ…¥¹¥¹œ€ðô€Àè(€€€€€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•€ôQÉÕ”(€€€€€€€€€€€‰É•…¬(€€€€€€€‘•ÁÑ¡}ÑÉ…¥¹¥¹}±¥µ¥Ð€ôµ…à Ä°É•µ…¥¹¥¹}ÑÉ…¥¹¥¹œ€¼¼É•µ…¥¹¥¹}‘•ÁÑ¡Ì¤(€€€€€€€Í¥µÕ±…Ñ¥½¹}Í±½ÑÌ€ôµ¥¸ (€€€€€€€€€€€±•¸¡¡•…Á}É…¹­•¤°(€€€€€€€€€€€‰Õ‘•Ð¹‰•…µ}Ý¥‘Ñ¡}Á•É}‘•ÁÑ €¨€È°(€€€€€€€€€€€‘•ÁÑ¡}ÑÉ…¥¹¥¹}±¥µ¥Ð°(€€€€€€€€¤(€€€€€€€¥˜Í¥µÕ±…Ñ¥½¹}Í±½ÑÌ€ð±•¸¡¡•…Á}É…¹­•¤è(€€€€€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•€ôQÉÕ”(€€€€€€€‘•ÁÑ¡}É•ÍÕ±ÑÌè±¥ÍÑm½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•I•ÍÕ±Ñt€ômt(€€€€€€€™½È…¹‘¥‘…Ñ”°Á…É•¹Ñ}™¥¹•ÉÁÉ¥¹Ð°}¡•…À¥¸¡•…Á}É…¹­•‘léÍ¥µÕ±…Ñ¥½¹}Í±½ÑÍtè(€€€€€€€€€€€ÑÉ…¥¹¥¹œ€ô}•½¹½µ¥}µ•ÑÉ¥Ì (€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”õ…¹‘¥‘…Ñ”°(€€€€€€€€€€€€€€€‘…Ñ…Í•Ðõ‘…Ñ…Í•Ð°(€€€€€€€€€€€€€€€µ…ÑÉ¥àõµ…ÑÉ¥à°(€€€€€€€€€€€€€€€Ý¥¹‘½ÝÌõÝ¥¹‘½ÝÌ°(€€€€€€€€€€€€€€€Á¡…Í”ô‰ÑÉ…¥¹¥¹œˆ°(€€€€€€€€€€€€€€€Í¥µÕ±…Ñ¥½¸õÍ¥µÕ±…Ñ¥½¸°(€€€€€€€€€€€€€€€¥¹¥Ñ¥…±}…Í õ¥¹¥Ñ¥…±}…Í °(€€€€€€€€€€€€¤(€€€€€€€€€€€ÑÉ…¥¹¥¹}½µÁÕÑ•€¬ô€Ä(€€€€€€€€€€€ÑÉ…¥¹¥¹}Á…ÍÍ•Ì€ô€ (€€€€€€€€€€€€€€€ÑÉ…¥¹¥¹œ¹ÕÍ…‰±•}Ý¥¹‘½Ý}½Õ¹Ð€øôÑ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}Ý¥¹‘½ÝÌ(€€€€€€€€€€€€€€€…¹ÑÉ…¥¹¥¹œ¹Ñ½Ñ…±}É•ÑÕÉ¸€ø€À(€€€€€€€€€€€€€€€…¹ÑÉ…¥¹¥¹œ¹ÑÉ…‘•}½Õ¹Ð€øôÑÉ…¥¹¥¹œ¹ÕÍ…‰±•}Ý¥¹‘½Ý}½Õ¹Ð(€€€€€€€€€€€€€€€…¹ÑÉ…¥¹¥¹œ¹µ…á}‘É…Ý‘½Ý¸€ðô•¥µ…° ˆÀ¸ÌÔˆ¤(€€€€€€€€€€€€€€€…¹ÑÉ…¥¹¥¹œ¹É•ÑÕÉ¹}ÍÑ…‰¥±¥Ñä(€€€€€€€€€€€€€€€€øôÑ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}ÍÑ…‰±•}‘¥É•Ñ¥½¹}É…Ñ¥¼(€€€€€€€€€€€€¤(€€€€€€€€€€€™…¥±•€ô€ ¤¥˜ÑÉ…¥¹¥¹}Á…ÍÍ•Ì•±Í”€ ‰ÑÉ…¥¹¥¹}•½¹½µ¥}ÅÕ…±¥™¥…Ñ¥½¸ˆ°¤(€€€€€€€€€€€‘•ÁÑ¡}É•ÍÕ±ÑÌ¹…ÁÁ•¹ (€€€€€€€€€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•I•ÍÕ±Ð (€€€€€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”°(€€€€€€€€€€€€€€€€€€€Á…É•¹Ñ}™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€€€€€€€€€€€€€‘•ÁÑ °(€€€€€€€€€€€€€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹IQ%9}QI%9%9°(€€€€€€€€€€€€€€€€€€€}É…¹­¥¹œ¡…¹‘¥‘…Ñ”°ÑÉ…¥¹¥¹œ¤°(€€€€€€€€€€€€€€€€€€€ÑÉ…¥¹¥¹œ°(€€€€€€€€€€€€€€€€€€€9½¹”°(€€€€€€€€€€€€€€€€€€€9½¹”°(€€€€€€€€€€€€€€€€€€€€ ‰ÑÉ…¥¹¥¹}•½¹½µ¥}ÅÕ…±¥™¥…Ñ¥½¸ˆ°¤¥˜ÑÉ…¥¹¥¹}Á…ÍÍ•Ì•±Í”€ ¤°(€€€€€€€€€€€€€€€€€€€™…¥±•°(€€€€€€€€€€€€€€€€€€€™…¥±•‘lÁt¥˜™…¥±••±Í”9½¹”°(€€€€€€€€€€€€€€€€€€€•¥µ…° À¤¥˜ÑÉ…¥¹¥¹}Á…ÍÍ•Ì•±Í”•¥µ…° Ä¤°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤(€€€€€€€‘•ÁÑ¡}É•ÍÕ±ÑÌ¹Í½ÉÐ (€€€€€€€€€€€­•äõ±…µ‰‘„¥Ñ•´è€ µ¥Ñ•´¹É…¹­¥¹œ¹Ñ½Ñ…°°¥Ñ•´¹…¹‘¥‘…Ñ”¹™¥¹•ÉÁÉ¥¹Ð¤(€€€€€€€€¤(€€€€€€€Á…É•¹ÑÌ€ôÑÕÁ±”¡¥Ñ•´™½È¥Ñ•´¥¸‘•ÁÑ¡}É•ÍÕ±ÑÌ¥˜¹½Ð¥Ñ•´¹™…¥±•‘}É•ÅÕ¥É•µ•¹ÑÌ¥l(€€€€€€€€€€€€è‰Õ‘•Ð¹‰•…µ}Ý¥‘Ñ¡}Á•É}‘•ÁÑ (€€€€€€€t(€€€€€€€Ù…±¥‘…Ñ¥½¹}±¥µ¥Ð€ôµ¥¸¡±•¸¡Á…É•¹ÑÌ¤°‰Õ‘•Ð¹µ…á¥µÕµ}Ù…±¥‘…Ñ¥½¹}Á•É}‘•ÁÑ ¤(€€€€€€€™¥¹…±¥é•è±¥ÍÑm½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•I•ÍÕ±Ñt€ômt(€€€€€€€™½È¥Ñ•´¥¸Á…É•¹ÑÍléÙ…±¥‘…Ñ¥½¹}±¥µ¥Ñtè(€€€€€€€€€€€Ù…±¥‘…Ñ¥½¸€ô}•½¹½µ¥}µ•ÑÉ¥Ì (€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”õ¥Ñ•´¹…¹‘¥‘…Ñ”°(€€€€€€€€€€€€€€€‘…Ñ…Í•Ðõ‘…Ñ…Í•Ð°(€€€€€€€€€€€€€€€µ…ÑÉ¥àõµ…ÑÉ¥à°(€€€€€€€€€€€€€€€Ý¥¹‘½ÝÌõÝ¥¹‘½ÝÌ°(€€€€€€€€€€€€€€€Á¡…Í”ô‰Ù…±¥‘…Ñ¥½¸ˆ°(€€€€€€€€€€€€€€€Í¥µÕ±…Ñ¥½¸õÍ¥µÕ±…Ñ¥½¸°(€€€€€€€€€€€€€€€¥¹¥Ñ¥…±}…Í õ¥¹¥Ñ¥…±}…Í °(€€€€€€€€€€€€¤(€€€€€€€€€€€Ù…±¥‘…Ñ¥½¹}½µÁÕÑ•€¬ô€Ä(€€€€€€€€€€€Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•Ì€ô€ (€€€€€€€€€€€€€€€Ù…±¥‘…Ñ¥½¸¹ÕÍ…‰±•}Ý¥¹‘½Ý}½Õ¹Ð€øôÑ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}Ý¥¹‘½ÝÌ(€€€€€€€€€€€€€€€…¹Ù…±¥‘…Ñ¥½¸¹Ñ½Ñ…±}É•ÑÕÉ¸€ø€À(€€€€€€€€€€€€€€€…¹Ù…±¥‘…Ñ¥½¸¹ÑÉ…‘•}½Õ¹Ð€øôÙ…±¥‘…Ñ¥½¸¹ÕÍ…‰±•}Ý¥¹‘½Ý}½Õ¹Ð(€€€€€€€€€€€€€€€…¹Ù…±¥‘…Ñ¥½¸¹µ…á}‘É…Ý‘½Ý¸€ðô•¥µ…° ˆÀ¸ÌÔˆ¤(€€€€€€€€€€€€€€€…¹Ù…±¥‘…Ñ¥½¸¹É•ÑÕÉ¹}ÍÑ…‰¥±¥Ñä(€€€€€€€€€€€€€€€€øôÑ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}ÍÑ…‰±•}‘¥É•Ñ¥½¹}É…Ñ¥¼(€€€€€€€€€€€€€€€…¹Ù…±¥‘…Ñ¥½¸¹•á•ÍÍ}É•ÑÕÉ¹}½Ù•É}ÁÉ½‘ÕÑ¥½¸€ø€À(€€€€€€€€€€€€¤(€€€€€€€€€€€Ñ•ÍÐ€ô9½¹”(€€€€€€€€€€€¥˜Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•Ì…¹Ñ•ÍÑ}½µÁÕÑ•€ð‰Õ‘•Ð¹µ…á¥µÕµ}Ñ•ÍÑ}…¹‘¥‘…Ñ•Ìè(€€€€€€€€€€€€€€€Ñ•ÍÐ€ô}•½¹½µ¥}µ•ÑÉ¥Ì (€€€€€€€€€€€€€€€€€€€…¹‘¥‘…Ñ”õ¥Ñ•´¹…¹‘¥‘…Ñ”°(€€€€€€€€€€€€€€€€€€€‘…Ñ…Í•Ðõ‘…Ñ…Í•Ð°(€€€€€€€€€€€€€€€€€€€µ…ÑÉ¥àõµ…ÑÉ¥à°(€€€€€€€€€€€€€€€€€€€Ý¥¹‘½ÝÌõÝ¥¹‘½ÝÌ°(€€€€€€€€€€€€€€€€€€€Á¡…Í”ô‰Ñ•ÍÐˆ°(€€€€€€€€€€€€€€€€€€€Í¥µÕ±…Ñ¥½¸õÍ¥µÕ±…Ñ¥½¸°(€€€€€€€€€€€€€€€€€€€¥¹¥Ñ¥…±}…Í õ¥¹¥Ñ¥…±}…Í °(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€Ñ•ÍÑ}½µÁÕÑ•€¬ô€Ä(€€€€€€€€€€€•±¥˜Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•Ìè(€€€€€€€€€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•€ôQÉÕ”(€€€€€€€€€€€Ñ•ÍÑ}½¹™¥Éµ•€ô‰½½° (€€€€€€€€€€€€€€€Ñ•ÍÐ(€€€€€€€€€€€€€€€…¹Ñ•ÍÐ¹ÕÍ…‰±•}Ý¥¹‘½Ý}½Õ¹Ð€øôÑ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}Ý¥¹‘½ÝÌ(€€€€€€€€€€€€€€€…¹Ñ•ÍÐ¹Ñ½Ñ…±}É•ÑÕÉ¸€ø€À(€€€€€€€€€€€€€€€…¹Ñ•ÍÐ¹ÑÉ…‘•}½Õ¹Ð€øôÑ•ÍÐ¹ÕÍ…‰±•}Ý¥¹‘½Ý}½Õ¹Ð(€€€€€€€€€€€€€€€…¹Ñ•ÍÐ¹µ…á}‘É…Ý‘½Ý¸€ðô•¥µ…° ˆÀ¸ÌÔˆ¤(€€€€€€€€€€€€€€€…¹Ñ•ÍÐ¹É•ÑÕÉ¹}ÍÑ…‰¥±¥Ñä€øôÑ¡É•Í¡½±‘Ì¹µ¥¹¥µÕµ}ÍÑ…‰±•}‘¥É•Ñ¥½¹}É…Ñ¥¼(€€€€€€€€€€€€€€€…¹Ñ•ÍÐ¹•á•ÍÍ}É•ÑÕÉ¹}½Ù•É}ÁÉ½‘ÕÑ¥½¸€ø€À(€€€€€€€€€€€€¤(€€€€€€€€€€€ÍÑ…ÑÕÌ€ô€ (€€€€€€€€€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹=9%I5}9%Q(€€€€€€€€€€€€€€€¥˜Ñ•ÍÑ}½¹™¥Éµ•(€€€€€€€€€€€€€€€•±Í”½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}QMP(€€€€€€€€€€€€€€€¥˜Ñ•ÍÐ¥Ì¹½Ð9½¹”(€€€€€€€€€€€€€€€•±Í”½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹AMM}Y1%Q%=8(€€€€€€€€€€€€€€€¥˜Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•Ì(€€€€€€€€€€€€€€€•±Í”½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}Y1%Q%=8(€€€€€€€€€€€€¤(€€€€€€€€€€€™…¥±•€ô€ (€€€€€€€€€€€€€€€€ ¤(€€€€€€€€€€€€€€€¥˜Ñ•ÍÑ}½¹™¥Éµ•½È€¡Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•Ì…¹Ñ•ÍÐ¥Ì9½¹”¤(€€€€€€€€€€€€€€€•±Í”€ (€€€€€€€€€€€€€€€€€€€€ ‰Ñ•ÍÑ}•½¹½µ¥}ÅÕ…±¥™¥…Ñ¥½¸ˆ°¤(€€€€€€€€€€€€€€€€€€€¥˜Ñ•ÍÐ(€€€€€€€€€€€€€€€€€€€•±Í”€ ‰Ù…±¥‘…Ñ¥½¹}•½¹½µ¥}ÅÕ…±¥™¥…Ñ¥½¸ˆ°¤(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤(€€€€€€€€€€€™¥¹…±}µ•ÑÉ¥Ì€ôÑ•ÍÐ½ÈÙ…±¥‘…Ñ¥½¸(€€€€€€€€€€€™¥¹…±¥é•¹…ÁÁ•¹ (€€€€€€€€€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•I•ÍÕ±Ð (€€€€€€€€€€€€€€€€€€€¥Ñ•´¹…¹‘¥‘…Ñ”°(€€€€€€€€€€€€€€€€€€€¥Ñ•´¹Á…É•¹Ñ}™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€€€€€€€€€€€€€‘•ÁÑ °(€€€€€€€€€€€€€€€€€€€ÍÑ…ÑÕÌ°(€€€€€€€€€€€€€€€€€€€}É…¹­¥¹œ¡¥Ñ•´¹…¹‘¥‘…Ñ”°™¥¹…±}µ•ÑÉ¥Ì¤°(€€€€€€€€€€€€€€€€€€€¥Ñ•´¹ÑÉ…¥¹¥¹}µ•ÑÉ¥Ì°(€€€€€€€€€€€€€€€€€€€Ù…±¥‘…Ñ¥½¸°(€€€€€€€€€€€€€€€€€€€Ñ•ÍÐ°(€€€€€€€€€€€€€€€€€€€¥Ñ•´¹Á…ÍÍ•‘}É•ÅÕ¥É•µ•¹ÑÌ(€€€€€€€€€€€€€€€€€€€€¬€ (€€€€€€€€€€€€€€€€€€€€€€€€ ‰Ù…±¥‘…Ñ¥½¹}•½¹½µ¥}ÅÕ…±¥™¥…Ñ¥½¸ˆ°¤(€€€€€€€€€€€€€€€€€€€€€€€¥˜Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•Ì(€€€€€€€€€€€€€€€€€€€€€€€•±Í”€ ¤(€€€€€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€€€€€€¬€  ‰Ñ•ÍÑ}•½¹½µ¥}ÅÕ…±¥™¥…Ñ¥½¸ˆ°¤¥˜Ñ•ÍÑ}½¹™¥Éµ••±Í”€ ¤¤°(€€€€€€€€€€€€€€€€€€€™…¥±•°(€€€€€€€€€€€€€€€€€€€™…¥±•‘lÁt¥˜™…¥±••±Í”9½¹”°(€€€€€€€€€€€€€€€€€€€•¥µ…° À¤(€€€€€€€€€€€€€€€€€€€¥˜Ñ•ÍÑ}½¹™¥Éµ•½È€¡Ù…±¥‘…Ñ¥½¹}Á…ÍÍ•Ì…¹Ñ•ÍÐ¥Ì9½¹”¤(€€€€€€€€€€€€€€€€€€€•±Í”•¥µ…° Ä¤°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€¤(€€€€€€€Á•ÉÍ¥ÍÑ•€ôÑÕÁ±” (€€€€€€€€€€€™¥¹…±¥é•(€€€€€€€€€€€€¬±¥ÍÐ¡Á…É•¹ÑÍmÙ…±¥‘…Ñ¥½¹}±¥µ¥Ðét¤(€€€€€€€€€€€€¬m¥Ñ•´™½È¥Ñ•´¥¸‘•ÁÑ¡}É•ÍÕ±ÑÌ¥˜¥Ñ•´¹½Ð¥¸Á…É•¹ÑÍt(€€€€€€€€¤(€€€€€€€É•µ…¥¹¥¹}Á•ÉÍ¥ÍÑ•¹”€ô‰Õ‘•Ð¹µ…á¥µÕµ}Á•ÉÍ¥ÍÑ•‘}…¹‘¥‘…Ñ•Ì€´±•¸¡É•ÍÕ±ÑÌ¤(€€€€€€€¥˜É•µ…¥¹¥¹}Á•ÉÍ¥ÍÑ•¹”€ø€Àè(€€€€€€€€€€€É•ÍÕ±ÑÌ¹•áÑ•¹¡Á•ÉÍ¥ÍÑ•‘léÉ•µ…¥¹¥¹}Á•ÉÍ¥ÍÑ•¹•t¤(€€€€€€€¥˜±•¸¡Á•ÉÍ¥ÍÑ•¤€øµ…à À°É•µ…¥¹¥¹}Á•ÉÍ¥ÍÑ•¹”¤è(€€€€€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•€ôQÉÕ”(€€€€€€€™Õ¹¹•±Ì¹…ÁÁ•¹ (€€€€€€€€€€€½µÁ½Í¥Ñ••ÁÑ¡Õ¹¹•° (€€€€€€€€€€€€€€€‘•ÁÑ °(€€€€€€€€€€€€€€€±•¸¡Õ¹¥ÅÕ•}ÁÉ½Á½Í…±Ì¤°(€€€€€€€€€€€€€€€½¹™¥ÕÉ…Ñ¥½¹Ì°(€€€€€€€€€€€€€€€‘ÕÁ±¥…Ñ•Ì°(€€€€€€€€€€€€€€€±•¸¡¡•…Á}É…¹­•¤°(€€€€€€€€€€€€€€€€À°(€€€€€€€€€€€€€€€Í¥µÕ±…Ñ¥½¹}Í±½ÑÌ°(€€€€€€€€€€€€€€€€À°(€€€€€€€€€€€€€€€±•¸¡Á…É•¹ÑÌ¤°(€€€€€€€€€€€€€€€Ù…±¥‘…Ñ¥½¹}±¥µ¥Ð°(€€€€€€€€€€€€€€€ÍÕ´ (€€€€€€€€€€€€€€€€€€€€Ä(€€€€€€€€€€€€€€€€€€€™½È¥Ñ•´¥¸™¥¹…±¥é•(€€€€€€€€€€€€€€€€€€€¥˜¥Ñ•´¹ÍÑ…ÑÕÌ(€€€€€€€€€€€€€€€€€€€¥¸ì(€€€€€€€€€€€€€€€€€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹AMM}Y1%Q%=8°(€€€€€€€€€€€€€€€€€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}QMP°(€€€€€€€€€€€€€€€€€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹=9%I5}9%Q°(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€ÍÕ´ Ä™½È¥Ñ•´¥¸™¥¹…±¥é•¥˜¥Ñ•´¹Ñ•ÍÑ}µ•ÑÉ¥Ì¥Ì¹½Ð9½¹”¤°(€€€€€€€€€€€€¤(€€€€€€€€¤(€€€€€€€¥˜¹½ÐÁ…É•¹ÑÌ½ÈÑÉ…¥¹¥¹}½µÁÕÑ•€øô‰Õ‘•Ð¹µ…á¥µÕµ}ÑÉ…¥¹¥¹}Í¥µÕ±…Ñ¥½¹Ìè(€€€€€€€€€€€¥˜ÑÉ…¥¹¥¹}½µÁÕÑ•€øô‰Õ‘•Ð¹µ…á¥µÕµ}ÑÉ…¥¹¥¹}Í¥µÕ±…Ñ¥½¹Ìè(€€€€€€€€€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•€ôQÉÕ”(€€€€€€€€€€€‰É•…¬(€€€½¹™¥Éµ•‘}…¹‘¥‘…Ñ•Ì€ôl(€€€€€€€¥Ñ•´(€€€€€€€™½È¥Ñ•´¥¸É•ÍÕ±ÑÌ(€€€€€€€¥˜¥Ñ•´¹ÍÑ…ÑÕÌ¥Ì½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹=9%I5}9%Q(€€€t(€€€Á…ÍÍ•‘}Ù…±¥‘…Ñ¥½¸€ôl(€€€€€€€¥Ñ•´(€€€€€€€™½È¥Ñ•´¥¸É•ÍÕ±ÑÌ(€€€€€€€¥˜¥Ñ•´¹ÍÑ…ÑÕÌ¥Ì½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹AMM}Y1%Q%=8(€€€t(€€€É•©•Ñ•‘}Ñ•ÍÐ€ôl(€€€€€€€¥Ñ•´(€€€€€€€™½È¥Ñ•´¥¸É•ÍÕ±ÑÌ(€€€€€€€¥˜¥Ñ•´¹ÍÑ…ÑÕÌ¥Ì½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}QMP(€€€t(€€€É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¸€ôl(€€€€€€€¥Ñ•´(€€€€€€€™½È¥Ñ•´¥¸É•ÍÕ±ÑÌ(€€€€€€€¥˜¥Ñ•´¹ÍÑ…ÑÕÌ¥Ì½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}Y1%Q%=8(€€€t(€€€½¹±ÕÍ¥½¸€ô€ (€€€€€€€½µÁ½Í¥Ñ•M•…É¡½¹±ÕÍ¥½¸¹=9%I5}=5A=M%Q}9%QL(€€€€€€€¥˜½¹™¥Éµ•‘}…¹‘¥‘…Ñ•Ì(€€€€€€€•±Í”½µÁ½Í¥Ñ•M•…É¡½¹±ÕÍ¥½¸¹9%QM}AMM}Y1%Q%=8(€€€€€€€¥˜Á…ÍÍ•‘}Ù…±¥‘…Ñ¥½¸(€€€€€€€•±Í”½µÁ½Í¥Ñ•M•…É¡½¹±ÕÍ¥½¸¹9%QM}I)Q}QMP(€€€€€€€¥˜É•©•Ñ•‘}Ñ•ÍÐ(€€€€€€€•±Í”½µÁ½Í¥Ñ•M•…É¡½¹±ÕÍ¥½¸¹9%QM}I)Q}Y1%Q%=8(€€€€€€€¥˜É•©•Ñ•‘}Ù…±¥‘…Ñ¥½¸(€€€€€€€•±Í”½µÁ½Í¥Ñ•M•…É¡½¹±ÕÍ¥½¸¹9=}QI%9%9}M%90(€€€€€€€¥˜É•ÍÕ±ÑÌ(€€€€€€€•±Í”½µÁ½Í¥Ñ•M•…É¡½¹±ÕÍ¥½¸¹MI!}	UQ}a!UMQ(€€€€€€€¥˜‰Õ‘•Ñ}•á¡…ÕÍÑ•(€€€€€€€•±Í”½µÁ½Í¥Ñ•M•…É¡½¹±ÕÍ¥½¸¹9=}QI%9%9}M%90(€€€€¤(€€€ÁÉ¥½É¥Ñä€ôì(€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹=9%I5}9%Qè€Ô°(€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹AMM}Y1%Q%=8è€Ð°(€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}QMPè€Ì°(€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹IQ%9}QI%9%9è€È°(€€€€€€€½µÁ½Í¥Ñ•…¹‘¥‘…Ñ•MÑ…ÑÕÌ¹I)Q}Y1%Q%=8è€Ä°(€€€ô(€€€‰•ÍÐ€ôµ…à (€€€€€€€É•ÍÕ±ÑÌ°(€€€€€€€­•äõ±…µ‰‘„¥Ñ•´è€ (€€€€€€€€€€€ÁÉ¥½É¥Ñåm¥Ñ•´¹ÍÑ…ÑÕÍt°(€€€€€€€€€€€¥Ñ•´¹É…¹­¥¹œ¹Ñ½Ñ…°°(€€€€€€€€€€€¥Ñ•´¹…¹‘¥‘…Ñ”¹™¥¹•ÉÁÉ¥¹Ð°(€€€€€€€€¤°(€€€€€€€‘•™…Õ±Ðõ9½¹”°(€€€€¤(€€€Ñ½Ñ…±}•Ù…±Õ…Ñ¥½¹Ì€ô€ (€€€€€€€¡•…Á}½µÁÕÑ•€¬ÑÉ…¥¹¥¹}½µÁÕÑ•€¬Ù…±¥‘…Ñ¥½¹}½µÁÕÑ•€¬Ñ•ÍÑ}½µÁÕÑ•(€€€€¤(€€€É•ÑÕÉ¸½µÁ½Í¥Ñ•M•…É¡I•ÍÕ±Ð (€€€€€€€½¹±ÕÍ¥½¸õ½¹±ÕÍ¥½¸°(€€€€€€€µ…á¥µÕµ}‘•ÁÑ¡}É•…¡•õ™Õ¹¹•±Íl´Åt¹‘•ÁÑ ¥˜™Õ¹¹•±Ì•±Í”€À°(€€€€€€€™•…ÑÕÉ•}Á½½°õÁ½½°°(€€€€€€€•á±Õ‘•‘}™•…ÑÕÉ•Ìõ•á±Õ‘•°(€€€€€€€™Õ¹¹•±}‰å}‘•ÁÑ õÑÕÁ±”¡™Õ¹¹•±Ì¤°(€€€€€€€…¹‘¥‘…Ñ•ÌõÑÕÁ±”¡É•ÍÕ±ÑÌ¤°(€€€€€€€Ñ½Ñ…±}•Ù…±Õ…Ñ¥½¹ÌõÑ½Ñ…±}•Ù…±Õ…Ñ¥½¹Ì°(€€€€€€€½µÁÕÑ•õÑ½Ñ…±}•Ù…±Õ…Ñ¥½¹Ì°(€€€€€€€É•ÕÍ•ôÀ°(€€€€€€€‰Õ‘•Ñ}•á¡…ÕÍÑ•õ‰Õ‘•Ñ}•á¡…ÕÍÑ•°(€€€€€€€¡•…Á}•Ù…±Õ…Ñ¥½¹Í}½µÁÕÑ•õ¡•…Á}½µÁÕÑ•°(€€€€€€€¡•…Á}•Ù…±Õ…Ñ¥½¹Í}É•ÕÍ•ôÀ°(€€€€€€€ÑÉ…¥¹¥¹}Í¥µÕ±…Ñ¥½¹Í}½µÁÕÑ•õÑÉ…¥¹¥¹}½µÁÕÑ•°(€€€€€€€ÑÉ…¥¹¥¹}Í¥µÕ±…Ñ¥½¹Í}É•ÕÍ•ôÀ°(€€€€€€€Ù…±¥‘…Ñ¥½¹}Í¥µÕ±…Ñ¥½¹Í}½µÁÕÑ•õÙ…±¥‘…Ñ¥½¹}½µÁÕÑ•°(€€€€€€€Ù…±¥‘…Ñ¥½¹}Í¥µÕ±…Ñ¥½¹Í}É•ÕÍ•ôÀ°(€€€€€€€Ñ•ÍÑ}Í¥µÕ±…Ñ¥½¹Í}½µÁÕÑ•õÑ•ÍÑ}½µÁÕÑ•°(€€€€€€€Ñ•ÍÑ}Í¥µÕ±…Ñ¥½¹Í}É•ÕÍ•ôÀ°(€€€€€€€‰•ÍÑ}‘•ÁÑ õ‰•ÍÐ¹‘•ÁÑ ¥˜‰•ÍÐ•±Í”9½¹”°(€€€€€€€‰•ÍÑ}…¹‘¥‘…Ñ•}™¥¹•ÉÁÉ¥¹Ðõ‰•ÍÐ¹…¹‘¥‘…Ñ”¹™¥¹•ÉÁÉ¥¹Ð¥˜‰•ÍÐ•±Í”9½¹”°(€€€€€€€‘½µ¥¹…¹Ñ}É•©•Ñ¥½¹}É•…Í½¸ô (€€€€€€€€€€€9½¹”¥˜½¹™¥Éµ•‘}…¹‘¥‘…Ñ•Ì•±Í”€‰•½¹½µ¥}•Ù¥‘•¹•}¹½Ñ}½¹™¥Éµ•ˆ(€€€€€€€€¤°(€€€€¤(

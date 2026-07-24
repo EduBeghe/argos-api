@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.optimization.composite_search import CompositeCandidateStatus
 from app.optimization.composite_search_read import (
     MAX_COMPOSITE_PAGE_LIMIT,
     CompositeSearchNotFoundError,
@@ -133,7 +134,7 @@ async def composite_search_candidates(
     run_id: UUID,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     depth: Annotated[int | None, Query(ge=2, le=7)] = None,
-    status: Annotated[str | None, Query()] = None,
+    status: Annotated[CompositeCandidateStatus | None, Query()] = None,
     feature_name: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_COMPOSITE_PAGE_LIMIT)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,

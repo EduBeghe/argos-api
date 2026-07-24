@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.optimization.composite_search import CompositeCandidateStatus
 from app.optimization.composite_search_memory import (
     CompositeSearchCandidateRecord,
     CompositeSearchRunRecord,
@@ -50,6 +51,15 @@ async def get_composite_search(
         total_evaluations=run.total_evaluations,
         computed=run.computed,
         reused=run.reused,
+        budget_exhausted=run.budget_exhausted,
+        cheap_evaluations_computed=run.cheap_evaluations_computed,
+        cheap_evaluations_reused=run.cheap_evaluations_reused,
+        training_simulations_computed=run.training_simulations_computed,
+        training_simulations_reused=run.training_simulations_reused,
+        validation_simulations_computed=run.validation_simulations_computed,
+        validation_simulations_reused=run.validation_simulations_reused,
+        test_simulations_computed=run.test_simulations_computed,
+        test_simulations_reused=run.test_simulations_reused,
         best_depth=run.best_depth,
         best_candidate_fingerprint=run.best_candidate_fingerprint,
         confirmed_candidate_count=int(confirmed or 0),
@@ -68,7 +78,7 @@ async def list_composite_candidates(
     predictive_edge_run_id: UUID,
     *,
     depth: int | None,
-    status: str | None,
+    status: CompositeCandidateStatus | None,
     feature_name: str | None,
     limit: int,
     offset: int,
