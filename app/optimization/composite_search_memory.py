@@ -88,6 +88,34 @@ class CompositeSearchRunRecord(Base):
     best_depth: Mapped[int | None] = mapped_column(Integer)
     best_candidate_fingerprint: Mapped[str | None] = mapped_column(String(64))
     dominant_rejection_reason: Mapped[str | None] = mapped_column(String(128))
+    best_economic_candidate_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    best_exploratory_candidate_fingerprint: Mapped[str | None] = mapped_column(
+        String(64)
+    )
+    candidate_simulations_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    candidate_simulations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    production_simulations_computed: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    production_simulations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    buy_and_hold_simulations_computed: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    buy_and_hold_simulations_reused: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    normalizations_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    normalizations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    simulations_avoided: Mapped[int] = mapped_column(Integer, nullable=False)
+    row_slices_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    row_slices_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    threshold_fits_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    threshold_fits_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    persistence_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    depth_quota_reached: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    global_compute_budget_exhausted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False
+    )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -107,6 +135,20 @@ class CompositeSearchCandidateRecord(Base):
             "status IN ('retained_training', 'rejected_validation', "
             "'passed_validation', 'rejected_test', 'confirmed_candidate')",
             name="ck_composite_search_candidate_status",
+        ),
+        CheckConstraint(
+            "selection_track IS NULL OR selection_track IN ('economic', 'exploratory')",
+            name="ck_composite_search_candidate_selection_track",
+        ),
+        CheckConstraint(
+            "selection_track IS NULL OR selection_track = 'economic' "
+            "OR status = 'retained_training'",
+            name="ck_composite_search_exploratory_not_promoted",
+        ),
+        CheckConstraint(
+            "operational_search_stage IS NULL OR operational_search_stage IN "
+            "('coarse', 'local_refinement')",
+            name="ck_composite_search_operational_stage",
         ),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
@@ -135,6 +177,14 @@ class CompositeSearchCandidateRecord(Base):
     failed_requirements: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     rejection_reason: Mapped[str | None] = mapped_column(String(128))
     normalized_distance: Mapped[str] = mapped_column(String(64), nullable=False)
+    selection_track: Mapped[str | None] = mapped_column(String(16))
+    exploration_reason: Mapped[str | None] = mapped_column(String(128))
+    distance_to_training_qualification: Mapped[str | None] = mapped_column(String(64))
+    operational_search_stage: Mapped[str | None] = mapped_column(String(32))
+    parent_operational_configuration_fingerprint: Mapped[str | None] = mapped_column(
+        String(64)
+    )
+    operational_refinement_reason: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -237,6 +287,30 @@ async def persist_composite_search_result(
             best_depth=result.best_depth,
             best_candidate_fingerprint=result.best_candidate_fingerprint,
             dominant_rejection_reason=result.dominant_rejection_reason,
+            best_economic_candidate_fingerprint=(
+                result.best_economic_candidate_fingerprint
+            ),
+            best_exploratory_candidate_fingerprint=(
+                result.best_exploratory_candidate_fingerprint
+            ),
+            candidate_simulations_computed=result.candidate_simulations_computed,
+            candidate_simulations_reused=result.candidate_simulations_reused,
+            production_simulations_computed=result.production_simulations_computed,
+            production_simulations_reused=result.production_simulations_reused,
+            buy_and_hold_simulations_computed=(
+                result.buy_and_hold_simulations_computed
+            ),
+            buy_and_hold_simulations_reused=result.buy_and_hold_simulations_reused,
+            normalizations_computed=result.normalizations_computed,
+            normalizations_reused=result.normalizations_reused,
+            simulations_avoided=result.simulations_avoided,
+            row_slices_computed=result.row_slices_computed,
+            row_slices_reused=result.row_slices_reused,
+            threshold_fits_computed=result.threshold_fits_computed,
+            threshold_fits_reused=result.threshold_fits_reused,
+            persistence_truncated=result.persistence_truncated,
+            depth_quota_reached=result.depth_quota_reached,
+            global_compute_budget_exhausted=(result.global_compute_budget_exhausted),
             started_at=started_at,
             completed_at=now,
         )
@@ -270,6 +344,18 @@ async def persist_composite_search_result(
                 failed_requirements=list(item.failed_requirements),
                 rejection_reason=item.rejection_reason,
                 normalized_distance=str(item.normalized_distance),
+                selection_track=item.selection_track.value,
+                exploration_reason=item.exploration_reason,
+                distance_to_training_qualification=str(
+                    item.distance_to_training_qualification
+                ),
+                operational_search_stage=item.candidate.operational_search_stage.value,
+                parent_operational_configuration_fingerprint=(
+                    item.candidate.parent_operational_configuration_fingerprint
+                ),
+                operational_refinement_reason=(
+                    item.candidate.operational_refinement_reason
+                ),
                 created_at=now,
             )
         )

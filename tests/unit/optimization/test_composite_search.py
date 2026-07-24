@@ -12,6 +12,8 @@ from app.optimization.composite_search import (
     CompositeMetrics,
     CompositeSearchBudget,
     CompositeSearchError,
+    CompositeSelectionTrack,
+    CompositeThresholdPolicy,
     build_candidate,
     normalize_weights,
     search_composite_features,
@@ -73,9 +75,9 @@ def _economic_matrix() -> tuple[HistoricalFeatureMatrix, tuple[WalkForwardWindow
     rows: list[HistoricalFeatureRow] = []
     size = 1440
     for index in range(size):
-        common = Decimal(1) if (index // 120) % 2 == 0 else Decimal(-1)
-        first_noise = Decimal(10) if index % 2 else Decimal(-10)
-        second_noise = Decimal(10) if (index // 2) % 2 else Decimal(-10)
+        common = Decimal(2) if (index // 120) % 2 == 0 else Decimal(-2)
+        first_noise = Decimal((index * 37) % 101 - 50)
+        second_noise = Decimal((index * 61 + 17) % 103 - 51)
         third_noise = -(first_noise + second_noise)
         first = common + first_noise
         second = common + second_noise
@@ -209,14 +211,169 @@ def test_progresses_deterministically_from_depth_two_through_seven() -> None:
         initial_cash=Decimal("10000"),
         budget=budget,
     )
-    assert tuple(item.depth for item in first.funnel_by_depth) == (2,)
-    assert first.maximum_depth_reached == 2
+    assert tuple(item.depth for item in first.funnel_by_depth) == (2, 3, 4, 5, 6, 7)
+    assert first.maximum_depth_reached == 7
     assert first == second
-    assert first.total_evaluations <= budget.maximum_cheap_evaluations
+    assert first.cheap_evaluations_computed <= budget.maximum_cheap_evaluations
+    assert first.total_evaluations == (
+        first.cheap_evaluations_computed
+        + first.training_simulations_computed
+        + first.validation_simulations_computed
+        + first.test_simulations_computed
+    )
     assert tuple(first.feature_pool) == COMPOSITE_FEATURE_POOL
     assert all(
         len(set(item.candidate.features)) == item.depth for item in first.candidates
     )
+    by_fingerprint = {item.candidate.fingerprint: item for item in first.candidates}
+    deepest = next(item for item in first.candidates if item.depth == 7)
+    lineage = [deepest]
+    while lineage[-1].parent_fingerprint is not None:
+        lineage.append(by_fingerprint[lineage[-1].parent_fingerprint])
+    assert tuple(item.depth for item in lineage) == (7, 6, 5, 4, 3, 2)
+
+
+def test_coarse_operational_grid_covers_required_cadences_and_horizons() -> None:
+    configurations = composite_module._operational_configurations()
+    assert {int(item.cadence.total_seconds()) for item in configurations} == {
+        1800,
+        3600,
+        7200,
+        14400,
+        21600,
+        28800,
+        43200,
+    }
+    assert {int(item.horizon.total_seconds()) for item in configurations} == {
+        1800,
+        3600,
+        7200,
+        14400,
+        28800,
+        43200,
+        86400,
+    }
+
+
+def test_local_refinement_generates_auditable_intermediate_neighbors() -> None:
+    coarse = next(
+        item
+        for item in composite_module._operational_configurations()
+        if item.cadence == timedelta(hours=4)
+    )
+    neighbors = composite_module._local_operational_neighbors(coarse)
+    assert timedelta(hours=3) in {item.cadence for item in neighbors}
+    assert all(
+        item.stage.value == "local_refinement"
+        and item.parent_fingerprint == coarse.fingerprint
+        and item.refinement_reason == "top_training_operational_family"
+        for item in neighbors
+    )
+
+
+def test_training_selects_two_hour_family_and_evaluates_local_neighbors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _matrix()
+    monkeypatch.setattr(
+        composite_module, "COMPOSITE_FEATURE_POOL", ("return_1", "return_12")
+    )
+
+    def metrics(**kwargs: object) -> CompositeMetrics:
+        candidate = kwargs["candidate"]
+        assert isinstance(candidate, composite_module.CompositeCandidate)
+        cadence = candidate.cadence
+        value = (
+            Decimal("0.10")
+            if cadence == timedelta(hours=2)
+            else Decimal("0.05")
+            if cadence == timedelta(hours=3)
+            else Decimal("0.01")
+        )
+        return replace(
+            _passing_metrics(),
+            total_return=value,
+            excess_return_over_production=value,
+        )
+
+    monkeypatch.setattr(composite_module, "_economic_metrics", metrics)
+    monkeypatch.setattr(composite_module, "_excessive_churn", lambda *_: False)
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=_window(matrix),
+        simulation=_simulation(),
+        initial_cash=Decimal("10000"),
+        budget=CompositeSearchBudget(
+            beam_width_per_depth=12,
+            maximum_variants_per_subset=1,
+            maximum_cheap_evaluations=80,
+            maximum_training_simulations=12,
+            maximum_validation_per_depth=2,
+            maximum_test_candidates=2,
+            maximum_persisted_candidates=30,
+        ),
+    )
+    by_cadence = {
+        item.candidate.cadence: item.training_metrics.total_return
+        for item in result.candidates
+    }
+    assert by_cadence[timedelta(hours=2)] > by_cadence[timedelta(hours=1)]
+    assert by_cadence[timedelta(hours=2)] > by_cadence[timedelta(hours=4)]
+    assert any(
+        item.candidate.operational_search_stage.value == "local_refinement"
+        and item.candidate.parent_operational_configuration_fingerprint is not None
+        for item in result.candidates
+    )
+
+
+def test_normalization_and_threshold_counters_measure_avoided_fits() -> None:
+    matrix = _matrix()
+    cache = composite_module._EvaluationCache()
+    candidate = build_candidate(
+        weights=(("return_1", Decimal(1)), ("return_12", Decimal(1))),
+        training_rows=matrix.rows[:180],
+        simulation=_simulation(),
+        cadence=timedelta(hours=2),
+        horizon=timedelta(hours=2),
+        threshold_policy=composite_module.CompositeThresholdPolicy.TRAINING_QUANTILE,
+        entry_quantile=Decimal("0.85"),
+        exit_quantile=Decimal("0.45"),
+    )
+    first = composite_module._freeze_candidate_for_window(
+        candidate, matrix.rows[:180], 0, cache
+    )
+    second = composite_module._freeze_candidate_for_window(
+        candidate, matrix.rows[:180], 0, cache
+    )
+    assert first == second
+    assert cache.normalizations_computed == 1
+    assert cache.normalizations_reused == 1
+    assert cache.threshold_fits_computed == 1
+    assert cache.threshold_fits_reused == 1
+
+
+def test_trade_annualization_uses_unique_evaluated_duration() -> None:
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    assert composite_module._annualized_trades(
+        30, ((start, start + timedelta(days=30)),)
+    ) == Decimal("365")
+    assert composite_module._annualized_trades(
+        365, ((start, start + timedelta(days=365)),)
+    ) == Decimal("365")
+    assert composite_module._annualized_trades(
+        365,
+        (
+            (start, start + timedelta(days=365)),
+            (start + timedelta(days=30), start + timedelta(days=60)),
+        ),
+    ) == Decimal("365")
+
+
+def test_multiwindow_cost_ratio_is_not_inflated_by_window_count() -> None:
+    one = composite_module._normalized_window_ratio(Decimal("100"), Decimal("10000"), 1)
+    six = composite_module._normalized_window_ratio(Decimal("600"), Decimal("10000"), 6)
+    assert one == six == Decimal("0.01")
 
 
 def test_constant_feature_is_excluded_with_reason() -> None:
@@ -257,6 +414,31 @@ def _passing_metrics() -> CompositeMetrics:
         excess_return_over_buy_and_hold=Decimal("0.02"),
         return_stability=Decimal("1"),
     )
+
+
+def test_zero_economic_stability_never_uses_statistical_fallback() -> None:
+    matrix = _matrix()
+    candidate = build_candidate(
+        weights=(("return_1", Decimal(1)), ("return_12", Decimal(1))),
+        training_rows=matrix.rows[:180],
+        simulation=_simulation(),
+        cadence=timedelta(hours=4),
+        horizon=timedelta(hours=4),
+    )
+    metrics = replace(
+        _passing_metrics(),
+        total_return=Decimal("-0.03836"),
+        excess_return_over_production=Decimal("0.00676"),
+        max_drawdown=Decimal("0.0801"),
+        fees_paid=Decimal("2218"),
+        fee_to_initial_cash_ratio=Decimal("0.2218"),
+        return_stability=Decimal(0),
+        profitable_window_ratio=Decimal(0),
+        dispersion=Decimal("0.001"),
+    )
+    ranking = composite_module._ranking(candidate, metrics)
+    assert ranking.stability == 0
+    assert ranking.total < 0
 
 
 def test_beam_children_add_exactly_one_feature_to_real_parent(
@@ -386,6 +568,123 @@ def test_validation_rejection_does_not_consult_test(
     assert all(item.test_metrics is None for item in result.candidates)
 
 
+def test_exploratory_parents_never_reach_validation_directly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _matrix()
+    phases: list[str] = []
+
+    def metrics(**kwargs: object) -> CompositeMetrics:
+        phase = str(kwargs["phase"])
+        phases.append(phase)
+        return replace(
+            _passing_metrics(),
+            total_return=Decimal("-0.01"),
+            return_stability=Decimal(0),
+            profitable_window_ratio=Decimal(0),
+        )
+
+    monkeypatch.setattr(composite_module, "_economic_metrics", metrics)
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=_window(matrix),
+        simulation=_simulation(),
+        initial_cash=Decimal("10000"),
+        budget=CompositeSearchBudget(
+            beam_width_per_depth=4,
+            maximum_variants_per_subset=1,
+            maximum_cheap_evaluations=80,
+            maximum_training_simulations=24,
+            maximum_validation_per_depth=2,
+            maximum_test_candidates=2,
+            maximum_persisted_candidates=40,
+        ),
+    )
+    assert set(phases) == {"training"}
+    assert result.maximum_depth_reached == 7
+    assert all(
+        item.selection_track is CompositeSelectionTrack.EXPLORATORY
+        and item.status is CompositeCandidateStatus.RETAINED_TRAINING
+        for item in result.candidates
+    )
+
+
+def test_churn_screen_rejects_noisy_30_minute_configuration() -> None:
+    matrix = _matrix()
+    candidate = build_candidate(
+        weights=(("return_1", Decimal(1)), ("return_12", Decimal(1))),
+        training_rows=matrix.rows[:180],
+        simulation=_simulation(),
+        cadence=timedelta(minutes=30),
+        horizon=timedelta(minutes=30),
+    )
+    assert composite_module._excessive_churn(
+        candidate,
+        replace(_passing_metrics(), action_observation_ratio=Decimal("0.90")),
+    )
+
+
+def test_depth_quota_is_not_global_budget_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _matrix()
+    monkeypatch.setattr(
+        composite_module, "_economic_metrics", lambda **_: _passing_metrics()
+    )
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=_window(matrix),
+        simulation=_simulation(),
+        initial_cash=Decimal("10000"),
+        budget=CompositeSearchBudget(
+            beam_width_per_depth=4,
+            maximum_variants_per_subset=1,
+            maximum_cheap_evaluations=300,
+            maximum_training_simulations=30,
+            maximum_validation_per_depth=1,
+            maximum_test_candidates=6,
+            maximum_persisted_candidates=80,
+        ),
+    )
+    assert any(
+        item.stopped_reason
+        is composite_module.CompositeDepthStoppedReason.DEPTH_QUOTA_REACHED
+        for item in result.funnel_by_depth
+    )
+    assert result.maximum_depth_reached == 7
+    assert result.budget_exhausted is False
+
+
+def test_persistence_truncation_is_not_compute_budget_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _matrix()
+    monkeypatch.setattr(
+        composite_module, "_economic_metrics", lambda **_: _passing_metrics()
+    )
+    result = search_composite_features(
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=_window(matrix),
+        simulation=_simulation(),
+        initial_cash=Decimal("10000"),
+        budget=CompositeSearchBudget(
+            beam_width_per_depth=4,
+            maximum_variants_per_subset=1,
+            maximum_cheap_evaluations=300,
+            maximum_training_simulations=72,
+            maximum_validation_per_depth=1,
+            maximum_test_candidates=12,
+            maximum_persisted_candidates=1,
+        ),
+    )
+    assert result.persistence_truncated is True
+    assert result.global_compute_budget_exhausted is False
+    assert result.budget_exhausted is False
+
+
 def test_default_budget_reaches_every_depth_when_parents_are_eligible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -409,6 +708,14 @@ def test_default_budget_reaches_every_depth_when_parents_are_eligible(
         + result.validation_simulations_computed
         + result.test_simulations_computed
     )
+    assert all(
+        set(item.coarse_simulations_by_cadence or {})
+        == {"1800", "3600", "7200", "14400", "21600", "28800", "43200"}
+        and set(item.coarse_simulations_by_horizon or {})
+        == {"1800", "3600", "7200", "14400", "28800", "43200", "86400"}
+        for item in result.funnel_by_depth
+    )
+    assert all(item.local_refinement_simulations > 0 for item in result.funnel_by_depth)
 
 
 def test_reduced_budget_stops_at_last_real_depth_without_empty_funnel(
@@ -476,8 +783,15 @@ def test_validation_pass_without_test_slot_has_explicit_status(
     )
 
 
-def test_three_feature_economic_signal_reaches_training_and_validation() -> None:
+def test_three_feature_economic_signal_reaches_training_and_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     matrix, windows = _economic_matrix()
+    monkeypatch.setattr(
+        composite_module,
+        "COMPOSITE_FEATURE_POOL",
+        ("return_1", "return_12", "relative_volume_20"),
+    )
     first_training = tuple(
         row
         for row in matrix.rows
@@ -514,6 +828,13 @@ def test_three_feature_economic_signal_reaches_training_and_validation() -> None
         <= set(item.candidate.features)
     )
     assert depth_three
+    by_fingerprint = {item.candidate.fingerprint: item for item in result.candidates}
+    assert any(
+        item.parent_fingerprint is not None
+        and by_fingerprint[item.parent_fingerprint].selection_track
+        is CompositeSelectionTrack.EXPLORATORY
+        for item in depth_three
+    )
     assert any(item.training_metrics.total_return > 0 for item in depth_three)
     assert any(
         item.status
@@ -524,6 +845,38 @@ def test_three_feature_economic_signal_reaches_training_and_validation() -> None
         }
         for item in depth_three
     )
+
+
+def test_quantile_thresholds_are_frozen_from_training_only() -> None:
+    matrix = _matrix()
+    training = matrix.rows[:180]
+    candidate = build_candidate(
+        weights=(("return_1", Decimal(1)), ("return_12", Decimal(1))),
+        training_rows=training,
+        simulation=_simulation(),
+        cadence=timedelta(hours=4),
+        horizon=timedelta(hours=4),
+        threshold_policy=CompositeThresholdPolicy.TRAINING_QUANTILE,
+        entry_quantile=Decimal("0.85"),
+        exit_quantile=Decimal("0.45"),
+    )
+    mutated_held_out = tuple(
+        replace(row, return_1=Decimal("9999"), return_12=Decimal("-9999"))
+        for row in matrix.rows[180:]
+    )
+    repeated = build_candidate(
+        weights=(("return_1", Decimal(1)), ("return_12", Decimal(1))),
+        training_rows=training + mutated_held_out[:0],
+        simulation=_simulation(),
+        cadence=timedelta(hours=4),
+        horizon=timedelta(hours=4),
+        threshold_policy=CompositeThresholdPolicy.TRAINING_QUANTILE,
+        entry_quantile=Decimal("0.85"),
+        exit_quantile=Decimal("0.45"),
+    )
+    assert candidate.entry_threshold == repeated.entry_threshold
+    assert candidate.exit_threshold == repeated.exit_threshold
+    assert candidate.fingerprint == repeated.fingerprint
 
 
 def test_real_costs_reject_the_same_gross_composite_signal() -> None:
@@ -625,6 +978,46 @@ def test_real_cadence_changes_decisions_and_trades() -> None:
     assert fast.trade_count != slow.trade_count
 
 
+def test_economic_evaluation_reuses_shared_benchmarks() -> None:
+    matrix, windows = _economic_matrix()
+    simulation = SimulationConfiguration(
+        1, "USDT", Decimal("0.0001"), Decimal("0.0001")
+    )
+    training_rows = composite_module._phase_rows(matrix, windows, "training")
+    candidates = tuple(
+        build_candidate(
+            weights=weights,
+            training_rows=training_rows,
+            simulation=simulation,
+            cadence=timedelta(hours=4),
+            horizon=timedelta(hours=4),
+            threshold_policy=CompositeThresholdPolicy.TRAINING_QUANTILE,
+            entry_quantile=Decimal("0.85"),
+            exit_quantile=Decimal("0.45"),
+        )
+        for weights in (
+            (("return_1", Decimal(1)), ("return_12", Decimal(1))),
+            (("return_1", Decimal(1)), ("relative_volume_20", Decimal(1))),
+        )
+    )
+    cache = composite_module._EvaluationCache()
+    for candidate in candidates:
+        composite_module._economic_metrics(
+            candidate=candidate,
+            dataset=_dataset(matrix),
+            matrix=matrix,
+            windows=windows,
+            phase="training",
+            simulation=simulation,
+            initial_cash=Decimal("10000"),
+            cache=cache,
+        )
+    assert cache.production_simulations_computed == len(windows)
+    assert cache.production_simulations_reused == len(windows)
+    assert cache.buy_and_hold_simulations_computed == len(windows)
+    assert cache.buy_and_hold_simulations_reused == len(windows)
+
+
 def test_validation_and_test_mutation_preserves_training_generation_order() -> None:
     matrix, windows = _economic_matrix()
     held_out_ranges = tuple(
@@ -682,6 +1075,9 @@ def test_validation_and_test_mutation_preserves_training_generation_order() -> N
                 item.candidate.minimum_holding_period,
                 item.candidate.maximum_holding_period,
                 item.candidate.cooldown,
+                item.candidate.operational_search_stage,
+                item.candidate.parent_operational_configuration_fingerprint,
+                item.candidate.operational_refinement_reason,
             )
             for item in result.candidates
         )

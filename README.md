@@ -810,16 +810,26 @@ The command parses money as `Decimal`, stops the active experiment, and creates 
 ### Weekly Strategy research
 
 Weekly research includes a bounded progressive composite-feature search after targeted
-refinement. Training-only association determines signed weights, and a real beam grows
-only from retained parents across depths 2–7. Each walk-forward window freezes its own
+refinement. Training-only association determines signed weights, and separate economic
+and exploratory beams grow through real parent lineage across depths 2–7. Exploratory
+parents may produce descendants but cannot enter validation or test themselves. Each
+walk-forward window freezes its own
 training median/IQR. Retained configurations use the historical Paper Trading simulator,
 so fees, slippage, cadence, thresholds, holding periods, cooldown, cash and positions are
 part of validation and isolated-test evidence. The stage never activates Strategies or
 changes Paper Trading. See
 [docs/014-weekly-strategy-research.md](docs/014-weekly-strategy-research.md).
 
-Composite summaries expose separate cheap, training, validation and test counters plus a
-diagnostic `budget_exhausted` flag. `passed_validation` means all validation gates passed
+The coarse matrix covers 30m/1h/2h/4h/6h/8h/12h cadences and
+30m/1h/2h/4h/8h/12h/24h horizons without a Cartesian product. Remaining training slots
+evaluate bounded local operational neighbors; validation and test never choose or retune
+those configurations.
+
+Composite summaries expose separate cheap, training, validation and test counters, real
+row-slice/normalization/threshold-fit reuse, cached benchmark work, coarse cadence/horizon
+coverage, local-refinement lineage, stop reasons, best economic/exploratory evidence, and a
+diagnostic `budget_exhausted` flag. Candidate listings can be filtered by
+`selection_track=economic|exploratory`. `passed_validation` means all validation gates passed
 but the bounded isolated-test allowance was already consumed; it is not a rejection.
 
 Read-only composite evidence is available at:
