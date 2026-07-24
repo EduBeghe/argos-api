@@ -37,6 +37,7 @@ from app.strategies.baseline_long_only import (
 )
 
 DEFAULT_DECISION_INTERVAL = timedelta(minutes=30)
+MAX_HISTORICAL_DECISION_INTERVAL = timedelta(hours=12)
 SIMULATION_ENGINE_VERSION = 1
 _ZERO_UUID = UUID(int=0)
 
@@ -206,12 +207,12 @@ def simulate_historical_feature_matrix(
         raise HistoricalSimulationError("unsupported strategy configuration")
     if (
         decision_interval < DEFAULT_DECISION_INTERVAL
-        or decision_interval > timedelta(hours=6)
+        or decision_interval > MAX_HISTORICAL_DECISION_INTERVAL
         or decision_interval % DEFAULT_DECISION_INTERVAL
     ):
         raise HistoricalSimulationError(
             "decision interval must be a 30-minute multiple between 30 minutes "
-            "and 6 hours"
+            "and 12 hours"
         )
     cash = validate_initial_cash(initial_cash)
     starting_cash = cash

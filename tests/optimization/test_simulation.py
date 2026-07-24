@@ -17,6 +17,7 @@ from app.optimization.historical_data import (
     HistoricalDatasetRange,
 )
 from app.optimization.simulation import (
+    MAX_HISTORICAL_DECISION_INTERVAL,
     HistoricalSimulationError,
     HistoricalSimulationResult,
     simulate_historical_feature_matrix,
@@ -163,6 +164,58 @@ def test_result_preserves_effective_simulation_configuration() -> None:
     assert result.fee_rate == fee_rate
     assert result.slippage_rate == slippage_rate
     assert result.decision_interval == decision_interval
+
+
+@pytest.mark.parametrize(
+    "decision_interval",
+    (
+        timedelta(hours=6),
+        timedelta(hours=8),
+        MAX_HISTORICAL_DECISION_INTERVAL,
+    ),
+)
+def test_historical_simulation_accepts_supported_long_cadences(
+    decision_interval: timedelta,
+) -> None:
+    feature_matrix = HistoricalFeatureMatrix(
+        "stable-fingerprint",
+        (row(START + decision_interval, "100"),),
+    )
+    with patch(
+        "app.optimization.simulation.calculate_baseline_score",
+        return_value=SimpleNamespace(overall_score=Decimal("0.1")),
+    ):
+        result = simulate_historical_feature_matrix(
+            dataset=source_dataset(),
+            feature_matrix=feature_matrix,
+            initial_cash=Decimal("10000"),
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            decision_interval=decision_interval,
+        )
+
+    assert result.decision_interval == decision_interval
+
+
+@pytest.mark.parametrize(
+    "decision_interval",
+    (timedelta(hours=12, minutes=30), timedelta(minutes=45)),
+)
+def test_historical_simulation_rejects_unsupported_cadences(
+    decision_interval: timedelta,
+) -> None:
+    with pytest.raises(
+        HistoricalSimulationError,
+        match="30-minute multiple between 30 minutes and 12 hours",
+    ):
+        simulate_historical_feature_matrix(
+            dataset=source_dataset(),
+            feature_matrix=matrix(),
+            initial_cash=Decimal("10000"),
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            decision_interval=decision_interval,
+        )
 
 
 def test_result_preserves_effective_strategy_parameters() -> None:

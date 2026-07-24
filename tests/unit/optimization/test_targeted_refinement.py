@@ -258,6 +258,24 @@ def test_each_cadence_is_evaluated_with_its_own_sampling_interval(
             Decimal("-0.01"),
             Decimal("0.01"),
         ),
+        TargetedConfiguration(
+            "8" * 64,
+            seed.candidate.relationship.fingerprint,
+            timedelta(hours=8),
+            timedelta(hours=24),
+            2,
+            Decimal("-0.01"),
+            Decimal("0.01"),
+        ),
+        TargetedConfiguration(
+            "c" * 64,
+            seed.candidate.relationship.fingerprint,
+            timedelta(hours=12),
+            timedelta(hours=24),
+            2,
+            Decimal("-0.01"),
+            Decimal("0.01"),
+        ),
     )
     monkeypatch.setattr(
         targeted_module,
@@ -304,4 +322,6 @@ def test_each_cadence_is_evaluated_with_its_own_sampling_interval(
     assert observed == [
         (timedelta(hours=4), (timedelta(hours=4),)),
         (timedelta(hours=6), (timedelta(hours=6),)),
+        (timedelta(hours=8), (timedelta(hours=8),)),
+        (timedelta(hours=12), (timedelta(hours=12),)),
     ]
