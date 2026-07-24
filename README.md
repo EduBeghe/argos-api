@@ -809,11 +809,14 @@ The command parses money as `Decimal`, stops the active experiment, and creates 
 
 ### Weekly Strategy research
 
-Weekly research now includes a bounded progressive composite-feature search after targeted
-refinement. It combines the seven canonical numeric Features at depths 2–7 with signed,
-normalized weights fitted from training only; validation and isolated test use the frozen
-candidate. The stage persists auditable evidence and never activates Strategies or changes
-Paper Trading. See [docs/014-weekly-strategy-research.md](docs/014-weekly-strategy-research.md).
+Weekly research includes a bounded progressive composite-feature search after targeted
+refinement. Training-only association determines signed weights, and a real beam grows
+only from retained parents across depths 2–7. Each walk-forward window freezes its own
+training median/IQR. Retained configurations use the historical Paper Trading simulator,
+so fees, slippage, cadence, thresholds, holding periods, cooldown, cash and positions are
+part of validation and isolated-test evidence. The stage never activates Strategies or
+changes Paper Trading. See
+[docs/014-weekly-strategy-research.md](docs/014-weekly-strategy-research.md).
 
 Read-only composite evidence is available at:
 

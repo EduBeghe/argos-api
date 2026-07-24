@@ -67,17 +67,30 @@ The research-only composite score combines two through seven canonical numeric F
 normalization, signed weights, thresholds, cadence, horizon, holding periods and cooldown
 before validation and isolated test. Validation and test cannot recalibrate the candidate.
 
-The deterministic beam search visits every depth from 2 through 7 when the Feature pool is
-evaluable. It proposes bounded equal-evidence, proportional and concentration-reducing
-weight variants, deduplicates before expensive work and retains diverse high-ranking
-branches. Defaults cap the beam at 12 branches per depth, three variants per subset, 420
-cheap evaluations, 72 training simulations, eight validation candidates per depth, 12
-isolated tests and 80 persisted candidates. The search is sequential and CPU-only.
+Depth 2 starts from pairs in the complete pool. Every candidate at depth N+1 descends from
+a retained depth-N parent and adds exactly one unused Feature. Training-only directional
+association determines signs and evidence-proportional magnitudes; equal-signed and small
+deterministic parent perturbations preserve diversity. A branch stops when it has no
+eligible parent, no remaining Feature, or no budget.
+
+Each walk-forward window fits its own median/IQR normalization from that window's training
+slice and freezes it for the matching validation and isolated-test slices. The bounded
+operational search covers 30-minute, 4-hour, 8-hour and 12-hour cadences; 30-minute,
+4-hour and 12-hour horizons; and explicit entry, exit, holding and cooldown rules. Cheap
+association ranking never counts as a simulation. Retained candidates run through the
+existing historical Paper Trading mathematics, including cash, positions, fees and
+slippage. Validation must qualify before test is read.
+
+Defaults cap the beam at 12 branches per depth, three weight variants per subset, 420
+cheap evaluations, 72 real training simulations, eight validation candidates per depth,
+12 isolated tests and 80 persisted candidates. The search is sequential and CPU-only.
 
 Results are evidence, not activation. They persist in `composite_search_runs` and
 `composite_search_candidates`, including frozen normalization, signed weights, ranking
-breakdown, nullable validation/test metrics, requirements, rejection reasons and a depth
-2–7 funnel. Conclusions describe only the evaluated dataset, Feature pool and bounded
+breakdown, nullable validation/test economic metrics, requirements, rejection reasons and
+a depth 2–7 funnel. Metrics include net return, P&L, drawdown, trades, fees, final equity,
+profitable-window ratio, production-baseline comparison and a separate buy-and-hold
+comparison. Conclusions describe only the evaluated dataset, Feature pool and bounded
 search space; they do not claim that no market pattern exists.
 
 Read-only inspection endpoints are:

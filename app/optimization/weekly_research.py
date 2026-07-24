@@ -464,9 +464,11 @@ async def execute_weekly_instrument_research(
             session, edge_execution.run_id
         )
     composite_result = search_composite_features(
+        dataset=dataset,
         matrix=matrix,
         windows=windows,
         simulation=simulation,
+        initial_cash=initial_cash,
     )
     composite_run_id = None
     if persist:

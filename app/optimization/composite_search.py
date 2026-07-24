@@ -1,6 +1,6 @@
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
@@ -11,13 +11,23 @@ from app.optimization.feature_matrix import (
     HistoricalFeatureMatrix,
     HistoricalFeatureRow,
 )
+from app.optimization.historical_data import HistoricalDataset
+from app.optimization.predictive_edges import EvidenceThresholds
+from app.optimization.refinement import RefinementSegmentName, simulate_buy_and_hold
+from app.optimization.simulation import (
+    SIMULATION_ENGINE_VERSION,
+    HistoricalSimulationResult,
+    SimulationDecisionOverride,
+    simulate_historical_feature_matrix,
+)
 from app.optimization.walk_forward import WalkForwardWindow
 from app.paper.config import SimulationConfiguration
+from app.strategies.baseline_long_only import StrategyAction
 
 COMPOSITE_FEATURE_POOL_VERSION = 1
-COMPOSITE_SEARCH_ALGORITHM_VERSION = 1
-COMPOSITE_RANKING_VERSION = 1
-COMPOSITE_NORMALIZATION_VERSION = 1
+COMPOSITE_SEARCH_ALGORITHM_VERSION = 2
+COMPOSITE_RANKING_VERSION = 2
+COMPOSITE_NORMALIZATION_VERSION = 2
 COMPOSITE_QUANTUM = Decimal("0.000000000000000001")
 COMPOSITE_FEATURE_POOL = (
     "ema_20_relative",
@@ -97,6 +107,8 @@ class CompositeCandidate:
     cooldown: timedelta
     fee_rate: Decimal
     slippage_rate: Decimal
+    initial_cash: Decimal
+    simulation_engine_version: int
     algorithm_version: int
     feature_pool_version: int
     fingerprint: str
@@ -111,6 +123,18 @@ class CompositeMetrics:
     expected_net_movement: Decimal
     dispersion: Decimal
     profitable_window_ratio: Decimal
+    usable_window_count: int = 0
+    total_return: Decimal = Decimal(0)
+    absolute_pnl: Decimal = Decimal(0)
+    max_drawdown: Decimal = Decimal(0)
+    trade_count: int = 0
+    fees_paid: Decimal = Decimal(0)
+    final_equity: Decimal = Decimal(0)
+    production_baseline_return: Decimal = Decimal(0)
+    excess_return_over_production: Decimal = Decimal(0)
+    buy_and_hold_return: Decimal = Decimal(0)
+    excess_return_over_buy_and_hold: Decimal = Decimal(0)
+    return_stability: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +193,18 @@ class CompositeSearchResult:
     best_depth: int | None
     best_candidate_fingerprint: str | None
     dominant_rejection_reason: str | None
+
+
+def _empty_metrics() -> CompositeMetrics:
+    return CompositeMetrics(
+        observations=0,
+        correlation=Decimal(0),
+        directional_hit_rate=Decimal(0),
+        expected_gross_movement=Decimal(0),
+        expected_net_movement=Decimal(0),
+        dispersion=Decimal(0),
+        profitable_window_ratio=Decimal(0),
+    )
 
 
 def feature_value(row: HistoricalFeatureRow, name: str) -> Decimal:
@@ -263,6 +299,7 @@ def build_candidate(
     minimum_holding_period: timedelta = timedelta(minutes=30),
     maximum_holding_period: timedelta = timedelta(hours=12),
     cooldown: timedelta = timedelta(minutes=30),
+    initial_cash: Decimal = Decimal("10000"),
 ) -> CompositeCandidate:
     normalized_weights = normalize_weights(weights)
     features = tuple(item.feature_name for item in normalized_weights)
@@ -285,6 +322,8 @@ def build_candidate(
         "cooldown": int(cooldown.total_seconds()),
         "fee_rate": str(simulation.fee_rate),
         "slippage_rate": str(simulation.slippage_rate),
+        "initial_cash": str(initial_cash),
+        "simulation_engine_version": SIMULATION_ENGINE_VERSION,
         "algorithm_version": COMPOSITE_SEARCH_ALGORITHM_VERSION,
         "feature_pool_version": COMPOSITE_FEATURE_POOL_VERSION,
         "normalization_version": COMPOSITE_NORMALIZATION_VERSION,
@@ -305,6 +344,8 @@ def build_candidate(
         cooldown,
         simulation.fee_rate,
         simulation.slippage_rate,
+        initial_cash,
+        SIMULATION_ENGINE_VERSION,
         COMPOSITE_SEARCH_ALGORITHM_VERSION,
         COMPOSITE_FEATURE_POOL_VERSION,
         fingerprint,
@@ -351,7 +392,7 @@ def _phase_rows(
     return tuple(selected[key] for key in sorted(selected))
 
 
-def _metrics(
+def _cheap_metrics(
     candidate: CompositeCandidate,
     rows: tuple[HistoricalFeatureRow, ...],
 ) -> CompositeMetrics:
@@ -362,9 +403,7 @@ def _metrics(
         future = rows[index + horizon_steps].close_price / rows[index].close_price - 1
         observations.append((score, future))
     if not observations:
-        return CompositeMetrics(
-            0, Decimal(0), Decimal(0), Decimal(0), Decimal(0), Decimal(0), Decimal(0)
-        )
+        return _empty_metrics()
     mean_score = sum((x for x, _ in observations), Decimal(0)) / len(observations)
     mean_return = sum((y for _, y in observations), Decimal(0)) / len(observations)
     covariance = sum(
@@ -397,7 +436,7 @@ def _metrics(
     )
 
 
-def _window_metrics(
+def _cheap_window_metrics(
     candidate: CompositeCandidate,
     matrix: HistoricalFeatureMatrix,
     windows: tuple[WalkForwardWindow, ...],
@@ -407,7 +446,7 @@ def _window_metrics(
         value
         for window in windows
         if (
-            value := _metrics(
+            value := _cheap_metrics(
                 candidate,
                 _rows_between(
                     matrix,
@@ -418,7 +457,7 @@ def _window_metrics(
         ).observations
     )
     if not usable:
-        return _metrics(candidate, ())
+        return _cheap_metrics(candidate, ())
     count = Decimal(len(usable))
     return CompositeMetrics(
         sum(item.observations for item in usable),
@@ -431,17 +470,286 @@ def _window_metrics(
     )
 
 
+def _association(
+    rows: tuple[HistoricalFeatureRow, ...], name: str, horizon: timedelta
+) -> Decimal:
+    steps = max(1, int(horizon / timedelta(minutes=5)))
+    pairs = tuple(
+        (
+            feature_value(rows[index], name),
+            rows[index + steps].close_price / rows[index].close_price - 1,
+        )
+        for index in range(max(0, len(rows) - steps))
+    )
+    if len(pairs) < 2:
+        return Decimal(0)
+    mean_x = sum((x for x, _ in pairs), Decimal(0)) / len(pairs)
+    mean_y = sum((y for _, y in pairs), Decimal(0)) / len(pairs)
+    covariance = sum(((x - mean_x) * (y - mean_y) for x, y in pairs), Decimal(0))
+    variance_x = sum(((x - mean_x) ** 2 for x, _ in pairs), Decimal(0))
+    variance_y = sum(((y - mean_y) ** 2 for _, y in pairs), Decimal(0))
+    return (
+        covariance / (variance_x.sqrt() * variance_y.sqrt())
+        if variance_x and variance_y
+        else Decimal(0)
+    )
+
+
+def _training_evidence(
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    horizon: timedelta,
+) -> dict[str, Decimal]:
+    by_feature: dict[str, list[Decimal]] = {name: [] for name in COMPOSITE_FEATURE_POOL}
+    for window in windows:
+        rows = _rows_between(matrix, window.training_from, window.training_to)
+        for name in by_feature:
+            value = _association(rows, name, horizon)
+            if value:
+                by_feature[name].append(value)
+    return {
+        name: sum(values, Decimal(0)) / len(values) if values else Decimal(0)
+        for name, values in by_feature.items()
+    }
+
+
+def _weight_variants(
+    features: tuple[str, ...],
+    evidence: dict[str, Decimal],
+    parent: CompositeCandidate | None,
+    limit: int,
+) -> tuple[tuple[tuple[str, Decimal], ...], ...]:
+    signed = tuple(
+        (name, Decimal(1) if evidence[name] >= 0 else Decimal(-1)) for name in features
+    )
+    weighted = tuple(
+        (name, evidence[name] if evidence[name] else value) for name, value in signed
+    )
+    variants: list[tuple[tuple[str, Decimal], ...]] = [signed, weighted]
+    if parent is not None:
+        parent_weights = {item.feature_name: item.weight for item in parent.weights}
+        variants.append(
+            tuple(
+                (
+                    name,
+                    parent_weights[name] * Decimal("0.90")
+                    if name in parent_weights
+                    else (evidence[name] or Decimal("0.10")),
+                )
+                for name in features
+            )
+        )
+    unique: dict[tuple[tuple[str, Decimal], ...], None] = {}
+    for variant in variants:
+        normalized = normalize_weights(variant)
+        unique[tuple((item.feature_name, item.weight) for item in normalized)] = None
+    return tuple(unique)[:limit]
+
+
+_OPERATIONAL_CONFIGURATIONS = (
+    (
+        timedelta(minutes=30),
+        timedelta(minutes=30),
+        Decimal("0.50"),
+        Decimal("-0.10"),
+        timedelta(minutes=30),
+        timedelta(hours=12),
+        timedelta(minutes=30),
+    ),
+    (
+        timedelta(hours=4),
+        timedelta(hours=4),
+        Decimal("0.35"),
+        Decimal("-0.05"),
+        timedelta(hours=4),
+        timedelta(hours=24),
+        timedelta(hours=4),
+    ),
+    (
+        timedelta(hours=8),
+        timedelta(hours=12),
+        Decimal("0.65"),
+        Decimal("0.00"),
+        timedelta(hours=8),
+        timedelta(days=2),
+        timedelta(hours=8),
+    ),
+    (
+        timedelta(hours=12),
+        timedelta(hours=12),
+        Decimal("0.50"),
+        Decimal("-0.20"),
+        timedelta(hours=12),
+        timedelta(days=3),
+        timedelta(hours=12),
+    ),
+)
+
+
+def _candidate_with_window_normalization(
+    candidate: CompositeCandidate, rows: tuple[HistoricalFeatureRow, ...]
+) -> CompositeCandidate:
+    return replace(candidate, normalization=fit_normalization(rows, candidate.features))
+
+
+def _composite_action_filter(candidate: CompositeCandidate):  # type: ignore[no-untyped-def]
+    previous_score: Decimal | None = None
+    opened_at: datetime | None = None
+    last_exit_at: datetime | None = None
+
+    def decide(
+        row: HistoricalFeatureRow,
+        position_is_open: bool,
+        _baseline_action: StrategyAction,
+    ) -> StrategyAction | SimulationDecisionOverride:
+        nonlocal previous_score, opened_at, last_exit_at
+        boundary = row.candle_open_time + timedelta(minutes=5)
+        score = composite_score(candidate, row)
+        entry_crossed = score >= candidate.entry_threshold and (
+            previous_score is None or previous_score < candidate.entry_threshold
+        )
+        exit_crossed = (
+            score <= candidate.exit_threshold
+            and previous_score is not None
+            and previous_score > candidate.exit_threshold
+        )
+        previous_score = score
+        if position_is_open:
+            if opened_at is None:
+                opened_at = boundary
+            held = boundary - opened_at
+            if held >= candidate.maximum_holding_period or (
+                held >= candidate.minimum_holding_period and exit_crossed
+            ):
+                opened_at = None
+                last_exit_at = boundary
+                return SimulationDecisionOverride(
+                    StrategyAction.SELL_ALL,
+                    applied_rule="composite_exit",
+                    explanation="Frozen composite exit or maximum holding rule.",
+                )
+            return StrategyAction.NO_ACTION
+        cooldown_complete = (
+            last_exit_at is None or boundary - last_exit_at >= candidate.cooldown
+        )
+        if entry_crossed and cooldown_complete:
+            opened_at = boundary
+            return SimulationDecisionOverride(
+                StrategyAction.OPEN_POSITION,
+                target_allocation_percentage=Decimal("15.00"),
+                applied_rule="composite_entry",
+                explanation="Frozen composite entry threshold crossed.",
+            )
+        return StrategyAction.NO_ACTION
+
+    return decide
+
+
+def _economic_metrics(
+    *,
+    candidate: CompositeCandidate,
+    dataset: HistoricalDataset,
+    matrix: HistoricalFeatureMatrix,
+    windows: tuple[WalkForwardWindow, ...],
+    phase: str,
+    simulation: SimulationConfiguration,
+    initial_cash: Decimal,
+) -> CompositeMetrics:
+    results: list[HistoricalSimulationResult] = []
+    baseline_returns: list[Decimal] = []
+    buy_hold_returns: list[Decimal] = []
+    for window in windows:
+        training_rows = _rows_between(matrix, window.training_from, window.training_to)
+        phase_rows = _rows_between(
+            matrix, getattr(window, f"{phase}_from"), getattr(window, f"{phase}_to")
+        )
+        if len(training_rows) < 4 or not phase_rows:
+            continue
+        frozen = _candidate_with_window_normalization(candidate, training_rows)
+        try:
+            result = simulate_historical_feature_matrix(
+                dataset=dataset,
+                feature_matrix=HistoricalFeatureMatrix(
+                    matrix.dataset_fingerprint, phase_rows
+                ),
+                initial_cash=initial_cash,
+                fee_rate=simulation.fee_rate,
+                slippage_rate=simulation.slippage_rate,
+                decision_interval=frozen.cadence,
+                decision_action_filter=_composite_action_filter(frozen),
+            )
+            baseline = simulate_historical_feature_matrix(
+                dataset=dataset,
+                feature_matrix=HistoricalFeatureMatrix(
+                    matrix.dataset_fingerprint, phase_rows
+                ),
+                initial_cash=initial_cash,
+                fee_rate=simulation.fee_rate,
+                slippage_rate=simulation.slippage_rate,
+                decision_interval=frozen.cadence,
+            )
+            buy_hold = simulate_buy_and_hold(
+                HistoricalFeatureMatrix(matrix.dataset_fingerprint, phase_rows),
+                RefinementSegmentName.TEST,
+                dataset.identity.instrument,
+                initial_cash,
+                simulation,
+            )
+        except (ValueError, IndexError):
+            continue
+        results.append(result)
+        baseline_returns.append(baseline.total_return)
+        buy_hold_returns.append(buy_hold.total_return)
+    if not results:
+        return _empty_metrics()
+    count = Decimal(len(results))
+    returns = tuple(item.total_return for item in results)
+    mean_return = sum(returns, Decimal(0)) / count
+    mean_baseline = sum(baseline_returns, Decimal(0)) / count
+    mean_buy_hold = sum(buy_hold_returns, Decimal(0)) / count
+    stability = sum((Decimal(1) for value in returns if value > 0), Decimal(0)) / count
+    return CompositeMetrics(
+        observations=sum(item.decision_count for item in results),
+        correlation=Decimal(0),
+        directional_hit_rate=Decimal(0),
+        expected_gross_movement=Decimal(0),
+        expected_net_movement=mean_return,
+        dispersion=(
+            sum(((value - mean_return) ** 2 for value in returns), Decimal(0)) / count
+        ).sqrt(),
+        profitable_window_ratio=stability,
+        usable_window_count=len(results),
+        total_return=mean_return,
+        absolute_pnl=sum((item.absolute_pnl for item in results), Decimal(0)) / count,
+        max_drawdown=max(item.max_drawdown for item in results),
+        trade_count=sum(item.trade_count for item in results),
+        fees_paid=sum((item.fees_paid for item in results), Decimal(0)),
+        final_equity=sum((item.final_equity for item in results), Decimal(0)) / count,
+        production_baseline_return=mean_baseline,
+        excess_return_over_production=mean_return - mean_baseline,
+        buy_and_hold_return=mean_buy_hold,
+        excess_return_over_buy_and_hold=mean_return - mean_buy_hold,
+        return_stability=stability,
+    )
+
+
 def _ranking(
     candidate: CompositeCandidate, metrics: CompositeMetrics
 ) -> CompositeRankingBreakdown:
     complexity = Decimal(len(candidate.features) - 2) * Decimal("0.01")
     concentration = max(abs(item.weight) for item in candidate.weights)
     concentration_penalty = max(Decimal(0), concentration - Decimal("0.60"))
-    stability = Decimal(1) - min(Decimal(1), metrics.dispersion)
+    stability = metrics.return_stability or (
+        Decimal(1) - min(Decimal(1), metrics.dispersion)
+    )
     total = (
-        metrics.expected_net_movement
-        + metrics.directional_hit_rate
+        metrics.total_return
+        + metrics.excess_return_over_production
+        + metrics.expected_net_movement
+        + metrics.directional_hit_rate / Decimal(10)
         + stability
+        - metrics.max_drawdown
+        - metrics.fees_paid / max(metrics.final_equity, Decimal(1))
         - complexity
         - concentration_penalty
     )
@@ -457,9 +765,11 @@ def _ranking(
 
 def search_composite_features(
     *,
+    dataset: HistoricalDataset,
     matrix: HistoricalFeatureMatrix,
     windows: tuple[WalkForwardWindow, ...],
     simulation: SimulationConfiguration,
+    initial_cash: Decimal,
     budget: CompositeSearchBudget = DEFAULT_COMPOSITE_SEARCH_BUDGET,
 ) -> CompositeSearchResult:
     excluded = validate_feature_pool(matrix)
@@ -480,105 +790,197 @@ def search_composite_features(
             "insufficient_evidence",
         )
     training_rows = _phase_rows(matrix, windows, "training")
+    evidence = _training_evidence(matrix, windows, timedelta(hours=4))
+    thresholds = EvidenceThresholds()
     results: list[CompositeCandidateResult] = []
     funnels: list[CompositeDepthFunnel] = []
     seen: set[str] = set()
-    computed = 0
-    best_parent: dict[tuple[str, ...], str] = {}
-    cadences = (
-        timedelta(minutes=30),
-        timedelta(hours=4),
-        timedelta(hours=8),
-        timedelta(hours=12),
-    )
-    horizons = (timedelta(minutes=30), timedelta(hours=4), timedelta(hours=12))
+    cheap_computed = 0
+    training_computed = 0
+    test_computed = 0
+    parents: tuple[CompositeCandidateResult, ...] = ()
+    budget_exhausted = False
     for depth in range(2, min(7, len(pool)) + 1):
-        generated = list(combinations(pool, depth))
-        depth_results: list[CompositeCandidateResult] = []
+        proposals: list[tuple[tuple[str, ...], CompositeCandidateResult | None]] = []
+        if depth == 2:
+            proposals = [(subset, None) for subset in combinations(pool, 2)]
+        else:
+            for retained_parent in parents:
+                for name in pool:
+                    if name not in retained_parent.candidate.features:
+                        proposals.append(
+                            (
+                                tuple(
+                                    sorted((*retained_parent.candidate.features, name))
+                                ),
+                                retained_parent,
+                            )
+                        )
+        if not proposals:
+            break
+        proposal_keys: set[tuple[tuple[str, ...], str | None]] = set()
+        unique_proposals: list[
+            tuple[tuple[str, ...], CompositeCandidateResult | None]
+        ] = []
+        for subset, proposal_parent in proposals:
+            key = (
+                subset,
+                proposal_parent.candidate.fingerprint if proposal_parent else None,
+            )
+            if key not in proposal_keys:
+                proposal_keys.add(key)
+                unique_proposals.append((subset, proposal_parent))
+        cheap_ranked: list[tuple[CompositeCandidate, str | None, CompositeMetrics]] = []
         configurations = 0
         duplicates = 0
-        for subset in generated:
-            if computed >= budget.maximum_cheap_evaluations:
+        for subset, proposal_parent in unique_proposals:
+            if cheap_computed >= budget.maximum_cheap_evaluations:
+                budget_exhausted = True
                 break
-            evidence = []
-            for name in subset:
-                single_values = tuple(feature_value(row, name) for row in training_rows)
-                direction = (
-                    Decimal(1)
-                    if single_values[-1] >= Decimal(median(single_values))
-                    else Decimal(-1)
-                )
-                evidence.append((name, direction))
-            variants = (
-                tuple(evidence),
-                tuple(
-                    (name, sign * Decimal(index + 1))
-                    for index, (name, sign) in enumerate(evidence)
-                ),
-                tuple(
-                    (name, sign * Decimal(len(evidence) - index))
-                    for index, (name, sign) in enumerate(evidence)
-                ),
-            )[: budget.maximum_variants_per_subset]
-            for variant_index, weights in enumerate(variants):
-                configurations += 1
-                candidate = build_candidate(
-                    weights=weights,
-                    training_rows=training_rows,
-                    simulation=simulation,
-                    cadence=cadences[(depth + variant_index) % len(cadences)],
-                    horizon=horizons[(depth + variant_index) % len(horizons)],
-                )
-                if candidate.fingerprint in seen:
-                    duplicates += 1
-                    continue
-                seen.add(candidate.fingerprint)
-                computed += 1
-                training = _window_metrics(candidate, matrix, windows, "training")
-                ranking = _ranking(candidate, training)
-                parent = best_parent.get(subset[:-1])
-                depth_results.append(
-                    CompositeCandidateResult(
-                        candidate,
-                        parent,
-                        depth,
-                        CompositeCandidateStatus.RETAINED_TRAINING,
-                        ranking,
-                        training,
-                        None,
-                        None,
-                        ("minimum_observations",)
-                        if training.observations >= 30
-                        else (),
-                        ()
-                        if training.observations >= 30
-                        else ("minimum_observations",),
-                        None if training.observations >= 30 else "minimum_observations",
-                        Decimal(0) if training.observations >= 30 else Decimal(1),
+            for weights in _weight_variants(
+                subset,
+                evidence,
+                proposal_parent.candidate if proposal_parent else None,
+                budget.maximum_variants_per_subset,
+            ):
+                for (
+                    cadence,
+                    horizon,
+                    entry,
+                    exit_,
+                    minimum,
+                    maximum,
+                    cooldown,
+                ) in _OPERATIONAL_CONFIGURATIONS:
+                    if cheap_computed >= budget.maximum_cheap_evaluations:
+                        budget_exhausted = True
+                        break
+                    configurations += 1
+                    candidate = build_candidate(
+                        weights=weights,
+                        training_rows=training_rows,
+                        simulation=simulation,
+                        cadence=cadence,
+                        horizon=horizon,
+                        entry_threshold=entry,
+                        exit_threshold=exit_,
+                        minimum_holding_period=minimum,
+                        maximum_holding_period=maximum,
+                        cooldown=cooldown,
+                        initial_cash=initial_cash,
                     )
+                    if candidate.fingerprint in seen:
+                        duplicates += 1
+                        continue
+                    seen.add(candidate.fingerprint)
+                    cheap_computed += 1
+                    cheap = _cheap_window_metrics(
+                        candidate, matrix, windows, "training"
+                    )
+                    cheap_ranked.append(
+                        (
+                            candidate,
+                            proposal_parent.candidate.fingerprint
+                            if proposal_parent
+                            else None,
+                            cheap,
+                        )
+                    )
+        cheap_ranked.sort(
+            key=lambda value: (
+                -_ranking(value[0], value[2]).total,
+                value[0].fingerprint,
+            )
+        )
+        simulation_slots = min(
+            len(cheap_ranked),
+            budget.beam_width_per_depth * 2,
+            budget.maximum_training_simulations - training_computed,
+        )
+        depth_results: list[CompositeCandidateResult] = []
+        for candidate, parent_fingerprint, _cheap in cheap_ranked[:simulation_slots]:
+            training = _economic_metrics(
+                candidate=candidate,
+                dataset=dataset,
+                matrix=matrix,
+                windows=windows,
+                phase="training",
+                simulation=simulation,
+                initial_cash=initial_cash,
+            )
+            training_computed += 1
+            training_passes = (
+                training.usable_window_count >= thresholds.minimum_windows
+                and training.total_return > 0
+                and training.trade_count >= training.usable_window_count
+                and training.max_drawdown <= Decimal("0.35")
+                and training.return_stability
+                >= thresholds.minimum_stable_direction_ratio
+            )
+            failed = () if training_passes else ("training_economic_qualification",)
+            depth_results.append(
+                CompositeCandidateResult(
+                    candidate,
+                    parent_fingerprint,
+                    depth,
+                    CompositeCandidateStatus.RETAINED_TRAINING,
+                    _ranking(candidate, training),
+                    training,
+                    None,
+                    None,
+                    ("training_economic_qualification",) if training_passes else (),
+                    failed,
+                    failed[0] if failed else None,
+                    Decimal(0) if training_passes else Decimal(1),
                 )
+            )
         depth_results.sort(
             key=lambda item: (-item.ranking.total, item.candidate.fingerprint)
         )
-        retained = depth_results[: budget.beam_width_per_depth]
-        validation_limit = min(len(retained), budget.maximum_validation_per_depth)
-        validated: list[CompositeCandidateResult] = []
-        for item in retained[:validation_limit]:
-            validation = _window_metrics(item.candidate, matrix, windows, "validation")
+        parents = tuple(item for item in depth_results if not item.failed_requirements)[
+            : budget.beam_width_per_depth
+        ]
+        validation_limit = min(len(parents), budget.maximum_validation_per_depth)
+        finalized: list[CompositeCandidateResult] = []
+        for item in parents[:validation_limit]:
+            validation = _economic_metrics(
+                candidate=item.candidate,
+                dataset=dataset,
+                matrix=matrix,
+                windows=windows,
+                phase="validation",
+                simulation=simulation,
+                initial_cash=initial_cash,
+            )
             validation_passes = (
-                validation.observations >= 30 and validation.expected_net_movement > 0
+                validation.usable_window_count >= thresholds.minimum_windows
+                and validation.total_return > 0
+                and validation.trade_count >= validation.usable_window_count
+                and validation.max_drawdown <= Decimal("0.35")
+                and validation.return_stability
+                >= thresholds.minimum_stable_direction_ratio
+                and validation.excess_return_over_production > 0
             )
-            test = (
-                _window_metrics(item.candidate, matrix, windows, "test")
-                if validation_passes
-                and sum(1 for value in results if value.test_metrics is not None)
-                < budget.maximum_test_candidates
-                else None
-            )
-            test_confirmed = (
-                test is not None
-                and test.observations >= 30
-                and test.expected_net_movement > 0
+            test = None
+            if validation_passes and test_computed < budget.maximum_test_candidates:
+                test = _economic_metrics(
+                    candidate=item.candidate,
+                    dataset=dataset,
+                    matrix=matrix,
+                    windows=windows,
+                    phase="test",
+                    simulation=simulation,
+                    initial_cash=initial_cash,
+                )
+                test_computed += 1
+            test_confirmed = bool(
+                test
+                and test.usable_window_count >= thresholds.minimum_windows
+                and test.total_return > 0
+                and test.trade_count >= test.usable_window_count
+                and test.max_drawdown <= Decimal("0.35")
+                and test.return_stability >= thresholds.minimum_stable_direction_ratio
+                and test.excess_return_over_production > 0
             )
             status = (
                 CompositeCandidateStatus.CONFIRMED_CANDIDATE
@@ -591,52 +993,60 @@ def search_composite_features(
                 ()
                 if test_confirmed
                 else (
-                    ("positive_test_net_movement",)
-                    if test is not None
-                    else ("positive_validation_net_movement",)
+                    ("test_economic_qualification",)
+                    if test
+                    else ("validation_economic_qualification",)
                 )
             )
-            validated.append(
+            final_metrics = test or validation
+            finalized.append(
                 CompositeCandidateResult(
                     item.candidate,
                     item.parent_fingerprint,
                     depth,
                     status,
-                    item.ranking,
+                    _ranking(item.candidate, final_metrics),
                     item.training_metrics,
                     validation,
                     test,
                     item.passed_requirements
-                    + (("validation",) if validation_passes else ()),
+                    + (
+                        ("validation_economic_qualification",)
+                        if validation_passes
+                        else ()
+                    )
+                    + (("test_economic_qualification",) if test_confirmed else ()),
                     failed,
                     failed[0] if failed else None,
                     Decimal(0) if test_confirmed else Decimal(1),
                 )
             )
-        persisted = tuple(validated + retained[validation_limit:])
+        persisted = tuple(
+            finalized
+            + list(parents[validation_limit:])
+            + [item for item in depth_results if item not in parents]
+        )
         results.extend(persisted[: budget.maximum_persisted_candidates - len(results)])
-        for item in retained:
-            best_parent[item.candidate.features] = item.candidate.fingerprint
         funnels.append(
             CompositeDepthFunnel(
                 depth,
-                len(generated),
+                len(unique_proposals),
                 configurations,
                 duplicates,
-                len(depth_results),
+                len(cheap_ranked),
                 0,
-                len(retained),
+                simulation_slots,
                 0,
-                len(retained),
+                len(parents),
                 validation_limit,
-                sum(
-                    1
-                    for item in validated
-                    if item.validation_metrics and not item.failed_requirements
-                ),
-                sum(1 for item in validated if item.test_metrics is not None),
+                sum(1 for item in finalized if item.test_metrics is not None),
+                sum(1 for item in finalized if item.test_metrics is not None),
             )
         )
+        if not parents or training_computed >= budget.maximum_training_simulations:
+            if training_computed >= budget.maximum_training_simulations:
+                budget_exhausted = True
+            break
     confirmed_candidates = [
         item
         for item in results
@@ -644,7 +1054,9 @@ def search_composite_features(
     ]
     validation_passed = [item for item in results if item.test_metrics is not None]
     conclusion = (
-        CompositeSearchConclusion.CONFIRMED_COMPOSITE_CANDIDATES
+        CompositeSearchConclusion.SEARCH_BUDGET_EXHAUSTED
+        if budget_exhausted and not confirmed_candidates
+        else CompositeSearchConclusion.CONFIRMED_COMPOSITE_CANDIDATES
         if confirmed_candidates
         else CompositeSearchConclusion.CANDIDATES_REJECTED_TEST
         if validation_passed
@@ -652,9 +1064,19 @@ def search_composite_features(
         if results
         else CompositeSearchConclusion.NO_TRAINING_SIGNAL
     )
+    priority = {
+        CompositeCandidateStatus.CONFIRMED_CANDIDATE: 3,
+        CompositeCandidateStatus.REJECTED_TEST: 2,
+        CompositeCandidateStatus.REJECTED_VALIDATION: 1,
+        CompositeCandidateStatus.RETAINED_TRAINING: 0,
+    }
     best = max(
         results,
-        key=lambda item: (item.ranking.total, item.candidate.fingerprint),
+        key=lambda item: (
+            priority[item.status],
+            item.ranking.total,
+            item.candidate.fingerprint,
+        ),
         default=None,
     )
     return CompositeSearchResult(
@@ -664,8 +1086,8 @@ def search_composite_features(
         excluded,
         tuple(funnels),
         tuple(results),
-        computed,
-        computed,
+        cheap_computed + training_computed + test_computed,
+        cheap_computed + training_computed + test_computed,
         0,
         best.depth if best else None,
         best.candidate.fingerprint if best else None,
