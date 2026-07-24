@@ -603,16 +603,24 @@ def test_real_cadence_changes_decisions_and_trades() -> None:
         exit_threshold=Decimal("-0.03"),
         initial_cash=Decimal("10000"),
     )
-    common = {
-        "dataset": _dataset(matrix),
-        "matrix": matrix,
-        "windows": windows,
-        "phase": "training",
-        "simulation": simulation,
-        "initial_cash": Decimal("10000"),
-    }
-    fast = composite_module._economic_metrics(candidate=thirty_minutes, **common)
-    slow = composite_module._economic_metrics(candidate=four_hours, **common)
+    fast = composite_module._economic_metrics(
+        candidate=thirty_minutes,
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=windows,
+        phase="training",
+        simulation=simulation,
+        initial_cash=Decimal("10000"),
+    )
+    slow = composite_module._economic_metrics(
+        candidate=four_hours,
+        dataset=_dataset(matrix),
+        matrix=matrix,
+        windows=windows,
+        phase="training",
+        simulation=simulation,
+        initial_cash=Decimal("10000"),
+    )
     assert fast.observations > slow.observations
     assert fast.trade_count != slow.trade_count
 
