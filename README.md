@@ -31,12 +31,11 @@ Every generated signal must retain its component scores, supporting metrics, and
 Argos currently runs closed-candle ingestion, bounded live Feature and Score
 calculation, 30-minute decision cycles, versioned Paper Trading, portfolio and
 performance history, historical simulation/refinement, Predictive Edge Map
-analysis, complete edge-guided Strategy qualification v3, and bounded weekly
-research. The API exposes current and historical evidence to the separately
-deployed `argos-web` SPA. Candidate approval or activation, parallel Strategy
-wallets, additional providers, ML, sentiment/news, authentication, and
-real-money trading are not implemented. See the
-[current system reference](docs/010-current-system.md).
+analysis, and edge-guided candidate qualification v2. The API exposes current
+and historical evidence to the separately deployed `argos-web` SPA. Candidate
+approval, parallel Strategy wallets, scheduled exploration, additional
+providers, ML, sentiment/news, authentication, and real-money trading are not
+implemented. See the [current system reference](docs/010-current-system.md).
 
 ## Development
 
@@ -808,8 +807,21 @@ python -m app.jobs.reset_paper_account --initial-cash 10000 --reason "baseline b
 
 The command parses money as `Decimal`, stops the active experiment, and creates a fresh linked run in one transaction. Stopping a run does not liquidate it: open Positions retain their quantity and entry state, and no synthetic Trade is created. Historical runs are queryable through `GET /paper/runs` and `GET /paper/runs/{run_id}`; positions and trades accept an optional `run_id`. Reset remains CLI-only until authenticated mutation endpoints exist, and a future authenticated frontend action must reuse this use case.
 
-
 ### Weekly Strategy research
+
+Weekly research now includes a bounded progressive composite-feature search after targeted
+refinement. It combines the seven canonical numeric Features at depths 2–7 with signed,
+normalized weights fitted from training only; validation and isolated test use the frozen
+candidate. The stage persists auditable evidence and never activates Strategies or changes
+Paper Trading. See [docs/014-weekly-strategy-research.md](docs/014-weekly-strategy-research.md).
+
+Read-only composite evidence is available at:
+
+```text
+GET /optimization/predictive-edge-runs/{run_id}/composite-search
+GET /optimization/predictive-edge-runs/{run_id}/composite-search/candidates
+GET /optimization/predictive-edge-runs/{run_id}/composite-search/candidates/{candidate_id}
+```
 
 Run bounded research for every scoring-enabled catalog instrument:
 
@@ -817,12 +829,12 @@ Run bounded research for every scoring-enabled catalog instrument:
 python -m app.jobs.run_weekly_strategy_research
 ```
 
-The default range is the latest 730 complete days. Use `--dry-run` to validate
-the catalog, range, and budget without loading the full dataset or persisting
-evidence. Completed identical evidence is reconstructed before candles or the
-Feature matrix are loaded. The job processes instruments sequentially, does not
-activate candidates, and does not mutate Paper Trading. Railway setup, candidate
-families, outcomes, and reuse semantics are documented in
+The default range is the latest 730 complete days. Use `--dry-run` to validate the
+catalog, range, and budget without loading the full dataset or persisting evidence.
+Completed identical evidence is reconstructed before candles or the Feature matrix are
+loaded. The job processes instruments sequentially, does not activate candidates, and
+does not mutate Paper Trading. Railway setup, candidate families, outcomes, and reuse
+semantics are documented in
 [`docs/014-weekly-strategy-research.md`](docs/014-weekly-strategy-research.md).
 That runbook also documents the bounded targeted-refinement stage for economically
 promising v4.1 near misses and its read-only evidence endpoints.

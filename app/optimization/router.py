@@ -6,6 +6,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.optimization.composite_search_read import (
+    MAX_COMPOSITE_PAGE_LIMIT,
+    CompositeSearchNotFoundError,
+    get_composite_candidate,
+    get_composite_search,
+    list_composite_candidates,
+)
+from app.optimization.composite_search_schemas import (
+    CompositeCandidateDetailResponse,
+    CompositeCandidatePageResponse,
+    CompositeSearchSummaryResponse,
+)
 from app.optimization.edge_guided import EdgeGuidedCandidateStatus
 from app.optimization.edge_guided_read import (
     MAX_EDGE_GUIDED_PAGE_LIMIT,
@@ -98,6 +110,61 @@ from app.optimization.walk_forward_read import (
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 RunQuery = Annotated[RefinementRunQuery, Query()]
 CandidatesQuery = Annotated[CandidateQuery, Query()]
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/composite-search",
+    response_model=CompositeSearchSummaryResponse,
+)
+async def composite_search(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> CompositeSearchSummaryResponse:
+    try:
+        return await get_composite_search(session, run_id)
+    except CompositeSearchNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/composite-search/candidates",
+    response_model=CompositeCandidatePageResponse,
+)
+async def composite_search_candidates(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    depth: Annotated[int | None, Query(ge=2, le=7)] = None,
+    status: Annotated[str | None, Query()] = None,
+    feature_name: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_COMPOSITE_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> CompositeCandidatePageResponse:
+    try:
+        return await list_composite_candidates(
+            session,
+            run_id,
+            depth=depth,
+            status=status,
+            feature_name=feature_name,
+            limit=limit,
+            offset=offset,
+        )
+    except CompositeSearchNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/predictive-edge-runs/{run_id}/composite-search/candidates/{candidate_id}",
+    response_model=CompositeCandidateDetailResponse,
+)
+async def composite_search_candidate(
+    run_id: UUID,
+    candidate_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> CompositeCandidateDetailResponse:
+    try:
+        return await get_composite_candidate(session, run_id, candidate_id)
+    except CompositeSearchNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get(

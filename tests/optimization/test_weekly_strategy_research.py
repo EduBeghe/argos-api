@@ -135,11 +135,20 @@ async def test_exact_reuse_short_circuits_every_heavy_stage(
             best_targeted_candidate="best-fingerprint",
         )
     )
+    composite_reader = AsyncMock(
+        return_value=SimpleNamespace(
+            id=uuid4(),
+            conclusion="candidates_rejected_validation",
+            maximum_depth_reached=7,
+            total_evaluations=120,
+        )
+    )
     monkeypatch.setattr(research_module, "read_historical_dataset_revision", revision)
     monkeypatch.setattr(research_module, "find_reusable_weekly_research_run", reusable)
     monkeypatch.setattr(research_module, "read_historical_dataset", dataset_loader)
     monkeypatch.setattr(research_module, "get_predictive_edge_diagnostics", diagnostics)
     monkeypatch.setattr(research_module, "get_targeted_refinement", targeted_reader)
+    monkeypatch.setattr(research_module, "get_composite_search", composite_reader)
     monkeypatch.setattr(
         research_module, "build_historical_feature_matrix", matrix_builder
     )
