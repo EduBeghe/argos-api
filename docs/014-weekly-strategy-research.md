@@ -41,8 +41,8 @@ GET /optimization/predictive-edge-runs/{run_id}/targeted-refinement/candidates
 GET /optimization/predictive-edge-runs/{run_id}/targeted-refinement/candidates/{candidate_id}
 ```
 
-Run once with `--persist` for a fresh execution and repeat the exact command to validate
-reuse. Exact reuse returns the original evidence, reports current heavy work as zero,
+Run once for a fresh execution and repeat the exact command to validate reuse. The job
+persists automatically. Exact reuse returns the original evidence, reports current heavy work as zero,
 and skips dataset loading, Feature construction, v4, v4.1, targeted refinement and
 Strategy simulation.
 It also preserves the targeted run and candidate IDs, deterministic ranking, best
@@ -191,8 +191,8 @@ so a costly no-Strategy result still reports positive avoided computation.
 Production verification:
 
 ```sh
-python -m app.jobs.run_weekly_strategy_research --asset BTC/USDT --persist --force-recompute
-python -m app.jobs.run_weekly_strategy_research --asset BTC/USDT --persist
+python -m app.jobs.run_weekly_strategy_research --asset BTC/USDT --force-recompute
+python -m app.jobs.run_weekly_strategy_research --asset BTC/USDT
 curl "$API_BASE_URL/optimization/predictive-edge-runs/$RUN_ID/diagnostics"
 curl "$API_BASE_URL/optimization/predictive-edge-runs/$RUN_ID/near-misses?kind=actionable"
 curl "$API_BASE_URL/optimization/predictive-edge-runs/$RUN_ID/near-misses?kind=diagnostic"
