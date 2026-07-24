@@ -24,6 +24,16 @@ _RUN_COUNTER_COLUMNS = (
     "normalizations_computed",
     "normalizations_reused",
     "simulations_avoided",
+    "row_slices_computed",
+    "row_slices_reused",
+    "threshold_fits_computed",
+    "threshold_fits_reused",
+)
+
+_RUN_BOOLEAN_COLUMNS = (
+    "persistence_truncated",
+    "depth_quota_reached",
+    "global_compute_budget_exhausted",
 )
 
 
@@ -53,6 +63,15 @@ def upgrade() -> None:
                 sa.Column(name, sa.Integer(), nullable=False, server_default="0"),
             )
             op.alter_column("composite_search_runs", name, server_default=None)
+    for name in _RUN_BOOLEAN_COLUMNS:
+        if name not in run_columns:
+            op.add_column(
+                "composite_search_runs",
+                sa.Column(
+                    name, sa.Boolean(), nullable=False, server_default=sa.false()
+                ),
+            )
+            op.alter_column("composite_search_runs", name, server_default=None)
 
     if "selection_track" not in candidate_columns:
         op.add_column(
@@ -68,6 +87,15 @@ def upgrade() -> None:
             "composite_search_candidates",
             sa.Column("distance_to_training_qualification", sa.String(64)),
         )
+    for name, size in (
+        ("operational_search_stage", 32),
+        ("parent_operational_configuration_fingerprint", 64),
+        ("operational_refinement_reason", 128),
+    ):
+        if name not in candidate_columns:
+            op.add_column(
+                "composite_search_candidates", sa.Column(name, sa.String(size))
+            )
     constraints = {
         item["name"]
         for item in sa.inspect(op.get_bind()).get_check_constraints(
@@ -87,9 +115,21 @@ def upgrade() -> None:
             "selection_track IS NULL OR selection_track = 'economic' "
             "OR status = 'retained_training'",
         )
+    if "ck_composite_search_operational_stage" not in constraints:
+        op.create_check_constraint(
+            "ck_composite_search_operational_stage",
+            "composite_search_candidates",
+            "operational_search_stage IS NULL OR operational_search_stage IN "
+            "('coarse', 'local_refinement')",
+        )
 
 
 def downgrade() -> None:
+    op.drop_constraint(
+        "ck_composite_search_operational_stage",
+        "composite_search_candidates",
+        type_="check",
+    )
     op.drop_constraint(
         "ck_composite_search_exploratory_not_promoted",
         "composite_search_candidates",
@@ -103,6 +143,14 @@ def downgrade() -> None:
     op.drop_column("composite_search_candidates", "distance_to_training_qualification")
     op.drop_column("composite_search_candidates", "exploration_reason")
     op.drop_column("composite_search_candidates", "selection_track")
+    op.drop_column("composite_search_candidates", "operational_refinement_reason")
+    op.drop_column(
+        "composite_search_candidates",
+        "parent_operational_configuration_fingerprint",
+    )
+    op.drop_column("composite_search_candidates", "operational_search_stage")
+    for name in reversed(_RUN_BOOLEAN_COLUMNS):
+        op.drop_column("composite_search_runs", name)
     for name in reversed(_RUN_COUNTER_COLUMNS):
         op.drop_column("composite_search_runs", name)
     op.drop_column("composite_search_runs", "best_exploratory_candidate_fingerprint")

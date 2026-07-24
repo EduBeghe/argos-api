@@ -79,11 +79,15 @@ capital loss, and absurd fee burden without requiring exploratory parents to be 
 
 Each walk-forward window fits its own median/IQR normalization from that window's training
 slice and freezes it for the matching validation and isolated-test slices. The bounded
-operational search covers 30-minute, 4-hour, 8-hour and 12-hour cadences; 30-minute,
-4-hour and 12-hour horizons; and explicit entry, exit, holding and cooldown rules. It
-compares conservative, medium, and demanding training-quantile thresholds with a bounded
-absolute-threshold control. Frozen entry and exit values provide hysteresis and cannot be
-recalibrated from validation or test. Cheap
+coarse operational search covers 30-minute, 1-hour, 2-hour, 4-hour, 6-hour, 8-hour and
+12-hour cadences plus 30-minute, 1-hour, 2-hour, 4-hour, 8-hour, 12-hour and 24-hour
+horizons. A balanced deterministic matrix covers every value without evaluating the full
+Cartesian product. Remaining per-depth training slots refine the strongest training-only
+families through bounded 30-minute-multiple neighbors; cadence stays within 30 minutes and
+12 hours, while research horizons may extend to 36 hours. Each refined candidate records
+its coarse operational parent and refinement reason. It compares conservative, medium,
+and demanding training-quantile thresholds. Frozen entry and exit values provide
+hysteresis and cannot be recalibrated from validation or test. Cheap
 association ranking never counts as a simulation. Retained candidates run through the
 existing historical Paper Trading mathematics, including cash, positions, fees and
 slippage. Validation must qualify before test is read.
@@ -104,7 +108,11 @@ profitable-window ratio, production-baseline comparison and a separate buy-and-h
 comparison. Conclusions describe only the evaluated dataset, Feature pool and bounded
 search space; they do not claim that no market pattern exists. Candidate evidence records
 the `economic` or `exploratory` selection track, qualification distance, exploration reason,
-parent fingerprint, turnover, holding duration, and fee-burden metrics. The run summary
+parent fingerprint, operational search stage/lineage, turnover, holding duration, and
+fee-burden metrics. Trade annualization uses the union of actually evaluated phase ranges,
+so overlapping intervals are not counted twice. Fee and realized-turnover ratios divide
+accumulated evidence by the capital independently allocated to every usable walk-forward
+window; absolute fees remain accumulated for audit. The run summary
 identifies the best economic and exploratory candidates, cadence coverage, stop reasons,
 and computed/reused work.
 
@@ -113,8 +121,12 @@ but the bounded isolated-test allowance was already consumed. Run counters separ
 report cheap evaluations and training, validation and test simulations; `total_evaluations`
 is their exact sum. Normal depth quotas do not mean global budget exhaustion; each depth
 records whether it stopped for evidence, safety, remaining Features, or global budget.
-Within one search, cached window slices, normalization inputs, candidate results, production
-baselines, and buy-and-hold baselines avoid repeated simulations. The outer reuse boundary
+Within one search, row slices, normalization parameters by window/Feature subset, frozen
+quantile thresholds by window/weights, candidate results, production baselines, and
+buy-and-hold baselines are cached separately. Their counters report only work actually
+avoided. `persistence_truncated`, `depth_quota_reached`, and
+`global_compute_budget_exhausted` remain separate; public `budget_exhausted` means only a
+global compute limit prevented minimum work. The outer reuse boundary
 remains the complete versioned weekly experiment:
 an identical second execution reads the persisted graph before dataset loading and does not
 invoke composite search.

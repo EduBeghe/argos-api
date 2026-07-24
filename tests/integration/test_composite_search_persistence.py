@@ -16,6 +16,7 @@ from app.optimization.composite_search import (
     CompositeCandidateStatus,
     CompositeDepthFunnel,
     CompositeMetrics,
+    CompositeOperationalSearchStage,
     CompositeRankingBreakdown,
     CompositeSearchBudget,
     CompositeSearchConclusion,
@@ -129,6 +130,9 @@ def _result() -> CompositeSearchResult:
         simulation=SimulationConfiguration(),
         cadence=timedelta(minutes=30),
         horizon=timedelta(minutes=30),
+        operational_search_stage=CompositeOperationalSearchStage.LOCAL_REFINEMENT,
+        parent_operational_configuration_fingerprint="o" * 64,
+        operational_refinement_reason="top_training_operational_family",
     )
     metrics = CompositeMetrics(
         90,
@@ -242,6 +246,12 @@ async def test_passed_validation_and_exact_counters_round_trip(
         assert page.items[0].validation_metrics is not None
         assert page.items[0].test_metrics is None
         assert page.items[0].selection_track is CompositeSelectionTrack.ECONOMIC
+        assert page.items[0].operational_search_stage == "local_refinement"
+        assert page.items[0].parent_operational_configuration_fingerprint == "o" * 64
+        assert (
+            page.items[0].operational_refinement_reason
+            == "top_training_operational_family"
+        )
 
         economic_page = await list_composite_candidates(
             session,

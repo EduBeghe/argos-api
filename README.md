@@ -820,8 +820,14 @@ part of validation and isolated-test evidence. The stage never activates Strateg
 changes Paper Trading. See
 [docs/014-weekly-strategy-research.md](docs/014-weekly-strategy-research.md).
 
-Composite summaries expose separate cheap, training, validation and test counters, cached
-benchmark work, cadence coverage, stop reasons, best economic/exploratory evidence, and a
+The coarse matrix covers 30m/1h/2h/4h/6h/8h/12h cadences and
+30m/1h/2h/4h/8h/12h/24h horizons without a Cartesian product. Remaining training slots
+evaluate bounded local operational neighbors; validation and test never choose or retune
+those configurations.
+
+Composite summaries expose separate cheap, training, validation and test counters, real
+row-slice/normalization/threshold-fit reuse, cached benchmark work, coarse cadence/horizon
+coverage, local-refinement lineage, stop reasons, best economic/exploratory evidence, and a
 diagnostic `budget_exhausted` flag. Candidate listings can be filtered by
 `selection_track=economic|exploratory`. `passed_validation` means all validation gates passed
 but the bounded isolated-test allowance was already consumed; it is not a rejection.

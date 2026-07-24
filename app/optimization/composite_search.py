@@ -62,6 +62,11 @@ class CompositeThresholdPolicy(StrEnum):
     TRAINING_QUANTILE = "training_quantile"
 
 
+class CompositeOperationalSearchStage(StrEnum):
+    COARSE = "coarse"
+    LOCAL_REFINEMENT = "local_refinement"
+
+
 class CompositeDepthStoppedReason(StrEnum):
     DEPTH_QUOTA_REACHED = "depth_quota_reached"
     GLOBAL_BUDGET_EXHAUSTED = "global_budget_exhausted"
@@ -135,6 +140,11 @@ class CompositeCandidate:
     threshold_policy: CompositeThresholdPolicy = CompositeThresholdPolicy.ABSOLUTE
     entry_quantile: Decimal | None = None
     exit_quantile: Decimal | None = None
+    operational_search_stage: CompositeOperationalSearchStage = (
+        CompositeOperationalSearchStage.COARSE
+    )
+    parent_operational_configuration_fingerprint: str | None = None
+    operational_refinement_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +239,13 @@ class CompositeDepthFunnel:
     rejected_for_churn: int = 0
     rejected_for_safety: int = 0
     stopped_reason: CompositeDepthStoppedReason = CompositeDepthStoppedReason.COMPLETED
+    coarse_simulations_by_cadence: dict[str, int] | None = None
+    coarse_simulations_by_horizon: dict[str, int] | None = None
+    local_refinement_simulations: int = 0
+    local_refinement_families: int = 0
+    cadence_coverage: tuple[str, ...] = ()
+    horizon_coverage: tuple[str, ...] = ()
+    depth_quota_reached: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +282,13 @@ class CompositeSearchResult:
     normalizations_computed: int = 0
     normalizations_reused: int = 0
     simulations_avoided: int = 0
+    row_slices_computed: int = 0
+    row_slices_reused: int = 0
+    threshold_fits_computed: int = 0
+    threshold_fits_reused: int = 0
+    persistence_truncated: bool = False
+    depth_quota_reached: bool = False
+    global_compute_budget_exhausted: bool = False
 
 
 def _empty_metrics() -> CompositeMetrics:
@@ -411,10 +435,17 @@ def build_candidate(
     threshold_policy: CompositeThresholdPolicy = CompositeThresholdPolicy.ABSOLUTE,
     entry_quantile: Decimal | None = None,
     exit_quantile: Decimal | None = None,
+    operational_search_stage: CompositeOperationalSearchStage = (
+        CompositeOperationalSearchStage.COARSE
+    ),
+    parent_operational_configuration_fingerprint: str | None = None,
+    operational_refinement_reason: str | None = None,
+    _normalization: tuple[NormalizationParameter, ...] | None = None,
+    _frozen_thresholds: tuple[Decimal, Decimal] | None = None,
 ) -> CompositeCandidate:
     normalized_weights = normalize_weights(weights)
     features = tuple(item.feature_name for item in normalized_weights)
-    normalization = fit_normalization(training_rows, features)
+    normalization = _normalization or fit_normalization(training_rows, features)
     if threshold_policy is CompositeThresholdPolicy.TRAINING_QUANTILE:
         if entry_quantile is None or exit_quantile is None:
             raise CompositeSearchError(
@@ -424,12 +455,15 @@ def build_candidate(
             raise CompositeSearchError(
                 "threshold quantiles must satisfy 0 <= exit < entry <= 1"
             )
-        training_scores = tuple(
-            _score_from_parameters(normalized_weights, normalization, row)
-            for row in training_rows
-        )
-        entry_threshold = _quantile(training_scores, entry_quantile)
-        exit_threshold = _quantile(training_scores, exit_quantile)
+        if _frozen_thresholds is None:
+            training_scores = tuple(
+                _score_from_parameters(normalized_weights, normalization, row)
+                for row in training_rows
+            )
+            entry_threshold = _quantile(training_scores, entry_quantile)
+            exit_threshold = _quantile(training_scores, exit_quantile)
+        else:
+            entry_threshold, exit_threshold = _frozen_thresholds
     payload = {
         "features": features,
         "weights": [
@@ -456,6 +490,11 @@ def build_candidate(
         "algorithm_version": COMPOSITE_SEARCH_ALGORITHM_VERSION,
         "feature_pool_version": COMPOSITE_FEATURE_POOL_VERSION,
         "normalization_version": COMPOSITE_NORMALIZATION_VERSION,
+        "operational_search_stage": operational_search_stage.value,
+        "parent_operational_configuration_fingerprint": (
+            parent_operational_configuration_fingerprint
+        ),
+        "operational_refinement_reason": operational_refinement_reason,
     }
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -481,6 +520,9 @@ def build_candidate(
         threshold_policy,
         entry_quantile,
         exit_quantile,
+        operational_search_stage,
+        parent_operational_configuration_fingerprint,
+        operational_refinement_reason,
     )
 
 
@@ -697,21 +739,25 @@ class _OperationalConfiguration:
     minimum_holding_period: timedelta
     maximum_holding_period: timedelta
     cooldown: timedelta
+    stage: CompositeOperationalSearchStage = CompositeOperationalSearchStage.COARSE
+    parent_fingerprint: str | None = None
+    refinement_reason: str | None = None
+
+    @property
+    def fingerprint(self) -> str:
+        return hashlib.sha256(
+            json.dumps(_jsonable(asdict(self)), sort_keys=True).encode()
+        ).hexdigest()
 
 
 def _operational_configurations() -> tuple[_OperationalConfiguration, ...]:
     """Return a bounded plan without a cadence-by-horizon Cartesian product."""
 
-    cadences = (
-        timedelta(minutes=30),
-        timedelta(hours=4),
-        timedelta(hours=8),
-        timedelta(hours=12),
+    cadences = tuple(
+        timedelta(minutes=value) for value in (30, 60, 120, 240, 360, 480, 720)
     )
-    horizons = (
-        timedelta(minutes=30),
-        timedelta(hours=4),
-        timedelta(hours=12),
+    horizons = tuple(
+        timedelta(minutes=value) for value in (30, 60, 120, 240, 480, 720, 1440)
     )
     values: list[_OperationalConfiguration] = []
     quantile_profiles = (
@@ -719,40 +765,82 @@ def _operational_configurations() -> tuple[_OperationalConfiguration, ...]:
         (Decimal("0.85"), Decimal("0.45")),
         (Decimal("0.93"), Decimal("0.55")),
     )
-    for index, cadence in enumerate(cadences):
+    for index, (cadence, horizon) in enumerate(zip(cadences, horizons, strict=True)):
         minimum = cadence
-        for variant, (entry_quantile, exit_quantile) in enumerate(quantile_profiles):
-            horizon = horizons[(index + variant) % len(horizons)]
-            values.append(
-                _OperationalConfiguration(
-                    cadence=cadence,
-                    horizon=horizon,
-                    threshold_policy=CompositeThresholdPolicy.TRAINING_QUANTILE,
-                    entry_threshold=Decimal(0),
-                    exit_threshold=Decimal(0),
-                    entry_quantile=entry_quantile,
-                    exit_quantile=exit_quantile,
-                    minimum_holding_period=minimum,
-                    maximum_holding_period=max(timedelta(hours=12), cadence * 4),
-                    cooldown=cadence,
-                )
-            )
-        # One absolute-threshold control per cadence keeps the comparison bounded.
+        entry_quantile, exit_quantile = quantile_profiles[index % 3]
         values.append(
             _OperationalConfiguration(
                 cadence=cadence,
-                horizon=horizons[index % len(horizons)],
-                threshold_policy=CompositeThresholdPolicy.ABSOLUTE,
-                entry_threshold=Decimal("0.50"),
-                exit_threshold=Decimal("-0.10"),
-                entry_quantile=None,
-                exit_quantile=None,
+                horizon=horizon,
+                threshold_policy=CompositeThresholdPolicy.TRAINING_QUANTILE,
+                entry_threshold=Decimal(0),
+                exit_threshold=Decimal(0),
+                entry_quantile=entry_quantile,
+                exit_quantile=exit_quantile,
                 minimum_holding_period=minimum,
                 maximum_holding_period=max(timedelta(hours=12), cadence * 4),
                 cooldown=cadence,
             )
         )
     return tuple(values)
+
+
+def _jsonable(value: object) -> object:
+    if isinstance(value, timedelta):
+        return int(value.total_seconds())
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, StrEnum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    return value
+
+
+def _local_operational_neighbors(
+    configuration: _OperationalConfiguration,
+) -> tuple[_OperationalConfiguration, ...]:
+    cadence_minutes = {
+        60: (30, 60, 90),
+        120: (60, 120, 180),
+        240: (180, 240, 300),
+        360: (240, 360, 480),
+        480: (360, 480, 600),
+        720: (600, 720),
+    }.get(int(configuration.cadence.total_seconds() // 60), ())
+    horizon_minutes = {
+        120: (60, 120, 240),
+        240: (120, 240, 360),
+        480: (360, 480, 720),
+        720: (480, 720, 1080),
+        1440: (1080, 1440, 2160),
+    }.get(int(configuration.horizon.total_seconds() // 60), ())
+    pairs = tuple(zip(cadence_minutes, horizon_minutes, strict=False))
+    return tuple(
+        _OperationalConfiguration(
+            cadence=timedelta(minutes=cadence),
+            horizon=timedelta(minutes=horizon),
+            threshold_policy=configuration.threshold_policy,
+            entry_threshold=configuration.entry_threshold,
+            exit_threshold=configuration.exit_threshold,
+            entry_quantile=configuration.entry_quantile,
+            exit_quantile=configuration.exit_quantile,
+            minimum_holding_period=timedelta(minutes=cadence),
+            maximum_holding_period=max(
+                timedelta(hours=12), timedelta(minutes=cadence * 4)
+            ),
+            cooldown=timedelta(minutes=cadence),
+            stage=CompositeOperationalSearchStage.LOCAL_REFINEMENT,
+            parent_fingerprint=configuration.fingerprint,
+            refinement_reason="top_training_operational_family",
+        )
+        for cadence, horizon in pairs
+        if (cadence, horizon)
+        != (
+            int(configuration.cadence.total_seconds() // 60),
+            int(configuration.horizon.total_seconds() // 60),
+        )
+    )
 
 
 def _candidate_with_window_normalization(
@@ -775,6 +863,11 @@ def _candidate_with_window_normalization(
         threshold_policy=candidate.threshold_policy,
         entry_quantile=candidate.entry_quantile,
         exit_quantile=candidate.exit_quantile,
+        operational_search_stage=candidate.operational_search_stage,
+        parent_operational_configuration_fingerprint=(
+            candidate.parent_operational_configuration_fingerprint
+        ),
+        operational_refinement_reason=candidate.operational_refinement_reason,
     )
 
 
@@ -846,6 +939,13 @@ class _EvaluationCache:
     candidate_metrics: dict[tuple[str, str], CompositeMetrics] = field(
         default_factory=dict
     )
+    normalizations: dict[
+        tuple[int, tuple[str, ...]], tuple[NormalizationParameter, ...]
+    ] = field(default_factory=dict)
+    threshold_fits: dict[
+        tuple[int, tuple[CompositeWeight, ...], Decimal, Decimal],
+        tuple[Decimal, Decimal],
+    ] = field(default_factory=dict)
     candidate_simulations_computed: int = 0
     candidate_simulations_reused: int = 0
     production_simulations_computed: int = 0
@@ -854,6 +954,100 @@ class _EvaluationCache:
     buy_and_hold_simulations_reused: int = 0
     normalizations_computed: int = 0
     normalizations_reused: int = 0
+    row_slices_computed: int = 0
+    row_slices_reused: int = 0
+    threshold_fits_computed: int = 0
+    threshold_fits_reused: int = 0
+
+
+def _unique_duration_seconds(ranges: tuple[tuple[datetime, datetime], ...]) -> Decimal:
+    merged: list[tuple[datetime, datetime]] = []
+    for start, end in sorted(ranges):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return sum(
+        (Decimal(str((end - start).total_seconds())) for start, end in merged),
+        Decimal(0),
+    )
+
+
+def _annualized_trades(
+    trade_count: int, ranges: tuple[tuple[datetime, datetime], ...]
+) -> Decimal:
+    years = _unique_duration_seconds(ranges) / Decimal("31536000")
+    return Decimal(trade_count) / years if years else Decimal(0)
+
+
+def _normalized_window_ratio(
+    accumulated: Decimal, initial_cash: Decimal, usable_window_count: int
+) -> Decimal:
+    capital = initial_cash * Decimal(usable_window_count)
+    return accumulated / max(capital, Decimal(1))
+
+
+def _freeze_candidate_for_window(
+    candidate: CompositeCandidate,
+    rows: tuple[HistoricalFeatureRow, ...],
+    ordinal: int,
+    cache: _EvaluationCache,
+) -> CompositeCandidate:
+    normalization_key = (ordinal, candidate.features)
+    normalization = cache.normalizations.get(normalization_key)
+    if normalization is None:
+        normalization = fit_normalization(rows, candidate.features)
+        cache.normalizations[normalization_key] = normalization
+        cache.normalizations_computed += 1
+    else:
+        cache.normalizations_reused += 1
+    frozen_thresholds = None
+    if candidate.threshold_policy is CompositeThresholdPolicy.TRAINING_QUANTILE:
+        assert candidate.entry_quantile is not None
+        assert candidate.exit_quantile is not None
+        threshold_key = (
+            ordinal,
+            candidate.weights,
+            candidate.entry_quantile,
+            candidate.exit_quantile,
+        )
+        frozen_thresholds = cache.threshold_fits.get(threshold_key)
+        if frozen_thresholds is None:
+            scores = tuple(
+                _score_from_parameters(candidate.weights, normalization, row)
+                for row in rows
+            )
+            frozen_thresholds = (
+                _quantile(scores, candidate.entry_quantile),
+                _quantile(scores, candidate.exit_quantile),
+            )
+            cache.threshold_fits[threshold_key] = frozen_thresholds
+            cache.threshold_fits_computed += 1
+        else:
+            cache.threshold_fits_reused += 1
+    return build_candidate(
+        weights=tuple((item.feature_name, item.weight) for item in candidate.weights),
+        training_rows=rows,
+        simulation=SimulationConfiguration(
+            1, "USDT", candidate.fee_rate, candidate.slippage_rate
+        ),
+        cadence=candidate.cadence,
+        horizon=candidate.prediction_horizon,
+        entry_threshold=candidate.entry_threshold,
+        exit_threshold=candidate.exit_threshold,
+        minimum_holding_period=candidate.minimum_holding_period,
+        maximum_holding_period=candidate.maximum_holding_period,
+        cooldown=candidate.cooldown,
+        initial_cash=candidate.initial_cash,
+        threshold_policy=candidate.threshold_policy,
+        entry_quantile=candidate.entry_quantile,
+        exit_quantile=candidate.exit_quantile,
+        operational_search_stage=candidate.operational_search_stage,
+        parent_operational_configuration_fingerprint=candidate.parent_operational_configuration_fingerprint,
+        operational_refinement_reason=candidate.operational_refinement_reason,
+        _normalization=normalization,
+        _frozen_thresholds=frozen_thresholds,
+    )
 
 
 def _economic_metrics(
@@ -875,16 +1069,17 @@ def _economic_metrics(
     results: list[HistoricalSimulationResult] = []
     baseline_returns: list[Decimal] = []
     buy_hold_returns: list[Decimal] = []
+    evaluated_ranges: list[tuple[datetime, datetime]] = []
     for ordinal, window in enumerate(windows):
         if ordinal in evaluation_cache.training_rows:
             training_rows = evaluation_cache.training_rows[ordinal]
-            evaluation_cache.normalizations_reused += 1
+            evaluation_cache.row_slices_reused += 1
         else:
             training_rows = _rows_between(
                 matrix, window.training_from, window.training_to
             )
             evaluation_cache.training_rows[ordinal] = training_rows
-            evaluation_cache.normalizations_computed += 1
+            evaluation_cache.row_slices_computed += 1
         rows_key = (ordinal, phase)
         phase_rows = evaluation_cache.phase_rows.get(rows_key)
         if phase_rows is None:
@@ -892,9 +1087,14 @@ def _economic_metrics(
                 matrix, getattr(window, f"{phase}_from"), getattr(window, f"{phase}_to")
             )
             evaluation_cache.phase_rows[rows_key] = phase_rows
+            evaluation_cache.row_slices_computed += 1
+        else:
+            evaluation_cache.row_slices_reused += 1
         if len(training_rows) < 4 or not phase_rows:
             continue
-        frozen = _candidate_with_window_normalization(candidate, training_rows)
+        frozen = _freeze_candidate_for_window(
+            candidate, training_rows, ordinal, evaluation_cache
+        )
         try:
             result = simulate_historical_feature_matrix(
                 dataset=dataset,
@@ -942,6 +1142,9 @@ def _economic_metrics(
         except (ValueError, IndexError):
             continue
         results.append(result)
+        evaluated_ranges.append(
+            (getattr(window, f"{phase}_from"), getattr(window, f"{phase}_to"))
+        )
         baseline_returns.append(baseline.total_return)
         buy_hold_returns.append(buy_hold_return)
     if not results:
@@ -956,9 +1159,10 @@ def _economic_metrics(
     stability = sum((Decimal(1) for value in returns if value > 0), Decimal(0)) / count
     trade_count = sum(item.trade_count for item in results)
     fees_paid = sum((item.fees_paid for item in results), Decimal(0))
+    capital_across_windows = initial_cash * count
     turnover = sum(
         (trade.notional for item in results for trade in item.trades), Decimal(0)
-    ) / max(initial_cash, Decimal(1))
+    ) / max(capital_across_windows, Decimal(1))
     holding_periods: list[Decimal] = []
     for result in results:
         entry: datetime | None = None
@@ -996,8 +1200,10 @@ def _economic_metrics(
         excess_return_over_buy_and_hold=mean_return - mean_buy_hold,
         return_stability=stability,
         trades_per_window=Decimal(trade_count) / count,
-        trades_per_year=Decimal(trade_count) / count * Decimal(365),
-        fee_to_initial_cash_ratio=fees_paid / max(initial_cash, Decimal(1)),
+        trades_per_year=_annualized_trades(trade_count, tuple(evaluated_ranges)),
+        fee_to_initial_cash_ratio=_normalized_window_ratio(
+            fees_paid, initial_cash, len(results)
+        ),
         fee_to_gross_profit_ratio=(fees_paid / gross_profit if gross_profit else None),
         average_holding_period_seconds=(
             sum(holding_periods, Decimal(0)) / len(holding_periods)
@@ -1302,6 +1508,9 @@ def search_composite_features(
     simulations_avoided = 0
     parents: tuple[CompositeCandidateResult, ...] = ()
     budget_exhausted = False
+    global_compute_budget_exhausted = False
+    persistence_truncated = False
+    depth_quota_reached = False
     maximum_depth = min(7, len(pool))
     for depth in range(2, maximum_depth + 1):
         proposals: list[tuple[tuple[str, ...], CompositeCandidateResult | None]] = []
@@ -1389,9 +1598,15 @@ def search_composite_features(
         remaining_cheap = budget.maximum_cheap_evaluations - cheap_computed
         if remaining_cheap <= 0:
             budget_exhausted = True
+            global_compute_budget_exhausted = True
             break
         depth_cheap_limit = max(1, remaining_cheap // remaining_depths)
         depth_cheap_stop = cheap_computed + depth_cheap_limit
+        local_cheap_reserve = max(1, depth_cheap_limit // 5)
+        coarse_cheap_stop = max(
+            cheap_computed + 1, depth_cheap_stop - local_cheap_reserve
+        )
+        depth_cheap_started = cheap_computed
         cheap_ranked: list[tuple[CompositeCandidate, str | None, CompositeMetrics]] = []
         configurations = 0
         duplicates = 0
@@ -1417,7 +1632,7 @@ def search_composite_features(
             for proposal_index, (_subset, proposal_parent, variants) in enumerate(
                 proposal_variants
             ):
-                if cheap_computed >= depth_cheap_stop:
+                if cheap_computed >= coarse_cheap_stop:
                     break
                 variant_index = round_index // len(operational)
                 if variant_index >= len(variants):
@@ -1439,6 +1654,11 @@ def search_composite_features(
                             parent_candidate.maximum_holding_period
                         ),
                         cooldown=parent_candidate.cooldown,
+                        stage=parent_candidate.operational_search_stage,
+                        parent_fingerprint=(
+                            parent_candidate.parent_operational_configuration_fingerprint
+                        ),
+                        refinement_reason=parent_candidate.operational_refinement_reason,
                     )
                 else:
                     configuration = operational[
@@ -1465,6 +1685,11 @@ def search_composite_features(
                     threshold_policy=configuration.threshold_policy,
                     entry_quantile=configuration.entry_quantile,
                     exit_quantile=configuration.exit_quantile,
+                    operational_search_stage=configuration.stage,
+                    parent_operational_configuration_fingerprint=(
+                        configuration.parent_fingerprint
+                    ),
+                    operational_refinement_reason=configuration.refinement_reason,
                 )
                 if candidate.fingerprint in seen:
                     duplicates += 1
@@ -1485,7 +1710,7 @@ def search_composite_features(
                         cheap,
                     )
                 )
-            if cheap_computed >= depth_cheap_stop:
+            if cheap_computed >= coarse_cheap_stop:
                 break
         cheap_ranked.sort(
             key=lambda value: (
@@ -1498,17 +1723,32 @@ def search_composite_features(
         remaining_training = budget.maximum_training_simulations - training_computed
         if remaining_training <= 0:
             budget_exhausted = True
+            global_compute_budget_exhausted = True
             break
         depth_training_limit = max(1, remaining_training // remaining_depths)
         simulation_slots = min(
-            len(cheap_ranked),
             budget.beam_width_per_depth * 2,
             depth_training_limit,
         )
+        coarse_ranked = [
+            item
+            for item in cheap_ranked
+            if item[0].operational_search_stage
+            is CompositeOperationalSearchStage.COARSE
+        ]
+        coarse_slots = min(
+            simulation_slots,
+            len(coarse_ranked),
+            max(7, (simulation_slots * 2) // 3),
+        )
         selected_for_training = _stratified_training_candidates(
-            cheap_ranked, simulation_slots
+            coarse_ranked, coarse_slots
         )
         simulations_by_cadence: dict[str, int] = {}
+        coarse_by_cadence: dict[str, int] = {}
+        coarse_by_horizon: dict[str, int] = {}
+        local_refinement_simulations = 0
+        local_refinement_families: set[str] = set()
         depth_results: list[CompositeCandidateResult] = []
         cheap_by_fingerprint = {
             candidate.fingerprint: cheap for candidate, _, cheap in cheap_ranked
@@ -1518,6 +1758,9 @@ def search_composite_features(
             simulations_by_cadence[cadence_key] = (
                 simulations_by_cadence.get(cadence_key, 0) + 1
             )
+            horizon_key = str(int(candidate.prediction_horizon.total_seconds()))
+            coarse_by_cadence[cadence_key] = coarse_by_cadence.get(cadence_key, 0) + 1
+            coarse_by_horizon[horizon_key] = coarse_by_horizon.get(horizon_key, 0) + 1
             training = _economic_metrics(
                 candidate=candidate,
                 dataset=dataset,
@@ -1566,6 +1809,121 @@ def search_composite_features(
                     distance,
                 )
             )
+        remaining_local_slots = max(0, simulation_slots - len(selected_for_training))
+        refinement_sources = sorted(
+            depth_results,
+            key=lambda item: (-item.ranking.total, item.candidate.fingerprint),
+        )
+        local_candidates: list[
+            tuple[CompositeCandidate, str | None, CompositeMetrics]
+        ] = []
+        for source in refinement_sources:
+            source_configuration = _OperationalConfiguration(
+                cadence=source.candidate.cadence,
+                horizon=source.candidate.prediction_horizon,
+                threshold_policy=source.candidate.threshold_policy,
+                entry_threshold=source.candidate.entry_threshold,
+                exit_threshold=source.candidate.exit_threshold,
+                entry_quantile=source.candidate.entry_quantile,
+                exit_quantile=source.candidate.exit_quantile,
+                minimum_holding_period=source.candidate.minimum_holding_period,
+                maximum_holding_period=source.candidate.maximum_holding_period,
+                cooldown=source.candidate.cooldown,
+            )
+            for neighbor in _local_operational_neighbors(source_configuration):
+                if cheap_computed >= depth_cheap_stop:
+                    break
+                local = build_candidate(
+                    weights=tuple(
+                        (item.feature_name, item.weight)
+                        for item in source.candidate.weights
+                    ),
+                    training_rows=training_rows,
+                    simulation=simulation,
+                    cadence=neighbor.cadence,
+                    horizon=neighbor.horizon,
+                    entry_threshold=neighbor.entry_threshold,
+                    exit_threshold=neighbor.exit_threshold,
+                    minimum_holding_period=neighbor.minimum_holding_period,
+                    maximum_holding_period=neighbor.maximum_holding_period,
+                    cooldown=neighbor.cooldown,
+                    initial_cash=initial_cash,
+                    threshold_policy=neighbor.threshold_policy,
+                    entry_quantile=neighbor.entry_quantile,
+                    exit_quantile=neighbor.exit_quantile,
+                    operational_search_stage=neighbor.stage,
+                    parent_operational_configuration_fingerprint=neighbor.parent_fingerprint,
+                    operational_refinement_reason=neighbor.refinement_reason,
+                )
+                if local.fingerprint in seen:
+                    continue
+                seen.add(local.fingerprint)
+                configurations += 1
+                cheap_computed += 1
+                local_cheap = _cheap_window_metrics(local, matrix, windows, "training")
+                if _excessive_churn(local, local_cheap):
+                    rejected_for_churn += 1
+                    simulations_avoided += 1
+                    continue
+                local_candidates.append((local, source.parent_fingerprint, local_cheap))
+        local_candidates.sort(
+            key=lambda value: (
+                -_ranking(value[0], value[2]).total,
+                value[0].fingerprint,
+            )
+        )
+        for candidate, parent_fingerprint, cheap in local_candidates[
+            :remaining_local_slots
+        ]:
+            training = _economic_metrics(
+                candidate=candidate,
+                dataset=dataset,
+                matrix=matrix,
+                windows=windows,
+                phase="training",
+                simulation=simulation,
+                initial_cash=initial_cash,
+                cache=cache,
+            )
+            training_computed += 1
+            local_refinement_simulations += 1
+            assert candidate.parent_operational_configuration_fingerprint is not None
+            local_refinement_families.add(
+                candidate.parent_operational_configuration_fingerprint
+            )
+            cadence_key = str(int(candidate.cadence.total_seconds()))
+            simulations_by_cadence[cadence_key] = (
+                simulations_by_cadence.get(cadence_key, 0) + 1
+            )
+            training_passes = _training_qualifies(training, thresholds)
+            safety_reason = _exploration_safety_reason(training, initial_cash)
+            distance = _training_distance(training, thresholds)
+            depth_results.append(
+                CompositeCandidateResult(
+                    candidate,
+                    parent_fingerprint,
+                    depth,
+                    CompositeCandidateStatus.RETAINED_TRAINING,
+                    _ranking(candidate, training),
+                    training,
+                    None,
+                    None,
+                    ("training_economic_qualification",) if training_passes else (),
+                    () if training_passes else ("training_economic_qualification",),
+                    None if training_passes else "training_economic_qualification",
+                    distance,
+                    CompositeSelectionTrack.ECONOMIC
+                    if training_passes
+                    else CompositeSelectionTrack.EXPLORATORY,
+                    None
+                    if training_passes
+                    else "safe_training_near_miss"
+                    if safety_reason is None
+                    else safety_reason,
+                    distance,
+                )
+            )
+            cheap_by_fingerprint[candidate.fingerprint] = cheap
         depth_results.sort(
             key=lambda item: (-item.ranking.total, item.candidate.fingerprint)
         )
@@ -1620,6 +1978,7 @@ def search_composite_features(
                 test_computed += 1
             elif validation_passes:
                 budget_exhausted = True
+                global_compute_budget_exhausted = True
             test_confirmed = bool(
                 test
                 and test.usable_window_count >= thresholds.minimum_windows
@@ -1685,16 +2044,18 @@ def search_composite_features(
         if remaining_persistence > 0:
             results.extend(persisted[:remaining_persistence])
         if len(persisted) > max(0, remaining_persistence):
-            budget_exhausted = True
+            persistence_truncated = True
+        depth_quota_for_depth = len(selected_for_training) < len(cheap_ranked)
+        depth_quota_reached = depth_quota_reached or depth_quota_for_depth
         funnels.append(
             CompositeDepthFunnel(
                 depth,
                 len(unique_proposals),
                 configurations,
                 duplicates,
-                len(cheap_ranked),
+                cheap_computed - depth_cheap_started,
                 0,
-                len(selected_for_training),
+                len(selected_for_training) + local_refinement_simulations,
                 0,
                 len(parents),
                 validation_limit,
@@ -1722,8 +2083,15 @@ def search_composite_features(
                 else CompositeDepthStoppedReason.GLOBAL_BUDGET_EXHAUSTED
                 if training_computed >= budget.maximum_training_simulations
                 else CompositeDepthStoppedReason.DEPTH_QUOTA_REACHED
-                if len(selected_for_training) < len(cheap_ranked)
+                if depth_quota_for_depth
                 else CompositeDepthStoppedReason.COMPLETED,
+                coarse_by_cadence,
+                coarse_by_horizon,
+                local_refinement_simulations,
+                len(local_refinement_families),
+                tuple(sorted(coarse_by_cadence)),
+                tuple(sorted(coarse_by_horizon)),
+                depth_quota_for_depth,
             )
         )
         if not parents or (
@@ -1735,6 +2103,7 @@ def search_composite_features(
                 and depth < maximum_depth
             ):
                 budget_exhausted = True
+                global_compute_budget_exhausted = True
             break
     confirmed_candidates = [
         item
@@ -1852,4 +2221,11 @@ def search_composite_features(
         normalizations_computed=cache.normalizations_computed,
         normalizations_reused=cache.normalizations_reused,
         simulations_avoided=simulations_avoided,
+        row_slices_computed=cache.row_slices_computed,
+        row_slices_reused=cache.row_slices_reused,
+        threshold_fits_computed=cache.threshold_fits_computed,
+        threshold_fits_reused=cache.threshold_fits_reused,
+        persistence_truncated=persistence_truncated,
+        depth_quota_reached=depth_quota_reached,
+        global_compute_budget_exhausted=global_compute_budget_exhausted,
     )

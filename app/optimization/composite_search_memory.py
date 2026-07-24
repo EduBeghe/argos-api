@@ -107,6 +107,15 @@ class CompositeSearchRunRecord(Base):
     normalizations_computed: Mapped[int] = mapped_column(Integer, nullable=False)
     normalizations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
     simulations_avoided: Mapped[int] = mapped_column(Integer, nullable=False)
+    row_slices_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    row_slices_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    threshold_fits_computed: Mapped[int] = mapped_column(Integer, nullable=False)
+    threshold_fits_reused: Mapped[int] = mapped_column(Integer, nullable=False)
+    persistence_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    depth_quota_reached: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    global_compute_budget_exhausted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False
+    )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -135,6 +144,11 @@ class CompositeSearchCandidateRecord(Base):
             "selection_track IS NULL OR selection_track = 'economic' "
             "OR status = 'retained_training'",
             name="ck_composite_search_exploratory_not_promoted",
+        ),
+        CheckConstraint(
+            "operational_search_stage IS NULL OR operational_search_stage IN "
+            "('coarse', 'local_refinement')",
+            name="ck_composite_search_operational_stage",
         ),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
@@ -166,6 +180,11 @@ class CompositeSearchCandidateRecord(Base):
     selection_track: Mapped[str | None] = mapped_column(String(16))
     exploration_reason: Mapped[str | None] = mapped_column(String(128))
     distance_to_training_qualification: Mapped[str | None] = mapped_column(String(64))
+    operational_search_stage: Mapped[str | None] = mapped_column(String(32))
+    parent_operational_configuration_fingerprint: Mapped[str | None] = mapped_column(
+        String(64)
+    )
+    operational_refinement_reason: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -285,6 +304,13 @@ async def persist_composite_search_result(
             normalizations_computed=result.normalizations_computed,
             normalizations_reused=result.normalizations_reused,
             simulations_avoided=result.simulations_avoided,
+            row_slices_computed=result.row_slices_computed,
+            row_slices_reused=result.row_slices_reused,
+            threshold_fits_computed=result.threshold_fits_computed,
+            threshold_fits_reused=result.threshold_fits_reused,
+            persistence_truncated=result.persistence_truncated,
+            depth_quota_reached=result.depth_quota_reached,
+            global_compute_budget_exhausted=(result.global_compute_budget_exhausted),
             started_at=started_at,
             completed_at=now,
         )
@@ -322,6 +348,13 @@ async def persist_composite_search_result(
                 exploration_reason=item.exploration_reason,
                 distance_to_training_qualification=str(
                     item.distance_to_training_qualification
+                ),
+                operational_search_stage=item.candidate.operational_search_stage.value,
+                parent_operational_configuration_fingerprint=(
+                    item.candidate.parent_operational_configuration_fingerprint
+                ),
+                operational_refinement_reason=(
+                    item.candidate.operational_refinement_reason
                 ),
                 created_at=now,
             )

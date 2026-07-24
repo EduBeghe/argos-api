@@ -80,6 +80,13 @@ async def get_composite_search(
         normalizations_computed=run.normalizations_computed,
         normalizations_reused=run.normalizations_reused,
         simulations_avoided=run.simulations_avoided,
+        row_slices_computed=run.row_slices_computed,
+        row_slices_reused=run.row_slices_reused,
+        threshold_fits_computed=run.threshold_fits_computed,
+        threshold_fits_reused=run.threshold_fits_reused,
+        persistence_truncated=run.persistence_truncated,
+        depth_quota_reached=run.depth_quota_reached,
+        global_compute_budget_exhausted=run.global_compute_budget_exhausted,
         started_at=run.started_at,
         completed_at=run.completed_at,
     )

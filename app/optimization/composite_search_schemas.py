@@ -44,6 +44,13 @@ class CompositeSearchSummaryResponse(BaseModel):
     normalizations_computed: int
     normalizations_reused: int
     simulations_avoided: int
+    row_slices_computed: int
+    row_slices_reused: int
+    threshold_fits_computed: int
+    threshold_fits_reused: int
+    persistence_truncated: bool
+    depth_quota_reached: bool
+    global_compute_budget_exhausted: bool
     started_at: datetime
     completed_at: datetime
 
@@ -69,6 +76,9 @@ class CompositeCandidateResponse(BaseModel):
     selection_track: CompositeSelectionTrack | None
     exploration_reason: str | None
     distance_to_training_qualification: str | None
+    operational_search_stage: str | None
+    parent_operational_configuration_fingerprint: str | None
+    operational_refinement_reason: str | None
 
 
 class CompositeCandidatePageResponse(BaseModel):
