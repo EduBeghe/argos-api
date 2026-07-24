@@ -3,7 +3,10 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.optimization.composite_search import CompositeCandidateStatus
+from app.optimization.composite_search import (
+    CompositeCandidateStatus,
+    CompositeSelectionTrack,
+)
 
 
 class CompositeSearchSummaryResponse(BaseModel):
@@ -30,6 +33,17 @@ class CompositeSearchSummaryResponse(BaseModel):
     best_candidate_fingerprint: str | None
     confirmed_candidate_count: int
     dominant_rejection_reason: str | None
+    best_economic_candidate_fingerprint: str | None
+    best_exploratory_candidate_fingerprint: str | None
+    candidate_simulations_computed: int
+    candidate_simulations_reused: int
+    production_simulations_computed: int
+    production_simulations_reused: int
+    buy_and_hold_simulations_computed: int
+    buy_and_hold_simulations_reused: int
+    normalizations_computed: int
+    normalizations_reused: int
+    simulations_avoided: int
     started_at: datetime
     completed_at: datetime
 
@@ -52,6 +66,9 @@ class CompositeCandidateResponse(BaseModel):
     failed_requirements: tuple[str, ...]
     rejection_reason: str | None
     normalized_distance: str
+    selection_track: CompositeSelectionTrack | None
+    exploration_reason: str | None
+    distance_to_training_qualification: str | None
 
 
 class CompositeCandidatePageResponse(BaseModel):

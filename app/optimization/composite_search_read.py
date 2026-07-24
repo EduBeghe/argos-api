@@ -3,7 +3,10 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.optimization.composite_search import CompositeCandidateStatus
+from app.optimization.composite_search import (
+    CompositeCandidateStatus,
+    CompositeSelectionTrack,
+)
 from app.optimization.composite_search_memory import (
     CompositeSearchCandidateRecord,
     CompositeSearchRunRecord,
@@ -64,6 +67,19 @@ async def get_composite_search(
         best_candidate_fingerprint=run.best_candidate_fingerprint,
         confirmed_candidate_count=int(confirmed or 0),
         dominant_rejection_reason=run.dominant_rejection_reason,
+        best_economic_candidate_fingerprint=run.best_economic_candidate_fingerprint,
+        best_exploratory_candidate_fingerprint=(
+            run.best_exploratory_candidate_fingerprint
+        ),
+        candidate_simulations_computed=run.candidate_simulations_computed,
+        candidate_simulations_reused=run.candidate_simulations_reused,
+        production_simulations_computed=run.production_simulations_computed,
+        production_simulations_reused=run.production_simulations_reused,
+        buy_and_hold_simulations_computed=run.buy_and_hold_simulations_computed,
+        buy_and_hold_simulations_reused=run.buy_and_hold_simulations_reused,
+        normalizations_computed=run.normalizations_computed,
+        normalizations_reused=run.normalizations_reused,
+        simulations_avoided=run.simulations_avoided,
         started_at=run.started_at,
         completed_at=run.completed_at,
     )
@@ -79,6 +95,7 @@ async def list_composite_candidates(
     *,
     depth: int | None,
     status: CompositeCandidateStatus | None,
+    selection_track: CompositeSelectionTrack | None,
     feature_name: str | None,
     limit: int,
     offset: int,
@@ -95,6 +112,10 @@ async def list_composite_candidates(
         filters.append(CompositeSearchCandidateRecord.depth == depth)
     if status is not None:
         filters.append(CompositeSearchCandidateRecord.status == status)
+    if selection_track is not None:
+        filters.append(
+            CompositeSearchCandidateRecord.selection_track == selection_track
+        )
     if feature_name is not None:
         filters.append(CompositeSearchCandidateRecord.features.contains([feature_name]))
     total = int(

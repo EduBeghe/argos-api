@@ -69,14 +69,21 @@ before validation and isolated test. Validation and test cannot recalibrate the 
 
 Depth 2 starts from pairs in the complete pool. Every candidate at depth N+1 descends from
 a retained depth-N parent and adds exactly one unused Feature. Training-only directional
-association determines signs and evidence-proportional magnitudes; equal-signed and small
-deterministic parent perturbations preserve diversity. A branch stops when it has no
-eligible parent, no remaining Feature, or no budget.
+association determines signs and evidence-proportional magnitudes; inherited weights and
+small deterministic perturbations preserve diversity and complete lineage through depth 7.
+The beam retains up to four economically qualified parents and eight explicitly exploratory
+near misses per depth. Exploratory parents may generate descendants but never enter
+validation or isolated test until a descendant independently qualifies on training. Wide
+safety limits stop non-finite results, no-trade branches, catastrophic drawdown, destructive
+capital loss, and absurd fee burden without requiring exploratory parents to be profitable.
 
 Each walk-forward window fits its own median/IQR normalization from that window's training
 slice and freezes it for the matching validation and isolated-test slices. The bounded
 operational search covers 30-minute, 4-hour, 8-hour and 12-hour cadences; 30-minute,
-4-hour and 12-hour horizons; and explicit entry, exit, holding and cooldown rules. Cheap
+4-hour and 12-hour horizons; and explicit entry, exit, holding and cooldown rules. It
+compares conservative, medium, and demanding training-quantile thresholds with a bounded
+absolute-threshold control. Frozen entry and exit values provide hysteresis and cannot be
+recalibrated from validation or test. Cheap
 association ranking never counts as a simulation. Retained candidates run through the
 existing historical Paper Trading mathematics, including cash, positions, fees and
 slippage. Validation must qualify before test is read.
@@ -95,14 +102,22 @@ breakdown, nullable validation/test economic metrics, requirements, rejection re
 a depth 2–7 funnel. Metrics include net return, P&L, drawdown, trades, fees, final equity,
 profitable-window ratio, production-baseline comparison and a separate buy-and-hold
 comparison. Conclusions describe only the evaluated dataset, Feature pool and bounded
-search space; they do not claim that no market pattern exists.
+search space; they do not claim that no market pattern exists. Candidate evidence records
+the `economic` or `exploratory` selection track, qualification distance, exploration reason,
+parent fingerprint, turnover, holding duration, and fee-burden metrics. The run summary
+identifies the best economic and exploratory candidates, cadence coverage, stop reasons,
+and computed/reused work.
 
 Candidate status distinguishes `passed_validation` from rejection when validation passed
 but the bounded isolated-test allowance was already consumed. Run counters separately
 report cheap evaluations and training, validation and test simulations; `total_evaluations`
-is their exact sum. The current reuse boundary is the complete versioned weekly experiment:
+is their exact sum. Normal depth quotas do not mean global budget exhaustion; each depth
+records whether it stopped for evidence, safety, remaining Features, or global budget.
+Within one search, cached window slices, normalization inputs, candidate results, production
+baselines, and buy-and-hold baselines avoid repeated simulations. The outer reuse boundary
+remains the complete versioned weekly experiment:
 an identical second execution reads the persisted graph before dataset loading and does not
-invoke composite search. Per-candidate evaluation reuse is not claimed by this version.
+invoke composite search.
 
 Read-only inspection endpoints are:
 
@@ -110,7 +125,8 @@ Read-only inspection endpoints are:
 - `GET /optimization/predictive-edge-runs/{run_id}/composite-search/candidates`
 - `GET /optimization/predictive-edge-runs/{run_id}/composite-search/candidates/{candidate_id}`
 
-Candidate lists accept `depth`, `status`, `feature_name`, `limit` and `offset`. No endpoint
+Candidate lists accept `depth`, `status`, `selection_track`, `feature_name`, `limit` and
+`offset`. No endpoint
 activates a candidate or changes Paper Trading. Run the existing weekly command once to
 persist evidence and repeat the identical command to verify exact reuse in the structured
 log (`computed=0`, prior evaluations reported as reused).

@@ -20,6 +20,7 @@ from app.optimization.composite_search import (
     CompositeSearchBudget,
     CompositeSearchConclusion,
     CompositeSearchResult,
+    CompositeSelectionTrack,
     build_candidate,
 )
 from app.optimization.composite_search_memory import (
@@ -225,6 +226,7 @@ async def test_passed_validation_and_exact_counters_round_trip(
             parent_id,
             depth=2,
             status=CompositeCandidateStatus.PASSED_VALIDATION,
+            selection_track=None,
             feature_name="return_1",
             limit=10,
             offset=0,
@@ -239,6 +241,30 @@ async def test_passed_validation_and_exact_counters_round_trip(
         assert page.items[0].status is CompositeCandidateStatus.PASSED_VALIDATION
         assert page.items[0].validation_metrics is not None
         assert page.items[0].test_metrics is None
+        assert page.items[0].selection_track is CompositeSelectionTrack.ECONOMIC
+
+        economic_page = await list_composite_candidates(
+            session,
+            parent_id,
+            depth=None,
+            status=None,
+            selection_track=CompositeSelectionTrack.ECONOMIC,
+            feature_name=None,
+            limit=10,
+            offset=0,
+        )
+        exploratory_page = await list_composite_candidates(
+            session,
+            parent_id,
+            depth=None,
+            status=None,
+            selection_track=CompositeSelectionTrack.EXPLORATORY,
+            feature_name=None,
+            limit=10,
+            offset=0,
+        )
+        assert economic_page.total == 1
+        assert exploratory_page.total == 0
 
         record_id = page.items[0].id
         with pytest.raises(IntegrityError):
@@ -246,6 +272,15 @@ async def test_passed_validation_and_exact_counters_round_trip(
                 update(CompositeSearchCandidateRecord)
                 .where(CompositeSearchCandidateRecord.id == record_id)
                 .values(status="invalid")
+            )
+            await session.commit()
+        await session.rollback()
+
+        with pytest.raises(IntegrityError):
+            await session.execute(
+                update(CompositeSearchCandidateRecord)
+                .where(CompositeSearchCandidateRecord.id == record_id)
+                .values(selection_track="exploratory")
             )
             await session.commit()
         await session.rollback()

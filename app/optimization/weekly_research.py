@@ -77,7 +77,7 @@ from app.optimization.targeted_refinement_memory import (
 from app.optimization.targeted_refinement_read import get_targeted_refinement
 from app.paper.config import SimulationConfiguration
 
-WEEKLY_RESEARCH_CONTRACT_VERSION = 3
+WEEKLY_RESEARCH_CONTRACT_VERSION = 4
 WEEKLY_RESEARCH_ADVISORY_LOCK = 0x4152474F53524553
 
 
