@@ -19,6 +19,7 @@ This index separates current system truth from historical decisions and future w
 | [Paper Strategy evaluation](007-paper-strategy-evaluation.md) | Read-only run evaluation and benchmark evidence | current |
 | [Experiment memory](008-experiment-memory.md) | Refinement persistence, reuse, and experience-guided planning | current |
 | [Predictive Edge Map](009-predictive-edge-map.md) | Walk-forward predictive evidence and hypotheses | current |
+| [ML experiment dataset contract](ml-experiment-contract.md) | Leak-free variables, targets, temporal folds, and read-only validation | current |
 
 ## Architecture decisions
 

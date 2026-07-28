@@ -24,6 +24,7 @@ Every generated signal must retain its component scores, supporting metrics, and
 - [Domain model](docs/003-domain-model.md)
 - [Binance market-data contract](docs/004-binance-market-data-contract.md)
 - [Experiment memory and experience-guided search](docs/008-experiment-memory.md)
+- [ML experiment dataset contract](docs/ml-experiment-contract.md)
 - [Architecture decisions](docs/decisions/)
 
 ## Current phase
