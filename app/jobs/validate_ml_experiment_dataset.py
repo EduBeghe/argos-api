@@ -122,7 +122,7 @@ async def run(args: argparse.Namespace) -> MLValidationSummary:
                 end=FINAL_TEST_END,
             )
             dataset = build_ml_experiment_dataset(
-                instrument=definition.instrument, candles=read_result.candles
+                instrument=definition.instrument, columns=read_result.columns
             )
             target_summary: dict[str, object] = {}
             for duration in FUTURE_DURATIONS:
@@ -159,9 +159,46 @@ async def run(args: argparse.Namespace) -> MLValidationSummary:
                     else None,
                 ],
                 "candle_count": dataset.metadata.candle_count,
-                "detected_gap_count": dataset.metadata.detected_gap_count,
-                "decision_boundary_count": len(dataset.boundaries),
+                "gap_event_count": dataset.metadata.gaps.gap_event_count,
+                "missing_candle_slot_count": (
+                    dataset.metadata.gaps.missing_candle_slot_count
+                ),
+                "first_missing_open_time": (
+                    dataset.metadata.gaps.first_missing_open_time.isoformat()
+                    if dataset.metadata.gaps.first_missing_open_time
+                    else None
+                ),
+                "last_missing_open_time": (
+                    dataset.metadata.gaps.last_missing_open_time.isoformat()
+                    if dataset.metadata.gaps.last_missing_open_time
+                    else None
+                ),
+                "raw_boundary_count": len(dataset.boundary_time_ns),
+                "feature_eligible_boundary_count": int(dataset.feature_eligible.sum()),
                 "feature_exclusions": dataset.feature_exclusions.as_dict(),
+                "temporal_folds": [
+                    {
+                        "name": fold.definition.name,
+                        "history_mode": fold.definition.history_mode.value,
+                        "training_range": [
+                            fold.definition.training_start.isoformat(),
+                            fold.definition.training_end.isoformat(),
+                        ],
+                        "validation_range": [
+                            fold.definition.validation_start.isoformat(),
+                            fold.definition.validation_end.isoformat(),
+                        ],
+                        "raw_training_rows": len(fold.training_indices),
+                        "raw_validation_rows": len(fold.validation_indices),
+                        "feature_eligible_training_rows": int(
+                            dataset.feature_eligible[fold.training_indices].sum()
+                        ),
+                        "feature_eligible_validation_rows": int(
+                            dataset.feature_eligible[fold.validation_indices].sum()
+                        ),
+                    }
+                    for fold in dataset.folds
+                ],
                 "eligible_samples_by_duration": target_summary,
                 "final_test_row_count": len(dataset.final_test_indices),
                 "dataset_fingerprint": dataset.metadata.fingerprint,

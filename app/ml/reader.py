@@ -1,28 +1,74 @@
 from dataclasses import dataclass
-from datetime import datetime
-from itertools import pairwise
+from datetime import UTC, datetime
 
+import numpy as np
+from numpy.typing import NDArray
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.market.catalog import Instrument
 from app.market.persistence import MarketCandleRecord
-from app.optimization.historical_data import (
-    DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
-    HistoricalCandle,
-)
+from app.optimization.historical_data import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
-from .contract import CANDLE_INTERVAL
-from .dataset import MLDatasetError
+from .errors import MLDatasetError
+from .gaps import GapSummary, datetime_to_ns, summarize_gaps
+
+
+@dataclass(frozen=True, slots=True)
+class MLCandleColumns:
+    """Compact, ordered candle columns for exactly one instrument."""
+
+    open_time_ns: NDArray[np.int64]
+    close_time_ns: NDArray[np.int64]
+    open_price: NDArray[np.float64]
+    high_price: NDArray[np.float64]
+    low_price: NDArray[np.float64]
+    close_price: NDArray[np.float64]
+    base_asset_volume: NDArray[np.float64]
+
+    def __len__(self) -> int:
+        return len(self.open_time_ns)
 
 
 @dataclass(frozen=True, slots=True)
 class MLCandleReadResult:
-    candles: tuple[HistoricalCandle, ...]
-    first_open_time: datetime | None
-    last_open_time: datetime | None
-    detected_gap_count: int
+    columns: MLCandleColumns
+    gaps: GapSummary
+
+
+def candle_columns(
+    *,
+    open_times: list[datetime],
+    close_times: list[datetime],
+    open_prices: list[float],
+    high_prices: list[float],
+    low_prices: list[float],
+    close_prices: list[float],
+    volumes: list[float],
+) -> MLCandleColumns:
+    if any(value.tzinfo is not UTC for value in (*open_times, *close_times)):
+        raise MLDatasetError("all candle timestamps must be timezone-aware UTC")
+    columns = MLCandleColumns(
+        np.asarray([datetime_to_ns(value) for value in open_times], dtype=np.int64),
+        np.asarray([datetime_to_ns(value) for value in close_times], dtype=np.int64),
+        np.asarray(open_prices, dtype=np.float64),
+        np.asarray(high_prices, dtype=np.float64),
+        np.asarray(low_prices, dtype=np.float64),
+        np.asarray(close_prices, dtype=np.float64),
+        np.asarray(volumes, dtype=np.float64),
+    )
+    lengths = {
+        len(columns.open_time_ns),
+        len(columns.close_time_ns),
+        len(columns.open_price),
+        len(columns.high_price),
+        len(columns.low_price),
+        len(columns.close_price),
+        len(columns.base_asset_volume),
+    }
+    if len(lengths) != 1:
+        raise MLDatasetError("candle columns must have equal lengths")
+    return columns
 
 
 async def read_ml_experiment_candles(
@@ -33,13 +79,19 @@ async def read_ml_experiment_candles(
     end: datetime,
     page_size: int = DEFAULT_PAGE_SIZE,
 ) -> MLCandleReadResult:
-    """Read one instrument with bounded keyset pages without rejecting genuine gaps."""
+    """Read one instrument into compact columns using bounded keyset pages."""
 
     if not 1 <= page_size <= MAX_PAGE_SIZE:
         raise MLDatasetError(f"page_size must be between 1 and {MAX_PAGE_SIZE}")
-    if start.tzinfo is None or end.tzinfo is None or start >= end:
-        raise MLDatasetError("ML candle bounds must be valid timezone-aware timestamps")
-    candles: list[HistoricalCandle] = []
+    if start.tzinfo is not UTC or end.tzinfo is not UTC or start >= end:
+        raise MLDatasetError("ML candle bounds must be valid UTC timestamps")
+    opens_at: list[datetime] = []
+    closes_at: list[datetime] = []
+    opens: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    closes: list[float] = []
+    volumes: list[float] = []
     cursor: datetime | None = None
     while True:
         statement = select(
@@ -50,10 +102,6 @@ async def read_ml_experiment_candles(
             MarketCandleRecord.low_price,
             MarketCandleRecord.close_price,
             MarketCandleRecord.base_asset_volume,
-            MarketCandleRecord.quote_asset_volume,
-            MarketCandleRecord.trade_count,
-            MarketCandleRecord.taker_buy_base_asset_volume,
-            MarketCandleRecord.taker_buy_quote_asset_volume,
         ).where(
             MarketCandleRecord.asset == instrument.asset.value,
             MarketCandleRecord.provider == instrument.provider.value,
@@ -67,9 +115,7 @@ async def read_ml_experiment_candles(
         rows = (
             (
                 await session.execute(
-                    statement.order_by(MarketCandleRecord.open_time.asc()).limit(
-                        page_size
-                    )
+                    statement.order_by(MarketCandleRecord.open_time).limit(page_size)
                 )
             )
             .tuples()
@@ -77,22 +123,27 @@ async def read_ml_experiment_candles(
         )
         if not rows:
             break
-        page = tuple(HistoricalCandle(*row) for row in rows)
-        if cursor is not None and page[0].open_time <= cursor:
+        for row in rows:
+            opens_at.append(row[0])
+            closes_at.append(row[1])
+            opens.append(float(row[2]))
+            highs.append(float(row[3]))
+            lows.append(float(row[4]))
+            closes.append(float(row[5]))
+            volumes.append(float(row[6]))
+        next_cursor = rows[-1][0]
+        if cursor is not None and next_cursor <= cursor:
             raise MLDatasetError("ML candle keyset cursor did not advance")
-        candles.extend(page)
-        cursor = page[-1].open_time
-        if len(page) < page_size:
+        cursor = next_cursor
+        if len(rows) < page_size:
             break
-    result = tuple(candles)
-    gaps = sum(
-        1
-        for left, right in pairwise(result)
-        if right.open_time - left.open_time != CANDLE_INTERVAL
+    columns = candle_columns(
+        open_times=opens_at,
+        close_times=closes_at,
+        open_prices=opens,
+        high_prices=highs,
+        low_prices=lows,
+        close_prices=closes,
+        volumes=volumes,
     )
-    return MLCandleReadResult(
-        result,
-        result[0].open_time if result else None,
-        result[-1].open_time if result else None,
-        gaps,
-    )
+    return MLCandleReadResult(columns, summarize_gaps(columns.open_time_ns))

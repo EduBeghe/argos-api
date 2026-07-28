@@ -3,19 +3,15 @@ import json
 import math
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from itertools import pairwise
-from typing import Final
+from datetime import datetime, timedelta
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from numpy.typing import NDArray
 
 from app.market.catalog import Instrument
-from app.optimization.historical_data import HistoricalCandle
 
 from .contract import (
-    CANDLE_INTERVAL,
-    DECISION_INTERVAL,
     DEVELOPMENT_START,
     FINAL_TEST_END,
     FINAL_TEST_START,
@@ -26,13 +22,17 @@ from .contract import (
     TemporalFoldDefinition,
     temporal_fold_definitions,
 )
+from .errors import MLDatasetError
+from .gaps import (
+    CANDLE_INTERVAL_NS,
+    GapSummary,
+    continuity_prefix,
+    datetime_to_ns,
+    ns_to_datetime,
+    summarize_gaps,
+)
+from .reader import MLCandleColumns
 from .registry import MAXIMUM_HISTORICAL_LOOKBACK, VARIABLE_REGISTRY, VariableDefinition
-
-NANOSECONDS_PER_SECOND: Final = 1_000_000_000
-
-
-class MLDatasetError(ValueError):
-    """Raised when input cannot satisfy the frozen ML dataset contract."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +59,12 @@ class TemporalFoldManifest:
 
 
 @dataclass(frozen=True, slots=True)
+class EligibleFoldIndices:
+    training_indices: NDArray[np.int64]
+    validation_indices: NDArray[np.int64]
+
+
+@dataclass(frozen=True, slots=True)
 class TargetVector:
     duration: timedelta
     values: NDArray[np.float32]
@@ -74,78 +80,83 @@ class MLDatasetMetadata:
     actual_start: datetime | None
     actual_end: datetime | None
     candle_count: int
-    detected_gap_count: int
+    gaps: GapSummary
     feature_count: int
     maximum_historical_lookback: timedelta
     fingerprint: str
 
 
 class LazyTargetProvider:
-    """Calculate one target vector on demand, never an 80-column target matrix."""
+    """Vectorize one target duration on demand without retaining other durations."""
 
     def __init__(
         self,
         *,
-        boundaries: tuple[datetime, ...],
+        boundaries_ns: NDArray[np.int64],
         reference_indices: NDArray[np.int64],
-        opens: tuple[datetime, ...],
+        open_time_ns: NDArray[np.int64],
         closes: NDArray[np.float64],
         feature_eligible: NDArray[np.bool_],
+        continuity: NDArray[np.int64],
     ) -> None:
-        self._boundaries = boundaries
+        self._boundaries_ns = boundaries_ns
         self._reference_indices = reference_indices
-        self._opens = opens
+        self._open_time_ns = open_time_ns
         self._closes = closes
         self._feature_eligible = feature_eligible
-        self._index_by_open = {value: index for index, value in enumerate(opens)}
+        self._continuity = continuity
 
     def for_duration(self, duration: timedelta) -> TargetVector:
         if duration not in FUTURE_DURATIONS:
             raise MLDatasetError("duration is not part of contract version 1")
-        values = np.full(len(self._boundaries), np.nan, dtype=np.float32)
-        eligible = np.zeros(len(self._boundaries), dtype=np.bool_)
-        exclusions: Counter[str] = Counter()
-        steps = int(duration / CANDLE_INTERVAL)
-        for row, (boundary, reference_index) in enumerate(
-            zip(self._boundaries, self._reference_indices, strict=True)
-        ):
-            if not self._feature_eligible[row]:
-                exclusions["feature_ineligible"] += 1
-                continue
-            target_open = boundary + duration - CANDLE_INTERVAL
-            target_index = self._index_by_open.get(target_open)
-            if target_index is None:
-                exclusions["missing_future_target_candle"] += 1
-                continue
-            if target_index - int(reference_index) != steps:
-                exclusions["missing_future_interval_candle"] += 1
-                continue
-            expected = boundary
-            complete = True
-            for index in range(int(reference_index) + 1, target_index + 1):
-                if self._opens[index] != expected:
-                    complete = False
-                    break
-                expected += CANDLE_INTERVAL
-            if not complete:
-                exclusions["missing_future_interval_candle"] += 1
-                continue
-            reference_close = self._closes[reference_index]
-            value = self._closes[target_index] / reference_close - 1.0
-            if not math.isfinite(value):
-                exclusions["non_finite_target"] += 1
-                continue
-            values[row] = np.float32(value)
-            eligible[row] = True
+        row_count = len(self._boundaries_ns)
+        values = np.full(row_count, np.nan, dtype=np.float32)
+        eligible = np.zeros(row_count, dtype=np.bool_)
+        reasons = np.full(row_count, "", dtype="U32")
+        reasons[~self._feature_eligible] = "feature_ineligible"
+        candidates = self._feature_eligible & (self._reference_indices >= 0)
+        duration_ns = int(duration.total_seconds() * 1_000_000_000)
+        target_ns = self._boundaries_ns + duration_ns - CANDLE_INTERVAL_NS
+        positions = np.searchsorted(self._open_time_ns, target_ns)
+        bounded = positions < len(self._open_time_ns)
+        exact = np.zeros(row_count, dtype=np.bool_)
+        exact[bounded] = self._open_time_ns[positions[bounded]] == target_ns[bounded]
+        missing_target = candidates & ~exact
+        reasons[missing_target] = "missing_future_target_candle"
+        exact_candidates = candidates & exact
+        expected_steps = duration_ns // CANDLE_INTERVAL_NS
+        expected_position = self._reference_indices + expected_steps
+        position_matches = positions == expected_position
+        continuity_matches = np.zeros(row_count, dtype=np.bool_)
+        valid_positions = exact_candidates & position_matches
+        rows = np.flatnonzero(valid_positions)
+        continuity_matches[rows] = (
+            self._continuity[positions[rows]]
+            == self._continuity[self._reference_indices[rows]]
+        )
+        interval_complete = valid_positions & continuity_matches
+        reasons[exact_candidates & ~interval_complete] = (
+            "missing_future_interval_candle"
+        )
+        rows = np.flatnonzero(interval_complete)
+        calculated = (
+            self._closes[positions[rows]] / self._closes[self._reference_indices[rows]]
+            - 1.0
+        )
+        finite = np.isfinite(calculated)
+        values[rows[finite]] = calculated[finite].astype(np.float32)
+        eligible[rows[finite]] = True
+        reasons[rows[~finite]] = "non_finite_target"
+        counter = Counter(str(reason) for reason in reasons if reason)
         return TargetVector(
-            duration, values, eligible, ExclusionCounts.from_counter(exclusions)
+            duration, values, eligible, ExclusionCounts.from_counter(counter)
         )
 
 
 @dataclass(frozen=True, slots=True)
 class MLExperimentDataset:
     metadata: MLDatasetMetadata
-    boundaries: tuple[datetime, ...]
+    boundary_time_ns: NDArray[np.int64]
     features: NDArray[np.float32]
     feature_eligible: NDArray[np.bool_]
     feature_exclusions: ExclusionCounts
@@ -153,74 +164,135 @@ class MLExperimentDataset:
     final_test_indices: NDArray[np.int64]
     targets: LazyTargetProvider
 
+    @property
+    def boundaries(self) -> tuple[datetime, ...]:
+        return tuple(ns_to_datetime(int(value)) for value in self.boundary_time_ns)
 
-def _validate_candles(candles: tuple[HistoricalCandle, ...]) -> None:
-    previous: datetime | None = None
-    for candle in candles:
-        if candle.open_time.tzinfo is not UTC or candle.close_time.tzinfo is not UTC:
-            raise MLDatasetError("all candle timestamps must be timezone-aware UTC")
-        if previous is not None and candle.open_time <= previous:
-            raise MLDatasetError("candles must be strictly ordered and unique")
-        if candle.close_time >= candle.open_time + CANDLE_INTERVAL:
-            raise MLDatasetError(
-                "candle close time is inconsistent with the 5m contract"
-            )
-        previous = candle.open_time
-
-
-def _ema(values: NDArray[np.float64], period: int) -> float:
-    """Calculate a finite-window EMA without a Python loop over every candle."""
-
-    alpha = 2.0 / (period + 1.0)
-    weights = np.power(1.0 - alpha, np.arange(len(values) - 1, -1, -1))
-    weights *= alpha
-    weights[0] += (1.0 - alpha) ** len(values)
-    return float(np.dot(values, weights))
-
-
-def _returns(closes: NDArray[np.float64]) -> NDArray[np.float64]:
-    return closes[1:] / closes[:-1] - 1.0
-
-
-def _calculate(
-    definition: VariableDefinition,
-    *,
-    boundary: datetime,
-    opens: NDArray[np.float64],
-    highs: NDArray[np.float64],
-    lows: NDArray[np.float64],
-    closes: NDArray[np.float64],
-    volumes: NDArray[np.float64],
-) -> float:
-    calculation, _, argument = definition.calculation.partition(":")
-    current = float(closes[-1])
-    candle_count = max(1, int(definition.lookback / CANDLE_INTERVAL))
-    window = closes[-candle_count:]
-    if calculation == "return":
-        return current / float(closes[0]) - 1.0
-    if calculation.startswith("ema_") or calculation == "trend_normalized":
-        period = max(
-            1,
-            int(
-                (
-                    definition.lookback
-                    - (CANDLE_INTERVAL if calculation == "ema_slope" else timedelta())
-                )
-                / CANDLE_INTERVAL
-            ),
+    def eligible_indices(
+        self, *, fold_name: str, duration: timedelta
+    ) -> EligibleFoldIndices:
+        fold = next(
+            (item for item in self.folds if item.definition.name == fold_name), None
         )
-        ema = _ema(closes[-period:], period)
-        if calculation == "ema_distance":
-            return current / ema - 1.0
+        if fold is None:
+            raise MLDatasetError(f"unknown temporal fold: {fold_name}")
+        target = self.targets.for_duration(duration)
+        eligible = self.feature_eligible & target.eligible
+        return EligibleFoldIndices(
+            fold.training_indices[eligible[fold.training_indices]],
+            fold.validation_indices[eligible[fold.validation_indices]],
+        )
+
+
+def _rolling_sum(values: NDArray[np.float64], window: int) -> NDArray[np.float64]:
+    result = np.full(len(values), np.nan)
+    if window <= len(values):
+        cumulative = np.concatenate((np.zeros(1), np.cumsum(values)))
+        result[window - 1 :] = cumulative[window:] - cumulative[:-window]
+    return result
+
+
+def _rolling_mean(values: NDArray[np.float64], window: int) -> NDArray[np.float64]:
+    return _rolling_sum(values, window) / window
+
+
+def _rolling_std(values: NDArray[np.float64], window: int) -> NDArray[np.float64]:
+    mean = _rolling_mean(values, window)
+    square_mean = _rolling_mean(values * values, window)
+    return np.sqrt(np.maximum(square_mean - mean * mean, 0.0))
+
+
+def _rolling_extreme(
+    values: NDArray[np.float64], window: int, *, maximum: bool
+) -> NDArray[np.float64]:
+    result = np.full(len(values), np.nan)
+    if window <= len(values):
+        views = sliding_window_view(values, window)
+        reduced = np.max(views, axis=1) if maximum else np.min(views, axis=1)
+        result[window - 1 :] = reduced
+    return result
+
+
+def _ema_series(values: NDArray[np.float64], period: int) -> NDArray[np.float64]:
+    result = np.full(len(values), np.nan)
+    if period > len(values):
+        return result
+    alpha = 2.0 / (period + 1.0)
+    result[period - 1] = float(np.mean(values[:period]))
+    for index in range(period, len(values)):
+        result[index] = alpha * values[index] + (1.0 - alpha) * result[index - 1]
+    return result
+
+
+class _SeriesCache:
+    """Reuse causal full-series rolling calculations across registry variables."""
+
+    def __init__(self, columns: MLCandleColumns, continuity: NDArray[np.int64]) -> None:
+        self.columns = columns
+        self.continuity = continuity
+        self.returns = np.full(len(columns), np.nan)
+        self.returns[1:] = columns.close_price[1:] / columns.close_price[:-1] - 1.0
+        self._cache: dict[tuple[str, int], NDArray[np.float64]] = {}
+
+    def cached(self, operation: str, period: int) -> NDArray[np.float64]:
+        key = (operation, period)
+        if key in self._cache:
+            return self._cache[key]
+        source = self.columns.close_price
+        if operation == "ema":
+            value = _ema_series(source, period)
+        elif operation == "return_std":
+            value = _rolling_std(np.nan_to_num(self.returns), period)
+        elif operation == "high":
+            value = _rolling_extreme(self.columns.high_price, period, maximum=True)
+        elif operation == "low":
+            value = _rolling_extreme(self.columns.low_price, period, maximum=False)
+        elif operation == "volume_sum":
+            value = _rolling_sum(self.columns.base_asset_volume, period)
+        elif operation == "volume_mean":
+            value = _rolling_mean(self.columns.base_asset_volume, period)
+        else:
+            raise MLDatasetError(f"unknown series operation: {operation}")
+        self._cache[key] = value
+        return value
+
+
+def _invalidate_window(
+    values: NDArray[np.float64], continuity: NDArray[np.int64], window: int
+) -> NDArray[np.float64]:
+    result = values.copy()
+    indices = np.arange(len(values))
+    starts = indices - window + 1
+    valid = starts >= 0
+    rows = np.flatnonzero(valid)
+    valid[rows] &= continuity[rows] == continuity[starts[rows]]
+    result[~valid] = np.nan
+    return result
+
+
+def _feature_series(
+    definition: VariableDefinition, cache: _SeriesCache
+) -> NDArray[np.float64]:
+    columns = cache.columns
+    close = columns.close_price
+    calculation, _, argument = definition.calculation.partition(":")
+    count = max(1, int(definition.lookback.total_seconds() // 300))
+    period = count - 1 if calculation in {"return", "ema_slope"} else count
+    if calculation == "return":
+        result = close / np.roll(close, period) - 1.0
+    elif calculation.startswith("ema_") or calculation == "trend_normalized":
+        ema = cache.cached("ema", period)
+        result = close / ema - 1.0
         if calculation == "ema_slope":
-            previous = _ema(closes[-period - 1 : -1], period)
-            return ema / previous - 1.0
-        if calculation == "ema_spread":
-            fast = int(argument) // 5
-            return _ema(closes[-fast:], fast) / ema - 1.0
-        volatility = float(np.std(_returns(window), ddof=0))
-        return (current / ema - 1.0) / volatility if volatility else 0.0
-    if calculation in {
+            result = ema / np.roll(ema, 1) - 1.0
+        elif calculation == "ema_spread":
+            result = cache.cached("ema", int(argument) // 5) / ema - 1.0
+        elif calculation == "trend_normalized":
+            denominator = cache.cached("return_std", period)
+            result = np.divide(
+                result, denominator, out=np.zeros(len(close)), where=denominator != 0
+            )
+    elif calculation in {
         "previous_high",
         "previous_low",
         "range_position",
@@ -229,85 +301,100 @@ def _calculate(
         "breakout_high",
         "breakout_low",
     }:
-        previous_high = float(np.max(highs[:-1]))
-        previous_low = float(np.min(lows[:-1]))
+        previous_high = np.roll(cache.cached("high", period - 1), 1)
+        previous_low = np.roll(cache.cached("low", period - 1), 1)
         span = previous_high - previous_low
         if calculation == "previous_high":
-            return previous_high
-        if calculation == "previous_low":
-            return previous_low
-        if calculation == "range_position":
-            return (current - previous_low) / span if span else 0.5
-        if calculation == "distance_from_high":
-            return current / previous_high - 1.0
-        if calculation == "distance_from_low":
-            return current / previous_low - 1.0
-        if calculation == "breakout_high":
-            return float(current > previous_high)
-        return float(current < previous_low)
-    if calculation in {
-        "return_volatility",
-        "normalized_range",
-        "volatility_change",
-        "volatility_ratio",
-    }:
-        if calculation == "normalized_range":
-            return float(np.mean((highs - lows) / closes))
-        if calculation == "volatility_change":
-            half = (len(closes) - 1) // 2
-            first = float(np.std(_returns(closes[: half + 1])))
-            second = float(np.std(_returns(closes[half:])))
-            return second - first
-        long_vol = float(np.std(_returns(closes)))
-        if calculation == "return_volatility":
-            return long_vol
-        short_count = int(argument) // 5 + 1
-        short_vol = float(np.std(_returns(closes[-short_count:])))
-        return short_vol / long_vol if long_vol else 0.0
-    if calculation in {
-        "relative_volume",
-        "volume_change",
-        "normalized_volume",
-        "signed_price_volume",
-    }:
-        if calculation == "relative_volume":
-            baseline = float(np.mean(volumes[:-1]))
-            return float(volumes[-1]) / baseline if baseline else 0.0
-        if calculation in {"volume_change", "normalized_volume"}:
-            half = len(volumes) // 2
-            old = float(np.sum(volumes[:half]))
-            new = float(np.sum(volumes[half:]))
-            return new / old - 1.0 if old else 0.0
-        return float(np.mean(_returns(closes) * volumes[1:]))
-    open_price = float(opens[-1])
-    high = float(highs[-1])
-    low = float(lows[-1])
-    close = float(closes[-1])
-    if calculation == "candle_body":
-        return abs(close - open_price) / open_price
-    if calculation == "candle_range":
-        return (high - low) / open_price
-    if calculation == "upper_wick":
-        return (high - max(open_price, close)) / open_price
-    if calculation == "lower_wick":
-        return (min(open_price, close) - low) / open_price
-    if calculation == "candle_close_position":
-        return (close - low) / (high - low) if high != low else 0.5
-    if calculation == "positive_fraction":
-        return float(np.mean(closes > opens))
-    seconds = boundary.hour * 3600 + boundary.minute * 60
-    if calculation == "utc_time_sin":
-        return math.sin(2 * math.pi * seconds / 86400)
-    if calculation == "utc_time_cos":
-        return math.cos(2 * math.pi * seconds / 86400)
-    if calculation == "utc_weekday_sin":
-        return math.sin(2 * math.pi * boundary.weekday() / 7)
-    if calculation == "utc_weekday_cos":
-        return math.cos(2 * math.pi * boundary.weekday() / 7)
-    raise MLDatasetError(f"unsupported variable calculation: {definition.calculation}")
+            result = previous_high
+        elif calculation == "previous_low":
+            result = previous_low
+        elif calculation == "range_position":
+            result = np.divide(
+                close - previous_low,
+                span,
+                out=np.full(len(close), 0.5),
+                where=span != 0,
+            )
+        elif calculation == "distance_from_high":
+            result = close / previous_high - 1.0
+        elif calculation == "distance_from_low":
+            result = close / previous_low - 1.0
+        elif calculation == "breakout_high":
+            result = (close > previous_high).astype(float)
+        else:
+            result = (close < previous_low).astype(float)
+    elif calculation == "return_volatility":
+        result = cache.cached("return_std", period)
+    elif calculation == "normalized_range":
+        result = _rolling_mean((columns.high_price - columns.low_price) / close, period)
+    elif calculation == "volatility_change":
+        half = period // 2
+        result = cache.cached("return_std", half) - np.roll(
+            cache.cached("return_std", half), half
+        )
+    elif calculation == "volatility_ratio":
+        denominator = cache.cached("return_std", period)
+        result = np.divide(
+            cache.cached("return_std", int(argument) // 5),
+            denominator,
+            out=np.zeros(len(close)),
+            where=denominator != 0,
+        )
+    elif calculation == "relative_volume":
+        baseline = np.roll(cache.cached("volume_mean", period - 1), 1)
+        result = columns.base_asset_volume / baseline
+    elif calculation in {"volume_change", "normalized_volume"}:
+        half = period // 2
+        recent = cache.cached("volume_sum", half)
+        old = np.roll(recent, half)
+        result = recent / old - 1.0
+    elif calculation == "signed_price_volume":
+        result = _rolling_mean(
+            np.nan_to_num(cache.returns) * columns.base_asset_volume, period
+        )
+    elif calculation == "candle_body":
+        result = np.abs(close - columns.open_price) / columns.open_price
+    elif calculation == "candle_range":
+        result = (columns.high_price - columns.low_price) / columns.open_price
+    elif calculation == "upper_wick":
+        result = (
+            columns.high_price - np.maximum(columns.open_price, close)
+        ) / columns.open_price
+    elif calculation == "lower_wick":
+        result = (
+            np.minimum(columns.open_price, close) - columns.low_price
+        ) / columns.open_price
+    elif calculation == "candle_close_position":
+        span = columns.high_price - columns.low_price
+        result = np.divide(
+            close - columns.low_price,
+            span,
+            out=np.full(len(close), 0.5),
+            where=span != 0,
+        )
+    elif calculation == "positive_fraction":
+        result = _rolling_mean((close > columns.open_price).astype(float), period)
+    else:
+        timestamps = columns.open_time_ns.astype("datetime64[ns]")
+        days = timestamps.astype("datetime64[D]")
+        seconds = (timestamps - days).astype("timedelta64[s]").astype(float)
+        weekdays = (days.astype(np.int64) + 3) % 7
+        if calculation == "utc_time_sin":
+            result = np.sin(2 * math.pi * seconds / 86400)
+        elif calculation == "utc_time_cos":
+            result = np.cos(2 * math.pi * seconds / 86400)
+        elif calculation == "utc_weekday_sin":
+            result = np.sin(2 * math.pi * weekdays / 7)
+        elif calculation == "utc_weekday_cos":
+            result = np.cos(2 * math.pi * weekdays / 7)
+        else:
+            raise MLDatasetError(f"unsupported variable calculation: {calculation}")
+    return _invalidate_window(
+        np.asarray(result, dtype=np.float64), cache.continuity, count
+    )
 
 
-def _fingerprint(instrument: Instrument, candles: tuple[HistoricalCandle, ...]) -> str:
+def _fingerprint(instrument: Instrument, columns: MLCandleColumns) -> str:
     digest = hashlib.sha256()
     contract = {
         "contract": ML_EXPERIMENT_CONTRACT_VERSION,
@@ -337,165 +424,126 @@ def _fingerprint(instrument: Instrument, candles: tuple[HistoricalCandle, ...]) 
         ],
     }
     digest.update(json.dumps(contract, sort_keys=True, separators=(",", ":")).encode())
-    for candle in candles:
-        digest.update(
-            "|".join(
-                (
-                    candle.open_time.isoformat(),
-                    candle.close_time.isoformat(),
-                    str(candle.open_price),
-                    str(candle.high_price),
-                    str(candle.low_price),
-                    str(candle.close_price),
-                    str(candle.base_asset_volume),
-                )
-            ).encode()
-        )
+    for array in (
+        columns.open_time_ns,
+        columns.close_time_ns,
+        columns.open_price,
+        columns.high_price,
+        columns.low_price,
+        columns.close_price,
+        columns.base_asset_volume,
+    ):
+        digest.update(array.tobytes())
     return digest.hexdigest()
 
 
 def build_ml_experiment_dataset(
-    *, instrument: Instrument, candles: tuple[HistoricalCandle, ...]
+    *, instrument: Instrument, columns: MLCandleColumns
 ) -> MLExperimentDataset:
-    _validate_candles(candles)
-    selected = tuple(
-        candle
-        for candle in candles
-        if DEVELOPMENT_START <= candle.open_time < FINAL_TEST_END
+    if len(columns) and (
+        np.any(np.diff(columns.open_time_ns) <= 0)
+        or np.any(columns.close_time_ns >= columns.open_time_ns + CANDLE_INTERVAL_NS)
+    ):
+        raise MLDatasetError("candle timestamps violate ordering or closure semantics")
+    start_ns = datetime_to_ns(DEVELOPMENT_START)
+    end_ns = datetime_to_ns(FINAL_TEST_END)
+    selected_mask = (columns.open_time_ns >= start_ns) & (columns.open_time_ns < end_ns)
+    selected = columns
+    if not np.all(selected_mask):
+        selected = MLCandleColumns(
+            columns.open_time_ns[selected_mask],
+            columns.close_time_ns[selected_mask],
+            columns.open_price[selected_mask],
+            columns.high_price[selected_mask],
+            columns.low_price[selected_mask],
+            columns.close_price[selected_mask],
+            columns.base_asset_volume[selected_mask],
+        )
+    continuity = continuity_prefix(selected.open_time_ns)
+    gaps = summarize_gaps(selected.open_time_ns)
+    boundary_ns = np.arange(start_ns, end_ns, 30 * 60 * 1_000_000_000, dtype=np.int64)
+    reference_ns = boundary_ns - CANDLE_INTERVAL_NS
+    reference_indices = np.searchsorted(selected.open_time_ns, reference_ns).astype(
+        np.int64
     )
-    index_by_open = {candle.open_time: index for index, candle in enumerate(selected)}
-    boundaries: list[datetime] = []
-    boundary = DEVELOPMENT_START
-    while boundary < FINAL_TEST_END:
-        boundaries.append(boundary)
-        boundary += DECISION_INTERVAL
-    feature_matrix = np.full(
-        (len(boundaries), len(VARIABLE_REGISTRY)), np.nan, dtype=np.float32
+    bounded = reference_indices < len(selected)
+    exact = np.zeros(len(boundary_ns), dtype=np.bool_)
+    exact[bounded] = (
+        selected.open_time_ns[reference_indices[bounded]] == reference_ns[bounded]
     )
-    feature_eligible = np.zeros(len(boundaries), dtype=np.bool_)
-    reference_indices = np.full(len(boundaries), -1, dtype=np.int64)
-    exclusions: Counter[str] = Counter()
-    opens = np.asarray([float(item.open_price) for item in selected], dtype=np.float64)
-    highs = np.asarray([float(item.high_price) for item in selected], dtype=np.float64)
-    lows = np.asarray([float(item.low_price) for item in selected], dtype=np.float64)
-    closes = np.asarray(
-        [float(item.close_price) for item in selected], dtype=np.float64
+    closed = np.zeros(len(boundary_ns), dtype=np.bool_)
+    rows = np.flatnonzero(exact)
+    closed[rows] = selected.close_time_ns[reference_indices[rows]] < boundary_ns[rows]
+    features = np.full(
+        (len(boundary_ns), len(VARIABLE_REGISTRY)), np.nan, dtype=np.float32
     )
-    volumes = np.asarray(
-        [float(item.base_asset_volume) for item in selected], dtype=np.float64
+    rows = np.flatnonzero(exact & closed)
+    cache = _SeriesCache(selected, continuity)
+    for column, definition in enumerate(VARIABLE_REGISTRY):
+        series = _feature_series(definition, cache)
+        features[rows, column] = series[reference_indices[rows]].astype(np.float32)
+        del series
+    feature_eligible = np.isfinite(features).all(axis=1)
+    reason_by_row = np.full(len(boundary_ns), "", dtype="U32")
+    reason_by_row[~exact] = "missing_reference_candle"
+    reason_by_row[exact & ~closed] = "reference_candle_not_closed"
+    candidates = exact & closed
+    maximum_steps = int(MAXIMUM_HISTORICAL_LOOKBACK.total_seconds() // 300)
+    enough = reference_indices >= maximum_steps - 1
+    reason_by_row[candidates & ~enough] = "insufficient_history"
+    complete = np.zeros(len(boundary_ns), dtype=np.bool_)
+    rows = np.flatnonzero(candidates & enough)
+    starts = reference_indices[rows] - maximum_steps + 1
+    complete[rows] = continuity[reference_indices[rows]] == continuity[starts]
+    reason_by_row[candidates & enough & ~complete] = "missing_historical_candle"
+    reason_by_row[candidates & enough & complete & ~feature_eligible] = (
+        "non_finite_feature"
     )
-    maximum_steps = int(MAXIMUM_HISTORICAL_LOOKBACK / CANDLE_INTERVAL)
-    for row, current_boundary in enumerate(boundaries):
-        reference_open = current_boundary - CANDLE_INTERVAL
-        reference_index = index_by_open.get(reference_open)
-        if reference_index is None:
-            exclusions["missing_reference_candle"] += 1
-            continue
-        reference_indices[row] = reference_index
-        if selected[reference_index].close_time >= current_boundary:
-            exclusions["reference_candle_not_closed"] += 1
-            continue
-        start_index = reference_index - maximum_steps + 1
-        if start_index < 0:
-            exclusions["insufficient_history"] += 1
-            continue
-        expected_start = reference_open - (maximum_steps - 1) * CANDLE_INTERVAL
-        if selected[start_index].open_time != expected_start:
-            exclusions["missing_historical_candle"] += 1
-            continue
-        valid = True
-        for column, definition in enumerate(VARIABLE_REGISTRY):
-            count = int(definition.lookback / CANDLE_INTERVAL)
-            first = reference_index - count + 1
-            value = _calculate(
-                definition,
-                boundary=current_boundary,
-                opens=opens[first : reference_index + 1],
-                highs=highs[first : reference_index + 1],
-                lows=lows[first : reference_index + 1],
-                closes=closes[first : reference_index + 1],
-                volumes=volumes[first : reference_index + 1],
-            )
-            if not math.isfinite(value):
-                valid = False
-                break
-            feature_matrix[row, column] = np.float32(value)
-        if not valid:
-            feature_matrix[row, :] = np.nan
-            exclusions["non_finite_feature"] += 1
-            continue
-        feature_eligible[row] = True
-    boundary_tuple = tuple(boundaries)
-    boundary_ns = np.asarray(
-        [int(item.timestamp() * NANOSECONDS_PER_SECOND) for item in boundary_tuple],
-        dtype=np.int64,
-    )
+    reasons = Counter(str(reason) for reason in reason_by_row if reason)
     folds = tuple(
         TemporalFoldManifest(
             definition,
             np.flatnonzero(
-                (
-                    boundary_ns
-                    >= int(
-                        definition.training_start.timestamp() * NANOSECONDS_PER_SECOND
-                    )
-                )
-                & (
-                    boundary_ns
-                    < int(definition.training_end.timestamp() * NANOSECONDS_PER_SECOND)
-                )
+                (boundary_ns >= datetime_to_ns(definition.training_start))
+                & (boundary_ns < datetime_to_ns(definition.training_end))
             ).astype(np.int64),
             np.flatnonzero(
-                (
-                    boundary_ns
-                    >= int(
-                        definition.validation_start.timestamp() * NANOSECONDS_PER_SECOND
-                    )
-                )
-                & (
-                    boundary_ns
-                    < int(
-                        definition.validation_end.timestamp() * NANOSECONDS_PER_SECOND
-                    )
-                )
+                (boundary_ns >= datetime_to_ns(definition.validation_start))
+                & (boundary_ns < datetime_to_ns(definition.validation_end))
             ).astype(np.int64),
         )
         for definition in temporal_fold_definitions()
     )
     final_indices = np.flatnonzero(
-        (boundary_ns >= int(FINAL_TEST_START.timestamp() * NANOSECONDS_PER_SECOND))
-        & (boundary_ns < int(FINAL_TEST_END.timestamp() * NANOSECONDS_PER_SECOND))
+        (boundary_ns >= datetime_to_ns(FINAL_TEST_START)) & (boundary_ns < end_ns)
     ).astype(np.int64)
-    gaps = sum(
-        1
-        for left, right in pairwise(selected)
-        if right.open_time - left.open_time != CANDLE_INTERVAL
-    )
     metadata = MLDatasetMetadata(
         instrument,
         DEVELOPMENT_START,
         FINAL_TEST_END,
-        selected[0].open_time if selected else None,
-        selected[-1].open_time if selected else None,
+        ns_to_datetime(int(selected.open_time_ns[0])) if len(selected) else None,
+        ns_to_datetime(int(selected.open_time_ns[-1])) if len(selected) else None,
         len(selected),
         gaps,
         len(VARIABLE_REGISTRY),
         MAXIMUM_HISTORICAL_LOOKBACK,
         _fingerprint(instrument, selected),
     )
+    targets = LazyTargetProvider(
+        boundaries_ns=boundary_ns,
+        reference_indices=reference_indices,
+        open_time_ns=selected.open_time_ns,
+        closes=selected.close_price,
+        feature_eligible=feature_eligible,
+        continuity=continuity,
+    )
     return MLExperimentDataset(
         metadata,
-        boundary_tuple,
-        feature_matrix,
+        boundary_ns,
+        features,
         feature_eligible,
-        ExclusionCounts.from_counter(exclusions),
+        ExclusionCounts.from_counter(reasons),
         folds,
         final_indices,
-        LazyTargetProvider(
-            boundaries=boundary_tuple,
-            reference_indices=reference_indices,
-            opens=tuple(item.open_time for item in selected),
-            closes=closes,
-            feature_eligible=feature_eligible,
-        ),
+        targets,
     )

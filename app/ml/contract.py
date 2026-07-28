@@ -82,7 +82,11 @@ def temporal_fold_definitions() -> tuple[TemporalFoldDefinition, ...]:
             (TrainingHistoryMode.ROLLING_THREE_YEARS, _subtract_years(training_end, 3)),
         )
         for mode, training_start in starts:
-            if training_start < DEVELOPMENT_START:
+            minimum_training_start = _subtract_years(training_end, 2)
+            if (
+                training_start < DEVELOPMENT_START
+                or minimum_training_start < DEVELOPMENT_START
+            ):
                 continue
             folds.append(
                 TemporalFoldDefinition(

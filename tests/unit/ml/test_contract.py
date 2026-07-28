@@ -31,7 +31,15 @@ def test_variable_registry_is_stable_and_float32() -> None:
 
 def test_temporal_folds_are_chronological_gapped_and_never_use_final_test() -> None:
     folds = temporal_fold_definitions()
-    assert folds
+    assert tuple(fold.name for fold in folds) == (
+        "202207_accumulating",
+        "202207_rolling_two_years",
+        "202301_accumulating",
+        "202301_rolling_two_years",
+        "202307_accumulating",
+        "202307_rolling_two_years",
+        "202307_rolling_three_years",
+    )
     for fold in folds:
         assert fold.training_start < fold.training_end
         assert fold.training_end + SPLIT_GAP == fold.validation_start
@@ -47,6 +55,24 @@ def test_temporal_folds_are_chronological_gapped_and_never_use_final_test() -> N
         fold.training_start.replace(year=fold.training_start.year + 2)
         == fold.training_end
         for fold in rolling_two
+    )
+    accumulating = [
+        fold for fold in folds if fold.history_mode is TrainingHistoryMode.ACCUMULATING
+    ]
+    assert all(
+        fold.training_start.replace(year=fold.training_start.year + 2)
+        <= fold.training_end
+        for fold in accumulating
+    )
+    rolling_three = [
+        fold
+        for fold in folds
+        if fold.history_mode is TrainingHistoryMode.ROLLING_THREE_YEARS
+    ]
+    assert all(
+        fold.training_start.replace(year=fold.training_start.year + 3)
+        == fold.training_end
+        for fold in rolling_three
     )
     assert not any(
         fold.history_mode is TrainingHistoryMode.ROLLING_THREE_YEARS

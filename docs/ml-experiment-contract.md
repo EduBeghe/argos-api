@@ -52,17 +52,19 @@ Zero-range candle close position is deterministically `0.5`. Zero denominators i
 
 ## Missing evidence
 
-Persisted Binance gaps are treated as genuine missing evidence. Argos never interpolates, forward-fills, synthesizes, or borrows a candle from another asset. A row is excluded for insufficient history, a missing reference, a gap in the maximum historical input window, a non-finite feature, a missing future interval candle, or a missing exact target. Exclusion reasons are counted explicitly.
+Persisted Binance gaps are treated as genuine missing evidence. Argos never interpolates, forward-fills, synthesizes, or borrows a candle from another asset. A row is excluded for insufficient history, a missing reference, a gap in the maximum historical input window, a non-finite feature, a missing future interval candle, or a missing exact target. Exclusion reasons are counted explicitly. Diagnostics distinguish a discontinuous range (`gap_event_count`) from the number of absent five-minute slots inside all such ranges (`missing_candle_slot_count`) and report the first and last missing opening timestamps.
 
 ## Development folds and leakage protection
 
-Six-month validation blocks begin on 2022-01-01, 2022-07-01, 2023-01-01, and 2023-07-01. Eligible modes are accumulating history from 2020, an exact rolling two-year history, and an exact rolling three-year history. A mode is omitted when its full history is unavailable; it is never silently shortened.
+Six-month validation blocks begin on 2022-01-01, 2022-07-01, 2023-01-01, and 2023-07-01. Every emitted fold has two complete years before its embargo-adjusted training end. Consequently, the 2022-01 validation block is omitted. Accumulating and exact rolling-two-year folds remain for the 2022-07, 2023-01, and 2023-07 blocks; the exact rolling-three-year fold remains only for 2023-07. A mode is omitted when its full history is unavailable and is never silently shortened.
 
-A fixed seven-day gap separates training from validation because seven days is the longest target. Therefore no training target can reach validation evidence. Development also stops before the untouched final-test partition. All matrices use integer split indices.
+A fixed seven-day gap separates training from validation because seven days is the longest target. Therefore no training target can reach validation evidence. Development also stops before the untouched final-test partition. All matrices use integer split indices. `eligible_indices()` is the safe public split operation: for one fold and one duration it intersects temporal rows, feature eligibility, and that duration's target eligibility, so a training consumer cannot accidentally receive NaN or final-test evidence.
 
 ## Memory and reproducibility
 
-The builder processes one catalog instrument per invocation and creates one shared `float32` feature matrix. `LazyTargetProvider` computes one one-dimensional duration target at a time; an 80-column target matrix is never retained. The paged reader does not contact Binance or write PostgreSQL.
+The reader processes one catalog instrument into compact NumPy columns: timestamps are `int64`, prices and volume are numerical arrays, and no per-candle object graph or datetime lookup dictionary is retained. The builder precomputes causal full-series returns, rolling aggregates, extrema, volatility, volume, EMA, and continuity arrays, then selects the UTC 30-minute reference positions into one shared `float32` feature matrix. Calculations are reused by period rather than repeated for every boundary and variable.
+
+`LazyTargetProvider` uses vectorized timestamp lookup and a continuity prefix to compute one one-dimensional duration target at a time in O(boundaries); it never walks every intervening candle or retains an 80-column target matrix. The paged reader does not contact Binance or write PostgreSQL, and temporary full-size arrays are released after boundary selection.
 
 The SHA-256 dataset fingerprint covers candle values, complete instrument identity, requested range, registry and calculation versions, duration contract, folds, and missing-data policy. Identical ordered evidence and configuration produce the same fingerprint.
 
@@ -81,4 +83,4 @@ python -m app.jobs.validate_ml_experiment_dataset --asset BTC/USDT
 python -m app.jobs.validate_ml_experiment_dataset --asset ETH/USDT
 ```
 
-The full command emits structured counts, ranges, gaps, folds, duration eligibility, exclusions, fingerprint, elapsed time, and approximate Python peak memory. It is diagnostic and read-only; it does not train models, choose thresholds, approve Strategies, trade, persist ML variables, or expose an API.
+The full command emits structured raw and feature-eligible boundary counts, gap events and missing slots, raw and eligible fold counts, all 80 duration eligibility/exclusion summaries, fingerprint, elapsed time, and peak resident memory when the operating system exposes it. It is diagnostic and read-only; it does not train models, choose thresholds, approve Strategies, trade, persist ML variables, or expose an API.
