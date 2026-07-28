@@ -213,14 +213,43 @@ def _rolling_extreme(
     return result
 
 
-def _ema_series(values: NDArray[np.float64], period: int) -> NDArray[np.float64]:
+def _ema_series(
+    values: NDArray[np.float64],
+    period: int,
+    continuity: NDArray[np.int64],
+) -> NDArray[np.float64]:
+    """Return a bounded finite-window EMA reset at every candle discontinuity.
+
+    The first complete window uses the explicit finite-window weights. Later
+    consecutive windows use the algebraically equivalent O(1) recurrence, so
+    no row rebuilds its weight array and no pre-gap value can enter a new segment.
+    """
+
     result = np.full(len(values), np.nan)
-    if period > len(values):
+    if period < 1 or period > len(values) or len(continuity) != len(values):
         return result
     alpha = 2.0 / (period + 1.0)
-    result[period - 1] = float(np.mean(values[:period]))
-    for index in range(period, len(values)):
-        result[index] = alpha * values[index] + (1.0 - alpha) * result[index - 1]
+    q = 1.0 - alpha
+    q_to_period = q**period
+    weights = alpha * np.power(q, np.arange(period - 1, -1, -1))
+    weights[0] += q_to_period
+    segment_start = 0
+    for index in range(len(values)):
+        if index and continuity[index] != continuity[index - 1]:
+            segment_start = index
+        segment_length = index - segment_start + 1
+        if segment_length < period:
+            continue
+        if segment_length == period:
+            result[index] = float(
+                np.dot(values[index - period + 1 : index + 1], weights)
+            )
+            continue
+        result[index] = (
+            q * result[index - 1]
+            + alpha * values[index]
+            + q_to_period * (values[index - period + 1] - values[index - period])
+        )
     return result
 
 
@@ -240,7 +269,7 @@ class _SeriesCache:
             return self._cache[key]
         source = self.columns.close_price
         if operation == "ema":
-            value = _ema_series(source, period)
+            value = _ema_series(source, period, self.continuity)
         elif operation == "return_std":
             value = _rolling_std(np.nan_to_num(self.returns), period)
         elif operation == "high":
