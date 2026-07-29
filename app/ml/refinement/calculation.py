@@ -77,7 +77,11 @@ def _fit_predict(
     validation_x: NDArray[np.float32],
     economic_threshold: float,
     seed: int,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.int64] | None,
+]:
     parameters = dict(candidate.hyperparameters)
     objective = candidate.objective
     regression = objective is PredictionObjective.FUTURE_RETURN_REGRESSION
@@ -134,6 +138,7 @@ def _fit_predict(
         return (
             np.asarray(model.predict(training_x), dtype=np.float64),
             np.asarray(model.predict(validation_x), dtype=np.float64),
+            None,
         )
     training_probability = np.asarray(model.predict_proba(training_x), dtype=np.float64)
     validation_probability = np.asarray(
@@ -143,6 +148,7 @@ def _fit_predict(
     return (
         _signed_classification_scores(training_probability, classes, objective),
         _signed_classification_scores(validation_probability, classes, objective),
+        _predicted_class_labels(validation_probability, classes),
     )
 
 
@@ -165,8 +171,17 @@ def _signed_classification_scores(
     return probabilities @ signed_classes
 
 
+def _predicted_class_labels(
+    probabilities: NDArray[np.float64], classes: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    if probabilities.ndim != 2 or probabilities.shape[1] != len(classes):
+        raise ValueError("class probabilities must align with model classes")
+    return classes[np.argmax(probabilities, axis=1)]
+
+
 def _classification_metrics(
-    predictions: NDArray[np.float64],
+    signed_scores: NDArray[np.float64],
+    predicted_labels: NDArray[np.int64],
     actual: NDArray[np.float64],
     threshold: float,
     *,
@@ -184,13 +199,9 @@ def _classification_metrics(
         actual_labels = np.where(
             actual > threshold, 2, np.where(actual < -threshold, 0, 1)
         )
-        predicted_labels = np.where(
-            predictions > 0.5, 2, np.where(predictions < -0.5, 0, 1)
-        )
         average = "macro"
     else:
         actual_labels = (actual > threshold).astype(np.int64)
-        predicted_labels = (predictions > 0).astype(np.int64)
         average = "binary"
     unique = np.unique(actual_labels)
     return {
@@ -208,7 +219,7 @@ def _classification_metrics(
                 actual_labels, predicted_labels, average=average, zero_division=0
             )
         ),
-        "roc_auc": float(roc_auc_score(actual_labels, (predictions + 1) / 2))
+        "roc_auc": float(roc_auc_score(actual_labels, (signed_scores + 1) / 2))
         if not three_class and len(unique) == 2
         else None,
         "down_examples": int(np.count_nonzero(actual_labels == 0))
@@ -427,7 +438,7 @@ def evaluate_refinement_candidate(
                 )
             )
             continue
-        training_predictions, validation_predictions = _fit_predict(
+        training_predictions, validation_predictions, predicted_labels = _fit_predict(
             candidate,
             training_x,
             target.values[training],
@@ -436,11 +447,14 @@ def evaluate_refinement_candidate(
             request.deterministic_seed,
         )
         actual = target.values[validation].astype(np.float64)
-        metrics = (
-            asdict(calculate_metrics(validation_predictions, actual))
-            if candidate.objective is PredictionObjective.FUTURE_RETURN_REGRESSION
-            else _classification_metrics(
+        if candidate.objective is PredictionObjective.FUTURE_RETURN_REGRESSION:
+            metrics = asdict(calculate_metrics(validation_predictions, actual))
+        else:
+            if predicted_labels is None:
+                raise ValueError("classification evaluation requires predicted labels")
+            metrics = _classification_metrics(
                 validation_predictions,
+                predicted_labels,
                 actual,
                 round_trip_cost
                 if candidate.objective
@@ -451,7 +465,6 @@ def evaluate_refinement_candidate(
                     is PredictionObjective.COST_ADJUSTED_ACTION_CLASSIFICATION
                 ),
             )
-        )
         buckets = tuple(
             _confidence_bucket(
                 fraction=float(fraction),

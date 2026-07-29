@@ -6,6 +6,7 @@ from app.ml.refinement.calculation import (
     _aggregate_confidence_buckets,
     _confidence_bucket,
     _fit_predict,
+    _predicted_class_labels,
     _signed_classification_scores,
     _training_class_count,
 )
@@ -35,7 +36,7 @@ def test_ridge_supports_each_prediction_objective(
     training_x = random.normal(size=(90, 4)).astype(np.float32)
     training_y = np.resize(np.asarray([-0.02, 0.0, 0.02], dtype=np.float32), 90)
     validation_x = random.normal(size=(12, 4)).astype(np.float32)
-    training, validation = _fit_predict(
+    training, validation, predicted_labels = _fit_predict(
         candidate(objective),
         training_x,
         training_y,
@@ -47,6 +48,9 @@ def test_ridge_supports_each_prediction_objective(
     assert validation.shape == (12,)
     assert np.all(np.isfinite(training))
     assert np.all(np.isfinite(validation))
+    assert (predicted_labels is None) is (
+        objective is PredictionObjective.FUTURE_RETURN_REGRESSION
+    )
 
 
 def test_confidence_threshold_uses_training_and_costs_reduce_net_evidence() -> None:
@@ -104,6 +108,50 @@ def test_direction_classification_uses_the_positive_class_column() -> None:
     )
 
     assert scores.tolist() == pytest.approx([-0.5, 0.8])
+
+
+@pytest.mark.parametrize(
+    ("classes", "probabilities", "expected"),
+    [
+        ([0, 1, 2], [[0.40, 0.35, 0.25]], [0]),
+        ([0, 1, 2], [[0.25, 0.35, 0.40]], [2]),
+        ([2, 0, 1], [[0.40, 0.35, 0.25]], [2]),
+        ([0, 1], [[0.40, 0.60]], [1]),
+        ([1, 2], [[0.60, 0.40]], [1]),
+    ],
+)
+def test_predicted_classes_use_argmax_and_model_class_labels(
+    classes: list[int],
+    probabilities: list[list[float]],
+    expected: list[int],
+) -> None:
+    labels = _predicted_class_labels(
+        np.asarray(probabilities, dtype=np.float64),
+        np.asarray(classes, dtype=np.int64),
+    )
+
+    assert labels.tolist() == expected
+
+
+def test_multiclass_argmax_is_independent_from_signed_score_thresholds() -> None:
+    classes = np.asarray([0, 1, 2], dtype=np.int64)
+    probabilities = np.asarray(
+        [
+            [0.40, 0.35, 0.25],
+            [0.25, 0.35, 0.40],
+        ],
+        dtype=np.float64,
+    )
+
+    scores = _signed_classification_scores(
+        probabilities,
+        classes,
+        PredictionObjective.COST_ADJUSTED_ACTION_CLASSIFICATION,
+    )
+    labels = _predicted_class_labels(probabilities, classes)
+
+    assert scores.tolist() == pytest.approx([-0.15, 0.15])
+    assert labels.tolist() == [0, 2]
 
 
 @pytest.mark.parametrize(
