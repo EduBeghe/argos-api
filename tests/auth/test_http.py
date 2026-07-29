@@ -446,4 +446,3 @@ def test_disabled_mode_login_fails_safely_without_credentials(
     assert response.json() == {"detail": "Authentication is not configured"}
     assert "X-CSRF-Token" not in response.headers
     assert "set-cookie" not in response.headers
-

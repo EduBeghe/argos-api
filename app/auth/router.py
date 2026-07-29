@@ -77,4 +77,3 @@ def logout(response: Response, settings: AuthSettingsDependency) -> None:
     response.delete_cookie(SESSION_COOKIE, httponly=True, **options)  # type: ignore[arg-type]
     response.delete_cookie(CSRF_COOKIE, httponly=False, **options)  # type: ignore[arg-type]
     response.headers["Cache-Control"] = "no-store"
-
