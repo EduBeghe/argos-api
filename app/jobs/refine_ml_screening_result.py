@@ -5,6 +5,8 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
@@ -12,7 +14,7 @@ from app.core.logging import configure_logging
 from app.market.catalog import InstrumentCapability, resolve_instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.ml.contract import DEVELOPMENT_END, DEVELOPMENT_START
-from app.ml.dataset import build_ml_experiment_dataset
+from app.ml.dataset import MLExperimentDataset, build_ml_experiment_dataset
 from app.ml.reader import read_ml_experiment_candles
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.persistence import resolve_source
@@ -39,6 +41,30 @@ def load_request(path: Path) -> MLRefinementRequest:
     return MLRefinementRequest.model_validate(payload)
 
 
+async def load_refinement_dataset(
+    session: AsyncSession, request: MLRefinementRequest
+) -> MLExperimentDataset:
+    source_run, _ = await resolve_source(session, request)
+    definition = resolve_instrument(
+        asset=Asset(source_run.asset),
+        provider=Provider(source_run.provider),
+        market_type=MarketType(source_run.market_type),
+        interval=Interval(source_run.interval),
+        capability=InstrumentCapability.SCORING,
+    )
+    candles = await read_ml_experiment_candles(
+        session=session,
+        instrument=definition.instrument,
+        start=DEVELOPMENT_START,
+        end=DEVELOPMENT_END,
+    )
+    return build_ml_experiment_dataset(
+        instrument=definition.instrument,
+        columns=candles.columns,
+        requested_end=DEVELOPMENT_END,
+    )
+
+
 async def run(args: argparse.Namespace) -> None:
     request = load_request(args.config)
     settings = get_settings()
@@ -48,25 +74,7 @@ async def run(args: argparse.Namespace) -> None:
     factory = create_session_factory(engine)
     try:
         async with factory() as session:
-            source_run, _ = await resolve_source(session, request)
-            definition = resolve_instrument(
-                asset=Asset(source_run.asset),
-                provider=Provider(source_run.provider),
-                market_type=MarketType(source_run.market_type),
-                interval=Interval(source_run.interval),
-                capability=InstrumentCapability.SCORING,
-            )
-            candles = await read_ml_experiment_candles(
-                session=session,
-                instrument=definition.instrument,
-                start=DEVELOPMENT_START,
-                end=DEVELOPMENT_END,
-            )
-            dataset = build_ml_experiment_dataset(
-                instrument=definition.instrument,
-                columns=candles.columns,
-                requested_end=DEVELOPMENT_END,
-            )
+            dataset = await load_refinement_dataset(session, request)
             if args.dry_run:
                 dry_run = await prepare_refinement(
                     session=session,
@@ -90,6 +98,12 @@ async def run(args: argparse.Namespace) -> None:
                             "durations": list(request.future_durations_seconds),
                             "fold_count": dry_run.fold_count,
                             "maximum_runtime_seconds": request.maximum_runtime_seconds,
+                            "uncovered_engines": dry_run.plan.uncovered_engines,
+                            "uncovered_objectives": dry_run.plan.uncovered_objectives,
+                            "uncovered_durations": dry_run.plan.uncovered_durations,
+                            "uncovered_feature_policies": (
+                                dry_run.plan.uncovered_feature_policies
+                            ),
                             "dry_run": True,
                         }
                     },

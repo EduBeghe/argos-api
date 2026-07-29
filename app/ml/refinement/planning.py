@@ -1,12 +1,13 @@
 import hashlib
 import json
+import math
 import random
-from collections.abc import Iterable
 from dataclasses import dataclass
 
 from app.ml.screening.config import ScreeningEngine
 
 from .contracts import (
+    ML_REFINEMENT_CONTRACT_VERSION,
     AllFeatures,
     CatBoostSearchSpace,
     ExplicitFeatures,
@@ -46,6 +47,10 @@ class RefinementPlan:
     evaluations: tuple[PlannedEvaluation, ...]
     total_combinations: int
     omitted_by_trial_budget: int
+    uncovered_engines: tuple[str, ...]
+    uncovered_objectives: tuple[str, ...]
+    uncovered_durations: tuple[int, ...]
+    uncovered_feature_policies: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,19 +145,35 @@ def build_refinement_plan(request: MLRefinementRequest) -> RefinementPlan:
             break
 
     candidates: list[PlannedEvaluation] = []
+    suffix_order: list[tuple[int, int, int]] = []
+    for ordinal in range(max(len(objectives), len(durations), len(features))):
+        item = (
+            ordinal % len(objectives),
+            ordinal % len(durations),
+            ordinal % len(features),
+        )
+        if item not in suffix_order:
+            suffix_order.append(item)
+    for objective_index in range(len(objectives)):
+        for duration_index in range(len(durations)):
+            for feature_index in range(len(features)):
+                item = (objective_index, duration_index, feature_index)
+                if item not in suffix_order:
+                    suffix_order.append(item)
     for block_index, (block, quota) in enumerate(zip(blocks, quotas, strict=True)):
-        indexes: Iterable[int]
-        if quota == block.combination_count:
-            indexes = range(block.combination_count)
-        else:
-            randomizer = random.Random(request.deterministic_seed + block_index)
-            indexes = sorted(randomizer.sample(range(block.combination_count), quota))
-        for flat_index in indexes:
-            parameter_index, suffix_index = divmod(flat_index, suffix_count)
-            duration_index, suffix_index = divmod(
-                suffix_index, len(objectives) * len(features)
-            )
-            objective_index, feature_index = divmod(suffix_index, len(features))
+        randomizer = random.Random(request.deterministic_seed + block_index)
+        parameter_offset = randomizer.randrange(block.parameter_count)
+        parameter_step = randomizer.randrange(1, block.parameter_count + 1)
+        while math.gcd(parameter_step, block.parameter_count) != 1:
+            parameter_step = parameter_step % block.parameter_count + 1
+        for ordinal in range(quota):
+            objective_index, duration_index, feature_index = suffix_order[
+                ordinal % suffix_count
+            ]
+            remainder = ordinal // suffix_count
+            parameter_index = (
+                parameter_offset + remainder * parameter_step
+            ) % block.parameter_count
             parameters = _decode_parameters(
                 flat_index=parameter_index,
                 names=block.names,
@@ -162,7 +183,7 @@ def build_refinement_plan(request: MLRefinementRequest) -> RefinementPlan:
             duration = durations[duration_index]
             objective = objectives[objective_index]
             payload: dict[str, object] = {
-                "contract_version": 1,
+                "contract_version": ML_REFINEMENT_CONTRACT_VERSION,
                 "engine": block.engine.value,
                 "duration": duration,
                 "objective": objective.value,
@@ -190,4 +211,28 @@ def build_refinement_plan(request: MLRefinementRequest) -> RefinementPlan:
                 )
             )
     candidates.sort(key=lambda item: item.fingerprint)
-    return RefinementPlan(tuple(candidates), total, max(0, total - len(candidates)))
+    selected_engines = {item.engine.value for item in candidates}
+    selected_objectives = {item.objective.value for item in candidates}
+    selected_durations = {item.future_duration_seconds for item in candidates}
+    selected_features = {
+        f"{item.feature_strategy}:{item.top_k or ''}:{item.explicit_variables or ''}"
+        for item in candidates
+    }
+    requested_features = {
+        f"{strategy}:{top_k or ''}:{variables or ''}"
+        for strategy, variables, top_k in features
+    }
+    return RefinementPlan(
+        tuple(candidates),
+        total,
+        max(0, total - len(candidates)),
+        tuple(sorted({item.value for item in request.engines} - selected_engines)),
+        tuple(
+            sorted(
+                {item.value for item in request.prediction_objectives}
+                - selected_objectives
+            )
+        ),
+        tuple(sorted(set(request.future_durations_seconds) - selected_durations)),
+        tuple(sorted(requested_features - selected_features)),
+    )

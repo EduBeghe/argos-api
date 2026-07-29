@@ -1,7 +1,13 @@
 import numpy as np
 import pytest
 
-from app.ml.refinement.calculation import _confidence_bucket, _fit_predict
+from app.ml.refinement.calculation import (
+    RefinementFoldResult,
+    _aggregate_confidence_buckets,
+    _confidence_bucket,
+    _fit_predict,
+    _training_class_count,
+)
 from app.ml.refinement.contracts import PredictionObjective
 from app.ml.refinement.planning import PlannedEvaluation
 from app.ml.screening.config import ScreeningEngine
@@ -68,3 +74,90 @@ def test_confidence_threshold_uses_training_and_costs_reduce_net_evidence() -> N
     assert isinstance(costly_return, float)
     assert isinstance(free_return, float)
     assert costly_return < free_return
+
+
+def test_signed_binary_confidence_selects_both_directions() -> None:
+    probabilities = np.asarray([0.01, 0.50, 0.99])
+    signed = 2 * probabilities - 1
+    result = _confidence_bucket(
+        fraction=2 / 3,
+        training_predictions=signed,
+        validation_predictions=signed,
+        actual=np.asarray([-0.03, 0.0, 0.03]),
+        round_trip_cost=0.001,
+    )
+    assert signed.tolist() == pytest.approx([-0.98, 0.0, 0.98])
+    assert result["negative_signal_count"] == 1
+    assert result["positive_signal_count"] == 1
+    assert result["negative_signals"]["directional_accuracy"] == 1.0  # type: ignore[index]
+    assert result["positive_signals"]["directional_accuracy"] == 1.0  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected_positive", "expected_negative"),
+    [
+        ([0.03, -0.001], True, False),
+        ([0.001, -0.03], False, True),
+        ([0.03, -0.03], True, True),
+        ([0.001, -0.001], False, False),
+    ],
+)
+def test_direction_specific_bucket_economics(
+    actual: list[float], expected_positive: bool, expected_negative: bool
+) -> None:
+    result = _confidence_bucket(
+        fraction=1.0,
+        training_predictions=np.asarray([0.9, -0.9]),
+        validation_predictions=np.asarray([0.9, -0.9]),
+        actual=np.asarray(actual),
+        round_trip_cost=0.01,
+    )
+    positive = result["positive_signals"]
+    negative = result["negative_signals"]
+    assert isinstance(positive, dict)
+    assert isinstance(negative, dict)
+    assert (positive["estimated_net_return"] > 0) is expected_positive
+    assert (negative["estimated_net_return"] > 0) is expected_negative
+
+
+def test_missing_training_classes_are_detected_for_both_classifiers() -> None:
+    values = np.asarray([0.001, 0.001], dtype=np.float32)
+    assert (
+        _training_class_count(
+            PredictionObjective.FUTURE_DIRECTION_CLASSIFICATION, values, 0.01
+        )
+        == 1
+    )
+    assert (
+        _training_class_count(
+            PredictionObjective.COST_ADJUSTED_ACTION_CLASSIFICATION, values, 0.01
+        )
+        == 1
+    )
+
+
+def test_confidence_evidence_is_aggregated_within_the_same_bucket() -> None:
+    first = _confidence_bucket(
+        fraction=0.1,
+        training_predictions=np.asarray([0.9, -0.9]),
+        validation_predictions=np.asarray([0.9, -0.9]),
+        actual=np.asarray([0.03, -0.03]),
+        round_trip_cost=0.01,
+    )
+    second = _confidence_bucket(
+        fraction=0.1,
+        training_predictions=np.asarray([0.9, -0.9]),
+        validation_predictions=np.asarray([0.9, -0.9]),
+        actual=np.asarray([-0.01, 0.01]),
+        round_trip_cost=0.01,
+    )
+    folds = [
+        RefinementFoldResult("a", 10, 2, (), {}, (first,), 0.01),
+        RefinementFoldResult("b", 10, 2, (), {}, (second,), 0.01),
+    ]
+    aggregate = _aggregate_confidence_buckets(folds)[0]
+    assert aggregate["observation_count"] == 4
+    assert aggregate["folds_with_positive_net_return"] == 1
+    assert aggregate["folds_with_favorable_direction"] == 1
+    assert aggregate["median_net_return"] == pytest.approx(0.0)
+    assert aggregate["worst_net_return"] == pytest.approx(-0.02)

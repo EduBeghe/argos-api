@@ -110,7 +110,25 @@ def test_plan_is_bounded_distributed_and_deterministic() -> None:
     assert first.omitted_by_trial_budget == 96
     assert len({item.fingerprint for item in first.evaluations}) == 12
     assert {item.future_duration_seconds for item in first.evaluations} == {1800, 3600}
-    assert len({item.objective for item in first.evaluations}) > 1
+    assert {item.objective for item in first.evaluations} == set(
+        request.prediction_objectives
+    )
+    assert {item.feature_strategy for item in first.evaluations} == {"all", "top_k"}
+    assert first.uncovered_engines == ()
+    assert first.uncovered_objectives == ()
+    assert first.uncovered_durations == ()
+    assert first.uncovered_feature_policies == ()
+
+
+def test_small_budget_reports_dimensions_without_coverage() -> None:
+    payload = request_payload()
+    payload["maximum_trials"] = 2
+    plan = build_refinement_plan(MLRefinementRequest.model_validate(payload))
+    assert len(plan.evaluations) == 2
+    assert plan.uncovered_engines == ()
+    assert len(plan.uncovered_objectives) == 1
+    assert plan.uncovered_durations == ()
+    assert plan.uncovered_feature_policies
 
 
 def test_all_three_engine_search_contracts_are_supported() -> None:

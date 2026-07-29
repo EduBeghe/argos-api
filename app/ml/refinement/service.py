@@ -15,6 +15,7 @@ from .persistence import (
     complete_run,
     completed_run_is_complete,
     effective_evaluation_fingerprint,
+    existing_run_evaluation,
     experiment_key,
     fail_run,
     find_completed_run,
@@ -129,8 +130,19 @@ async def execute_refinement(
                 reason = "maximum_runtime_seconds"
                 break
             fingerprint = effective_evaluation_fingerprint(
-                dataset.metadata.fingerprint, candidate.fingerprint
+                dataset_fingerprint=dataset.metadata.fingerprint,
+                candidate_fingerprint=candidate.fingerprint,
+                engine=candidate.engine.value,
+                versions=versions,
+                deterministic_seed=request.deterministic_seed,
             )
+            retained = await existing_run_evaluation(session, run.id, fingerprint)
+            if retained is not None:
+                reused_count += 1
+                await record_progress(
+                    session, run.id, computed=computed, reused=reused_count
+                )
+                continue
             reused = await reusable_evaluation(session, fingerprint)
             if reused is not None:
                 await persist_evaluation(

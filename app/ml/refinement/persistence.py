@@ -111,9 +111,22 @@ async def start_run(
     if existing is not None:
         if existing.status in {"queued", "running"}:
             raise MLRefinementError("an identical refinement is already running")
+        compatible_fingerprints = [
+            effective_evaluation_fingerprint(
+                dataset_fingerprint=dataset_fingerprint,
+                candidate_fingerprint=candidate.fingerprint,
+                engine=candidate.engine.value,
+                versions=versions,
+                deterministic_seed=request.deterministic_seed,
+            )
+            for candidate in plan.evaluations
+        ]
         await session.execute(
             delete(MLRefinementEvaluationRecord).where(
-                MLRefinementEvaluationRecord.run_id == existing.id
+                MLRefinementEvaluationRecord.run_id == existing.id,
+                MLRefinementEvaluationRecord.fingerprint.not_in(
+                    compatible_fingerprints
+                ),
             )
         )
         await session.execute(
@@ -173,11 +186,48 @@ async def start_run(
 
 
 def effective_evaluation_fingerprint(
-    dataset_fingerprint: str, candidate_fingerprint: str
+    *,
+    dataset_fingerprint: str,
+    candidate_fingerprint: str,
+    engine: str,
+    versions: dict[str, str],
+    deterministic_seed: int,
 ) -> str:
+    engine_version_keys = {
+        "ridge": ("scikit-learn",),
+        "lightgbm": ("lightgbm",),
+        "catboost": ("catboost",),
+    }
+    relevant_versions = {
+        key: versions[key] for key in engine_version_keys[engine] if key in versions
+    }
+    payload = {
+        "dataset_fingerprint": dataset_fingerprint,
+        "candidate_fingerprint": candidate_fingerprint,
+        "contract_version": ML_REFINEMENT_CONTRACT_VERSION,
+        "classification_version": ML_REFINEMENT_CLASSIFICATION_VERSION,
+        "variable_registry_version": VARIABLE_REGISTRY_VERSION,
+        "missing_data_policy_version": MISSING_DATA_POLICY_VERSION,
+        "engine_versions": relevant_versions,
+        "deterministic_seed": deterministic_seed,
+    }
     return hashlib.sha256(
-        f"{dataset_fingerprint}:{candidate_fingerprint}".encode()
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+async def existing_run_evaluation(
+    session: AsyncSession, run_id: UUID, fingerprint: str
+) -> MLRefinementEvaluationRecord | None:
+    return cast(
+        MLRefinementEvaluationRecord | None,
+        await session.scalar(
+            select(MLRefinementEvaluationRecord).where(
+                MLRefinementEvaluationRecord.run_id == run_id,
+                MLRefinementEvaluationRecord.fingerprint == fingerprint,
+            )
+        ),
+    )
 
 
 async def reusable_evaluation(

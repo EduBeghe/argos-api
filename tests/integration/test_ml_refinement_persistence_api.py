@@ -18,7 +18,10 @@ from app.ml.refinement.models import (
 )
 from app.ml.refinement.persistence import (
     complete_run,
+    effective_evaluation_fingerprint,
+    existing_run_evaluation,
     experiment_key,
+    fail_run,
     find_completed_run,
     persist_evaluation,
     resolve_source,
@@ -195,6 +198,13 @@ async def test_persistence_reuse_and_read_only_api(
             now=NOW,
         )
         candidate = plan.evaluations[0]
+        evaluation_fingerprint = effective_evaluation_fingerprint(
+            dataset_fingerprint="d" * 64,
+            candidate_fingerprint=candidate.fingerprint,
+            engine=candidate.engine.value,
+            versions=versions,
+            deterministic_seed=refinement_request.deterministic_seed,
+        )
         result = RefinementEvaluationResult(
             candidate,
             (),
@@ -206,7 +216,7 @@ async def test_persistence_reuse_and_read_only_api(
         await persist_evaluation(
             session=session,
             run_id=run.id,
-            fingerprint=candidate.fingerprint,
+            fingerprint=evaluation_fingerprint,
             result=result,
             reused=None,
             request=refinement_request,
@@ -253,3 +263,107 @@ async def test_persistence_reuse_and_read_only_api(
             select(func.count(MLRefinementEvaluationRecord.id))
         )
         assert evaluation_count == 1
+
+
+async def test_failed_run_retains_complete_evaluations_for_retry(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    payload = request(source_run_id, source_result_id).model_dump(mode="json")
+    payload["search_space"][0]["alpha"] = {"values": [1.0, 2.0]}
+    payload["maximum_trials"] = 2
+    refinement_request = MLRefinementRequest.model_validate(payload)
+    plan = build_refinement_plan(refinement_request)
+    versions = library_versions()
+    key = experiment_key(
+        request=refinement_request, dataset_fingerprint="r" * 64, versions=versions
+    )
+    fingerprints = [
+        effective_evaluation_fingerprint(
+            dataset_fingerprint="r" * 64,
+            candidate_fingerprint=candidate.fingerprint,
+            engine=candidate.engine.value,
+            versions=versions,
+            deterministic_seed=refinement_request.deterministic_seed,
+        )
+        for candidate in plan.evaluations
+    ]
+    async with factory() as session:
+        run = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key=key,
+            dataset_fingerprint="r" * 64,
+            versions=versions,
+            now=NOW,
+        )
+        first_result = RefinementEvaluationResult(
+            plan.evaluations[0],
+            (),
+            {"fold_count": 0},
+            RefinementClassification.INCOMPLETE,
+            ("incomplete_fold_count",),
+            0.1,
+        )
+        await persist_evaluation(
+            session=session,
+            run_id=run.id,
+            fingerprint=fingerprints[0],
+            result=first_result,
+            reused=None,
+            request=refinement_request,
+            now=NOW,
+        )
+        await fail_run(session, run.id, RuntimeError("simulated"), NOW)
+
+        recovered = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key=key,
+            dataset_fingerprint="r" * 64,
+            versions=versions,
+            now=NOW,
+        )
+        assert recovered.id == run.id
+        assert await existing_run_evaluation(session, run.id, fingerprints[0])
+        assert await existing_run_evaluation(session, run.id, fingerprints[1]) is None
+        second_result = RefinementEvaluationResult(
+            plan.evaluations[1],
+            (),
+            {"fold_count": 0},
+            RefinementClassification.INCOMPLETE,
+            ("incomplete_fold_count",),
+            0.2,
+        )
+        await persist_evaluation(
+            session=session,
+            run_id=run.id,
+            fingerprint=fingerprints[1],
+            result=second_result,
+            reused=None,
+            request=refinement_request,
+            now=NOW,
+        )
+        await complete_run(
+            session,
+            run.id,
+            computed=1,
+            reused=1,
+            omitted=0,
+            budget_exhausted=False,
+            reason="trial_plan_completed",
+            elapsed=1,
+            now=NOW,
+        )
+        await session.refresh(recovered)
+        count = await session.scalar(
+            select(func.count(MLRefinementEvaluationRecord.id)).where(
+                MLRefinementEvaluationRecord.run_id == run.id
+            )
+        )
+        assert count == 2
+        assert recovered.status == "completed"
+        assert recovered.evaluations_computed == 1
+        assert recovered.evaluations_reused == 1

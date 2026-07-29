@@ -30,6 +30,7 @@ class RefinementFoldResult:
     metrics: dict[str, object]
     confidence_metrics: tuple[dict[str, object], ...]
     economic_threshold: float
+    incomplete_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +140,9 @@ def _fit_predict(
         model.predict_proba(validation_x), dtype=np.float64
     )
     if training_probability.shape[1] == 2:
-        return training_probability[:, 1], validation_probability[:, 1]
+        # Binary classifiers expose positive-class probability. Refinement uses a
+        # signed directional score so confidence and direction remain distinct.
+        return 2 * training_probability[:, 1] - 1, 2 * validation_probability[:, 1] - 1
     classes = np.asarray(model.classes_)
     signed = np.where(classes == 2, 1.0, np.where(classes == 0, -1.0, 0.0))
     return training_probability @ signed, validation_probability @ signed
@@ -170,7 +173,7 @@ def _classification_metrics(
         average = "macro"
     else:
         actual_labels = (actual > threshold).astype(np.int64)
-        predicted_labels = (predictions > 0.5).astype(np.int64)
+        predicted_labels = (predictions > 0).astype(np.int64)
         average = "binary"
     unique = np.unique(actual_labels)
     return {
@@ -188,7 +191,7 @@ def _classification_metrics(
                 actual_labels, predicted_labels, average=average, zero_division=0
             )
         ),
-        "roc_auc": float(roc_auc_score(actual_labels, predictions))
+        "roc_auc": float(roc_auc_score(actual_labels, (predictions + 1) / 2))
         if not three_class and len(unique) == 2
         else None,
         "down_examples": int(np.count_nonzero(actual_labels == 0))
@@ -224,6 +227,36 @@ def _confidence_bucket(
     signs = np.sign(validation_predictions[selected])
     aligned = returns * signs
     net = aligned - round_trip_cost
+
+    def direction_metrics(mask: NDArray[np.bool_]) -> dict[str, object]:
+        direction_returns = returns[mask]
+        direction_aligned = aligned[mask]
+        direction_net = net[mask]
+        return {
+            "observation_count": int(np.count_nonzero(mask)),
+            "directional_accuracy": (
+                float(np.mean(direction_aligned > 0))
+                if len(direction_aligned)
+                else None
+            ),
+            "mean_future_return": (
+                float(np.mean(direction_returns)) if len(direction_returns) else None
+            ),
+            "median_future_return": (
+                float(np.median(direction_returns)) if len(direction_returns) else None
+            ),
+            "estimated_net_return": (
+                float(np.mean(direction_net)) if len(direction_net) else None
+            ),
+            "cost_covering_fraction": (
+                float(np.mean(direction_aligned > round_trip_cost))
+                if len(direction_aligned)
+                else None
+            ),
+        }
+
+    positive = signs > 0
+    negative = signs < 0
     return {
         "fraction": fraction,
         "training_confidence_threshold": cutoff,
@@ -238,7 +271,66 @@ def _confidence_bucket(
         else None,
         "positive_signal_count": int(np.count_nonzero(signs > 0)),
         "negative_signal_count": int(np.count_nonzero(signs < 0)),
+        "positive_signals": direction_metrics(positive),
+        "negative_signals": direction_metrics(negative),
     }
+
+
+def _aggregate_confidence_buckets(
+    folds: list[RefinementFoldResult],
+) -> tuple[dict[str, object], ...]:
+    fractions = sorted(
+        {
+            _number(bucket["fraction"])
+            for fold in folds
+            for bucket in fold.confidence_metrics
+        }
+    )
+    aggregates: list[dict[str, object]] = []
+    for fraction in fractions:
+        buckets = [
+            bucket
+            for fold in folds
+            for bucket in fold.confidence_metrics
+            if _number(bucket["fraction"]) == fraction
+        ]
+        usable = [
+            bucket for bucket in buckets if bucket["estimated_net_return"] is not None
+        ]
+        observations = sum(_integer(bucket["observation_count"]) for bucket in buckets)
+        net_returns = [_number(bucket["estimated_net_return"]) for bucket in usable]
+        weighted_net = sum(
+            _number(bucket["estimated_net_return"])
+            * _integer(bucket["observation_count"])
+            for bucket in usable
+        )
+        coverage_weight = sum(_number(bucket["coverage"]) for bucket in buckets)
+        aggregates.append(
+            {
+                "fraction": fraction,
+                "observation_count": observations,
+                "folds_with_evidence": len(usable),
+                "folds_with_positive_net_return": sum(
+                    value > 0 for value in net_returns
+                ),
+                "folds_with_favorable_direction": sum(
+                    bucket["directional_accuracy"] is not None
+                    and _number(bucket["directional_accuracy"]) > 0.5
+                    for bucket in buckets
+                ),
+                "median_net_return": (
+                    float(np.median(net_returns)) if net_returns else None
+                ),
+                "worst_net_return": min(net_returns) if net_returns else None,
+                "observation_weighted_net_return": (
+                    weighted_net / observations if observations else None
+                ),
+                "aggregate_coverage": (
+                    coverage_weight / len(buckets) if buckets else 0.0
+                ),
+            }
+        )
+    return tuple(aggregates)
 
 
 def _number(value: object) -> float:
@@ -251,6 +343,23 @@ def _integer(value: object) -> int:
     if not isinstance(value, int):
         raise ValueError("expected integer metric")
     return value
+
+
+def _training_class_count(
+    objective: PredictionObjective,
+    target: NDArray[np.float32],
+    economic_threshold: float,
+) -> int | None:
+    if objective is PredictionObjective.FUTURE_RETURN_REGRESSION:
+        return None
+    if objective is PredictionObjective.FUTURE_DIRECTION_CLASSIFICATION:
+        return len(np.unique(target > 0))
+    labels = np.where(
+        target > economic_threshold,
+        2,
+        np.where(target < -economic_threshold, 0, 1),
+    )
+    return len(np.unique(labels))
 
 
 def evaluate_refinement_candidate(
@@ -277,6 +386,30 @@ def evaluate_refinement_candidate(
         )
         training_x = dataset.features[np.ix_(training, columns)]
         validation_x = dataset.features[np.ix_(validation, columns)]
+        class_count = _training_class_count(
+            candidate.objective, target.values[training], round_trip_cost
+        )
+        validation_class_count = _training_class_count(
+            candidate.objective, target.values[validation], round_trip_cost
+        )
+        if (
+            class_count is not None
+            and validation_class_count is not None
+            and (class_count < 2 or validation_class_count < 2)
+        ):
+            folds.append(
+                RefinementFoldResult(
+                    fold.definition.name,
+                    len(training),
+                    len(validation),
+                    tuple(VARIABLE_REGISTRY[index].name for index in columns),
+                    {},
+                    (),
+                    round_trip_cost,
+                    "classification_fold_contains_single_class",
+                )
+            )
+            continue
         training_predictions, validation_predictions = _fit_predict(
             candidate,
             training_x,
@@ -323,41 +456,63 @@ def evaluate_refinement_candidate(
                 round_trip_cost,
             )
         )
-    best = [
-        bucket
-        for fold in folds
-        for bucket in fold.confidence_metrics
-        if bucket["estimated_net_return"] is not None
-    ]
+    confidence_aggregates = _aggregate_confidence_buckets(folds)
+    selected = max(
+        confidence_aggregates,
+        key=lambda item: (
+            _integer(item["folds_with_positive_net_return"]),
+            _integer(item["folds_with_favorable_direction"]),
+            _number(item["median_net_return"])
+            if item["median_net_return"] is not None
+            else -math.inf,
+            _integer(item["observation_count"]),
+            -_number(item["fraction"]),
+        ),
+        default=None,
+    )
     evidence = RefinementEvidence(
         fold_count=len(folds),
+        complete_fold_count=sum(fold.incomplete_reason is None for fold in folds),
         folds_beating_benchmark=sum(
             _number(fold.metrics.get("mae_improvement_over_zero", 0)) > 0
             or _number(fold.metrics.get("balanced_accuracy", 0)) > 0.5
             for fold in folds
+            if fold.incomplete_reason is None
         ),
-        folds_with_positive_direction=sum(
-            any(
-                bucket["directional_accuracy"] is not None
-                and _number(bucket["directional_accuracy"]) > 0.5
-                for bucket in fold.confidence_metrics
-            )
-            for fold in folds
+        selected_bucket_fraction=(
+            _number(selected["fraction"]) if selected is not None else None
         ),
-        best_confidence_net_return=max(
-            (_number(item["estimated_net_return"]) for item in best), default=None
+        selected_bucket_observations=(
+            _integer(selected["observation_count"]) if selected is not None else 0
         ),
-        best_confidence_observations=max(
-            (_integer(item["observation_count"]) for item in best), default=0
+        selected_bucket_positive_net_folds=(
+            _integer(selected["folds_with_positive_net_return"])
+            if selected is not None
+            else 0
+        ),
+        selected_bucket_favorable_direction_folds=(
+            _integer(selected["folds_with_favorable_direction"])
+            if selected is not None
+            else 0
+        ),
+        selected_bucket_median_net_return=(
+            _number(selected["median_net_return"])
+            if selected is not None and selected["median_net_return"] is not None
+            else None
+        ),
+        selected_bucket_worst_net_return=(
+            _number(selected["worst_net_return"])
+            if selected is not None and selected["worst_net_return"] is not None
+            else None
         ),
     )
     classification, failed = classify_refinement_evidence(evidence)
     aggregate: dict[str, object] = {
         "fold_count": len(folds),
         "folds_beating_benchmark": evidence.folds_beating_benchmark,
-        "folds_with_positive_direction": evidence.folds_with_positive_direction,
-        "best_confidence_net_return": evidence.best_confidence_net_return,
-        "best_confidence_observations": evidence.best_confidence_observations,
+        "complete_fold_count": evidence.complete_fold_count,
+        "confidence_bucket_aggregates": confidence_aggregates,
+        "selected_confidence_bucket": selected,
     }
     return RefinementEvaluationResult(
         candidate,
