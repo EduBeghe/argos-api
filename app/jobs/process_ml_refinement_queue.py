@@ -27,6 +27,10 @@ class DatasetFingerprintChanged(RuntimeError):
     pass
 
 
+def heartbeat_interval_seconds(stale_after_seconds: int) -> float:
+    return float(min(60, max(1, stale_after_seconds // 3)))
+
+
 def bounded_integer(minimum: int, maximum: int) -> Callable[[str], int]:
     def parse(value: str) -> int:
         parsed = int(value)
@@ -87,6 +91,9 @@ async def process_once(
                 request=request,
                 claimed_run=run,
                 worker_id=worker_id,
+                heartbeat_interval_seconds=heartbeat_interval_seconds(
+                    int(stale_after.total_seconds())
+                ),
             )
         except Exception as error:
             await fail_run(

@@ -33,6 +33,22 @@ class MLRefinementError(RuntimeError):
     pass
 
 
+class SourceScreeningRunNotFoundError(MLRefinementError):
+    pass
+
+
+class SourceScreeningResultNotFoundError(MLRefinementError):
+    pass
+
+
+class SourceScreeningMismatchError(MLRefinementError):
+    pass
+
+
+class SourceScreeningIncompleteError(MLRefinementError):
+    pass
+
+
 def decimal_metric(value: float) -> Decimal:
     if not math.isfinite(value):
         raise MLRefinementError("non-finite refinement metric cannot be persisted")
@@ -62,12 +78,18 @@ async def resolve_source(
     result = await session.get(
         MLModelScreeningResultRecord, request.source_screening_result_id
     )
-    if run is None or result is None:
-        raise MLRefinementError("source screening run or result does not exist")
+    if run is None:
+        raise SourceScreeningRunNotFoundError("source screening run does not exist")
+    if result is None:
+        raise SourceScreeningResultNotFoundError(
+            "source screening result does not exist"
+        )
     if result.run_id != run.id:
-        raise MLRefinementError("source screening result does not belong to source run")
+        raise SourceScreeningMismatchError(
+            "source screening result does not belong to source run"
+        )
     if run.status != "completed" or run.completed_at is None:
-        raise MLRefinementError("source screening run is incomplete")
+        raise SourceScreeningIncompleteError("source screening run is incomplete")
     return run, result
 
 

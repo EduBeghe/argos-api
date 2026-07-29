@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ml.dataset import MLExperimentDataset
 from app.ml.screening.engines import library_versions
 
-from .calculation import evaluate_refinement_candidate
+from .calculation import RefinementEvaluationResult, evaluate_refinement_candidate
 from .contracts import MLRefinementRequest
 from .models import MLRefinementRunRecord
 from .persistence import (
@@ -27,10 +28,63 @@ from .persistence import (
     reusable_evaluation,
     start_run,
 )
-from .planning import RefinementPlan, build_refinement_plan
+from .planning import PlannedEvaluation, RefinementPlan, build_refinement_plan
 from .queue import heartbeat
 
 logger = logging.getLogger(__name__)
+
+
+class RefinementLeaseLostError(RuntimeError):
+    pass
+
+
+async def _evaluate_with_heartbeat(
+    *,
+    session: AsyncSession,
+    run_id: UUID,
+    worker_id: str,
+    heartbeat_interval_seconds: float,
+    dataset: MLExperimentDataset,
+    candidate: PlannedEvaluation,
+    request: MLRefinementRequest,
+) -> RefinementEvaluationResult:
+    stopped = asyncio.Event()
+    lease_error: Exception | None = None
+
+    async def maintain_lease() -> None:
+        nonlocal lease_error
+        try:
+            while not stopped.is_set():
+                try:
+                    await asyncio.wait_for(
+                        stopped.wait(), timeout=heartbeat_interval_seconds
+                    )
+                except TimeoutError:
+                    if not await heartbeat(session, run_id, worker_id):
+                        raise RefinementLeaseLostError(
+                            "worker lost the refinement lease"
+                        ) from None
+        except Exception as error:
+            lease_error = error
+
+    task = asyncio.create_task(maintain_lease())
+    try:
+        result = await asyncio.to_thread(
+            evaluate_refinement_candidate,
+            dataset=dataset,
+            candidate=candidate,
+            request=request,
+        )
+    finally:
+        stopped.set()
+        await task
+    if lease_error is not None:
+        raise RefinementLeaseLostError(
+            "worker lease could not be verified during evaluation"
+        ) from lease_error
+    if not await heartbeat(session, run_id, worker_id):
+        raise RefinementLeaseLostError("worker lost the refinement lease")
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +134,7 @@ async def execute_refinement(
     now: datetime | None = None,
     claimed_run: MLRefinementRunRecord | None = None,
     worker_id: str | None = None,
+    heartbeat_interval_seconds: float | None = None,
 ) -> RefinementExecutionResult:
     await resolve_source(session, request)
     versions = library_versions()
@@ -113,6 +168,8 @@ async def execute_refinement(
         if claimed_run.experiment_key != key:
             raise RuntimeError("DatasetFingerprintChanged")
         run = claimed_run
+        if heartbeat_interval_seconds is None or heartbeat_interval_seconds <= 0:
+            raise ValueError("claimed execution requires a positive heartbeat interval")
     else:
         run = await start_run(
             session=session,
@@ -195,9 +252,40 @@ async def execute_refinement(
                 )
                 reused_count += 1
             else:
-                result = evaluate_refinement_candidate(
-                    dataset=dataset, candidate=candidate, request=request
-                )
+                if worker_id is None:
+                    result = evaluate_refinement_candidate(
+                        dataset=dataset, candidate=candidate, request=request
+                    )
+                else:
+                    assert heartbeat_interval_seconds is not None
+                    result = await _evaluate_with_heartbeat(
+                        session=session,
+                        run_id=run.id,
+                        worker_id=worker_id,
+                        heartbeat_interval_seconds=heartbeat_interval_seconds,
+                        dataset=dataset,
+                        candidate=candidate,
+                        request=request,
+                    )
+                    await session.refresh(run)
+                    if run.cancellation_requested_at is not None:
+                        await cancel_claimed_run(
+                            session,
+                            run.id,
+                            worker_id=worker_id,
+                            now=datetime.now(UTC),
+                        )
+                        return RefinementExecutionResult(
+                            run.id,
+                            key,
+                            False,
+                            plan.total_combinations,
+                            computed,
+                            reused_count,
+                            omitted + len(plan.evaluations) - index,
+                            True,
+                            "cancelled_by_user",
+                        )
                 await persist_evaluation(
                     session=session,
                     run_id=run.id,
@@ -246,16 +334,17 @@ async def execute_refinement(
             worker_id=worker_id,
         )
     except Exception as error:
-        await fail_run(session, run.id, error, datetime.now(UTC), worker_id=worker_id)
-        logger.exception(
-            "ML refinement failed",
-            extra={
-                "structured_fields": {
-                    "run_id": str(run.id),
-                    "failure_type": type(error).__name__,
-                }
-            },
-        )
+        if worker_id is None:
+            await fail_run(session, run.id, error, datetime.now(UTC))
+            logger.exception(
+                "ML refinement failed",
+                extra={
+                    "structured_fields": {
+                        "run_id": str(run.id),
+                        "failure_type": type(error).__name__,
+                    }
+                },
+            )
         raise
     logger.info(
         "ML refinement completed",

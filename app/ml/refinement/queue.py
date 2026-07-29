@@ -93,7 +93,9 @@ async def enqueue_refinement(
         versions=versions,
     )
     existing = await session.scalar(
-        select(MLRefinementRunRecord).where(MLRefinementRunRecord.experiment_key == key)
+        select(MLRefinementRunRecord)
+        .where(MLRefinementRunRecord.experiment_key == key)
+        .with_for_update()
     )
     if existing is not None:
         if existing.status == "queued":
@@ -185,7 +187,11 @@ async def enqueue_refinement(
 async def cancel_refinement(
     session: AsyncSession, run_id: UUID, *, now: datetime | None = None
 ) -> MLRefinementRunRecord:
-    record = await session.get(MLRefinementRunRecord, run_id)
+    record = await session.scalar(
+        select(MLRefinementRunRecord)
+        .where(MLRefinementRunRecord.id == run_id)
+        .with_for_update()
+    )
     if record is None:
         raise RefinementQueueNotFoundError(f"ML refinement run {run_id} not found")
     timestamp = now or datetime.now(UTC)
@@ -201,7 +207,11 @@ async def cancel_refinement(
 
 
 async def retry_refinement(session: AsyncSession, run_id: UUID) -> EnqueueResult:
-    record = await session.get(MLRefinementRunRecord, run_id)
+    record = await session.scalar(
+        select(MLRefinementRunRecord)
+        .where(MLRefinementRunRecord.id == run_id)
+        .with_for_update()
+    )
     if record is None:
         raise RefinementQueueNotFoundError(f"ML refinement run {run_id} not found")
     if record.status not in {"failed", "cancelled"}:

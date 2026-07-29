@@ -4,7 +4,10 @@ from uuid import uuid4
 
 import pytest
 
-from app.jobs.process_ml_refinement_queue import build_parser
+from app.jobs.process_ml_refinement_queue import (
+    build_parser,
+    heartbeat_interval_seconds,
+)
 from app.ml.contract import FUTURE_DURATIONS
 from app.ml.refinement.contract_service import refinement_contract
 from app.ml.refinement.models import MLRefinementRunRecord
@@ -50,6 +53,15 @@ def test_stale_seconds_accepts_inclusive_boundaries(value: str) -> None:
 def test_stale_seconds_rejects_outside_boundaries(value: str) -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--stale-after-seconds", value])
+
+
+@pytest.mark.parametrize(
+    ("stale_after", "expected"), [(300, 60.0), (7200, 60.0), (3, 1.0)]
+)
+def test_heartbeat_interval_is_bounded_below_stale_threshold(
+    stale_after: int, expected: float
+) -> None:
+    assert heartbeat_interval_seconds(stale_after) == expected
 
 
 def test_run_response_exposes_bounded_progress_and_cancellation() -> None:

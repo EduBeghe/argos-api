@@ -13,7 +13,12 @@ from app.ml.refinement.contracts import (
     RefinementClassification,
     RefinementStatus,
 )
-from app.ml.refinement.persistence import MLRefinementError
+from app.ml.refinement.persistence import (
+    SourceScreeningIncompleteError,
+    SourceScreeningMismatchError,
+    SourceScreeningResultNotFoundError,
+    SourceScreeningRunNotFoundError,
+)
 from app.ml.refinement.queue import (
     QueueDisposition,
     RefinementQueueConflictError,
@@ -193,10 +198,13 @@ async def enqueue_ml_refinement_run(
 ) -> RefinementEnqueueResponse:
     try:
         result = await enqueue_refinement(session, request)
-    except MLRefinementError as error:
-        detail = str(error)
-        code = 404 if "does not exist" in detail else 409
-        raise HTTPException(status_code=code, detail=detail) from error
+    except (
+        SourceScreeningRunNotFoundError,
+        SourceScreeningResultNotFoundError,
+    ) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (SourceScreeningMismatchError, SourceScreeningIncompleteError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except RefinementQueueValidationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except RefinementQueueConflictError as error:
@@ -231,7 +239,9 @@ async def cancel_ml_refinement_run(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def retry_ml_refinement_run(
-    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+    run_id: UUID,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> RefinementEnqueueResponse:
     try:
         result = await retry_refinement(session, run_id)
@@ -240,6 +250,7 @@ async def retry_ml_refinement_run(
     except RefinementQueueConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     location = f"/optimization/ml-refinement-runs/{run_id}"
+    response.headers["Location"] = location
     return RefinementEnqueueResponse(
         disposition=result.disposition,
         run=RefinementRunResponse.model_validate(result.run),
