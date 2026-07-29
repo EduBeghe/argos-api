@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-ML_EXPERIMENT_CONTRACT_VERSION = 1
+ML_EXPERIMENT_CONTRACT_VERSION = 2
 VARIABLE_REGISTRY_VERSION = 1
 MISSING_DATA_POLICY_VERSION = 1
 DEVELOPMENT_START = datetime(2020, 1, 1, tzinfo=UTC)

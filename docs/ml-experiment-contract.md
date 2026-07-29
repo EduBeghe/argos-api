@@ -54,6 +54,10 @@ Zero-range candle close position is deterministically `0.5`. Zero denominators i
 
 Persisted Binance gaps are treated as genuine missing evidence. Argos never interpolates, forward-fills, synthesizes, or borrows a candle from another asset. A row is excluded for insufficient history, a missing reference, a gap in the maximum historical input window, a non-finite feature, a missing future interval candle, or a missing exact target. Exclusion reasons are counted explicitly. Diagnostics distinguish a discontinuous range (`gap_event_count`) from the number of absent five-minute slots inside all such ranges (`missing_candle_slot_count`) and report the first and last missing opening timestamps.
 
+## Numerical safety
+
+Relative activity and percentage-change calculations use explicit safe division. A finite `0 / 0` means that both the observed quantity and its baseline are absent and is represented as neutral `0.0`. A finite non-zero value over zero is undefined and remains `NaN`, so dataset eligibility excludes it. Any `NaN` or infinite source value also remains invalid. Infinite feature values are never accepted, and division does not emit runtime warnings.
+
 ## Development folds and leakage protection
 
 Six-month validation blocks begin on 2022-01-01, 2022-07-01, 2023-01-01, and 2023-07-01. Every emitted fold has two complete years before its embargo-adjusted training end. Consequently, the 2022-01 validation block is omitted. Accumulating and exact rolling-two-year folds remain for the 2022-07, 2023-01, and 2023-07 blocks; the exact rolling-three-year fold remains only for 2023-07. A mode is omitted when its full history is unavailable and is never silently shortened.

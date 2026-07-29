@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
 from app.market.catalog import Instrument
 
@@ -192,6 +192,51 @@ def _rolling_sum(values: NDArray[np.float64], window: int) -> NDArray[np.float64
     return result
 
 
+def _safe_ratio(numerator: ArrayLike, denominator: ArrayLike) -> NDArray[np.float64]:
+    """Divide finite values without warnings and preserve undefined ratios as NaN.
+
+    A finite 0/0 pair represents neutral relative activity and returns 0. A
+    finite non-zero numerator over zero, or any non-finite input, remains NaN.
+    """
+
+    numerator_array, denominator_array = np.broadcast_arrays(
+        np.asarray(numerator, dtype=np.float64),
+        np.asarray(denominator, dtype=np.float64),
+    )
+    result = np.full(numerator_array.shape, np.nan, dtype=np.float64)
+    finite = np.isfinite(numerator_array) & np.isfinite(denominator_array)
+    divisible = finite & (denominator_array != 0)
+    np.divide(
+        numerator_array,
+        denominator_array,
+        out=result,
+        where=divisible,
+    )
+    result[finite & (numerator_array == 0) & (denominator_array == 0)] = 0.0
+    return result
+
+
+def _safe_percentage_change(
+    recent: ArrayLike, previous: ArrayLike
+) -> NDArray[np.float64]:
+    """Return a safe relative change while keeping a finite 0/0 pair neutral."""
+
+    recent_array, previous_array = np.broadcast_arrays(
+        np.asarray(recent, dtype=np.float64),
+        np.asarray(previous, dtype=np.float64),
+    )
+    ratio = _safe_ratio(recent_array, previous_array)
+    both_zero = (
+        np.isfinite(recent_array)
+        & np.isfinite(previous_array)
+        & (recent_array == 0)
+        & (previous_array == 0)
+    )
+    result = ratio - 1.0
+    result[both_zero] = 0.0
+    return result
+
+
 def _rolling_mean(values: NDArray[np.float64], window: int) -> NDArray[np.float64]:
     return _rolling_sum(values, window) / window
 
@@ -371,12 +416,12 @@ def _feature_series(
         )
     elif calculation == "relative_volume":
         baseline = np.roll(cache.cached("volume_mean", period - 1), 1)
-        result = columns.base_asset_volume / baseline
+        result = _safe_ratio(columns.base_asset_volume, baseline)
     elif calculation in {"volume_change", "normalized_volume"}:
         half = period // 2
         recent = cache.cached("volume_sum", half)
         old = np.roll(recent, half)
-        result = recent / old - 1.0
+        result = _safe_percentage_change(recent, old)
     elif calculation == "signed_price_volume":
         result = _rolling_mean(
             np.nan_to_num(cache.returns) * columns.base_asset_volume, period
