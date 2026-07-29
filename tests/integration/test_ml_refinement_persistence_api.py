@@ -139,6 +139,7 @@ async def refinement_factory() -> AsyncIterator[
             )
         )
         session.add(source_run(run_id))
+        await session.flush()
         session.add(source_result(run_id, result_id))
         await session.commit()
     yield factory, run_id, result_id
