@@ -110,4 +110,3 @@ def test_classification_is_deterministic_and_ignores_pareto() -> None:
     first = classify_evidence(result(pareto_retained=False, folds_beating_zero=3))
     second = classify_evidence(result(pareto_retained=True, folds_beating_zero=3))
     assert first == second
-

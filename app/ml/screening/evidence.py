@@ -96,4 +96,3 @@ def classify_evidence(result: MLModelScreeningResultRecord) -> EvidenceAssessmen
         "The complete result lacks enough combined positive screening evidence.",
         tuple(failed),
     )
-

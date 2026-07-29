@@ -124,4 +124,3 @@ class FoldEvaluationResponse(BaseModel):
 class ScreeningResultDetail(BaseModel):
     result: ScreeningResultResponse
     fold_evaluations: list[FoldEvaluationResponse]
-

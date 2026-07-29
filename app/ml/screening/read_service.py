@@ -315,4 +315,3 @@ async def get_screening_result_detail(
         result=_result_response(result),
         fold_evaluations=[FoldEvaluationResponse.model_validate(row) for row in folds],
     )
-
