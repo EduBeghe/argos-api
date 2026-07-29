@@ -64,5 +64,5 @@ Evidence classification version 1 derives a label exclusively from the seven chr
 
 Each result exposes the stable identifiers of failed promising rules and a concise explanation. Pareto retention remains a separate relative comparison: non-dominated does not mean predictive, approved, or suitable for trading.
 
-These endpoints do not read the protected 2024â€“2026 final-test period, generate Strategies, serialize models, create wallets, or make trading recommendations.
+These endpoints do not read the protected 2024-2026 final-test period, generate Strategies, serialize models, create wallets, or make trading recommendations.
 
