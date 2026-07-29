@@ -1,3 +1,4 @@
+
 # ML Model Screening
 
 ## Purpose
@@ -66,3 +67,37 @@ Each result exposes the stable identifiers of failed promising rules and a conci
 
 These endpoints do not read the protected 2024-2026 final-test period, generate Strategies, serialize models, create wallets, or make trading recommendations.
 
+## Parameterized refinement
+
+Screening compares one fixed configuration for every engine and horizon. Refinement starts from one persisted screening result and searches a normalized JSON-defined set of hyperparameters, feature policies, prediction objectives, confidence buckets, costs, and budgets. The example at `docs/examples/ml-refinement-catboost-30m.json` is deliberately bounded and contains placeholder UUIDs rather than production identifiers.
+
+The supported objectives are numeric future-return regression, binary future-direction classification, and cost-adjusted `up`/`no_trade`/`down` classification. Cost-adjusted labels use the configured round-trip fee and slippage assumptions; they are experimental predictions, not Paper Trading instructions.
+
+`all` uses the complete versioned variable registry. `explicit` validates names against that registry. `top_k` calculates relevance independently inside each fold using training rows only and persists the selected names with that fold. Confidence thresholds are also frozen from training predictions before validation metrics are calculated. These rules prevent validation information from selecting variables or confidence thresholds.
+
+The refinement reader stops at `2024-01-01T00:00:00Z`. The protected 2024-2026 final test is neither loaded nor queryable by this command, and there is no override flag. Training/validation continue to use the seven chronological development folds and their existing target-completion bounds.
+
+Validate and inspect the deterministic plan without training or writes:
+
+```bash
+python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refinement-catboost-30m.json --dry-run
+```
+
+Execute and persist the same plan:
+
+```bash
+python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refinement-catboost-30m.json
+```
+
+The normalized configuration, dataset fingerprint, source result, costs, contract versions, library versions, and seed form the experiment key. An identical completed experiment is returned without recomputation. Compatible completed individual evaluations are copied as reused evidence. Trial and runtime budgets stop creation of new evaluations only between transactional writes and record computed, reused, and omitted counts plus the termination reason.
+
+Run states are `queued`, `running`, `completed`, `failed`, and `cancelled`; external cancellation is intentionally not exposed yet. Evaluation classifications are `promising_for_strategy_simulation`, `insufficient_evidence`, `discarded`, and `incomplete`. Promising evidence only permits later economic simulation: it is not a Strategy approval and still requires protected final-test evaluation in a separate, explicitly governed workflow.
+
+Read-only inspection is available at:
+
+- `GET /optimization/ml-refinement-runs`
+- `GET /optimization/ml-refinement-runs/{run_id}`
+- `GET /optimization/ml-refinement-runs/{run_id}/evaluations`
+- `GET /optimization/ml-refinement-runs/{run_id}/evaluations/{evaluation_id}`
+
+The API cannot create, execute, cancel, or delete refinements.

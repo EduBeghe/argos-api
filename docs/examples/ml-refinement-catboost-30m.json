@@ -1,0 +1,36 @@
+
+{
+  "source_screening_run_id": "00000000-0000-0000-0000-000000000001",
+  "source_screening_result_id": "00000000-0000-0000-0000-000000000002",
+  "engines": ["catboost"],
+  "future_durations_seconds": [1800],
+  "search_space": [
+    {
+      "engine": "catboost",
+      "learning_rate": {"values": [0.03, 0.05]},
+      "iterations": {"values": [120, 240]},
+      "depth": {"values": [4, 6]},
+      "l2_leaf_reg": {"values": [1, 3]},
+      "random_strength": {"values": [0.5, 1.0]},
+      "bagging_temperature": {"values": [0.5, 1.0]}
+    }
+  ],
+  "feature_selection": {
+    "strategies": [
+      {"strategy": "all"},
+      {"strategy": "top_k", "values": [32, 64, 96]}
+    ]
+  },
+  "prediction_objectives": [
+    "future_return_regression",
+    "future_direction_classification",
+    "cost_adjusted_action_classification"
+  ],
+  "confidence_buckets": [0.05, 0.10, 0.20],
+  "fee_rate": 0.001,
+  "slippage_rate": 0.0005,
+  "maximum_trials": 40,
+  "maximum_runtime_seconds": 7200,
+  "deterministic_seed": 1729,
+  "notes": "Replace both placeholder UUIDs with one completed screening run/result pair."
+}

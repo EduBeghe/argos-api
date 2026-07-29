@@ -1,3 +1,4 @@
+
 import hashlib
 import json
 import math
@@ -479,7 +480,9 @@ def _feature_series(
     )
 
 
-def _fingerprint(instrument: Instrument, columns: MLCandleColumns) -> str:
+def _fingerprint(
+    instrument: Instrument, columns: MLCandleColumns, requested_end: datetime
+) -> str:
     digest = hashlib.sha256()
     contract = {
         "contract": ML_EXPERIMENT_CONTRACT_VERSION,
@@ -491,7 +494,7 @@ def _fingerprint(instrument: Instrument, columns: MLCandleColumns) -> str:
             instrument.market_type.value,
             instrument.interval.value,
         ],
-        "range": [DEVELOPMENT_START.isoformat(), FINAL_TEST_END.isoformat()],
+        "range": [DEVELOPMENT_START.isoformat(), requested_end.isoformat()],
         "variables": [
             (item.name, item.calculation, item.lookback.total_seconds())
             for item in VARIABLE_REGISTRY
@@ -523,15 +526,22 @@ def _fingerprint(instrument: Instrument, columns: MLCandleColumns) -> str:
 
 
 def build_ml_experiment_dataset(
-    *, instrument: Instrument, columns: MLCandleColumns
+    *,
+    instrument: Instrument,
+    columns: MLCandleColumns,
+    requested_end: datetime = FINAL_TEST_END,
 ) -> MLExperimentDataset:
+    if requested_end not in {FINAL_TEST_START, FINAL_TEST_END}:
+        raise MLDatasetError(
+            "ML dataset end must be the development or protected final-test end"
+        )
     if len(columns) and (
         np.any(np.diff(columns.open_time_ns) <= 0)
         or np.any(columns.close_time_ns >= columns.open_time_ns + CANDLE_INTERVAL_NS)
     ):
         raise MLDatasetError("candle timestamps violate ordering or closure semantics")
     start_ns = datetime_to_ns(DEVELOPMENT_START)
-    end_ns = datetime_to_ns(FINAL_TEST_END)
+    end_ns = datetime_to_ns(requested_end)
     selected_mask = (columns.open_time_ns >= start_ns) & (columns.open_time_ns < end_ns)
     selected = columns
     if not np.all(selected_mask):
@@ -605,14 +615,14 @@ def build_ml_experiment_dataset(
     metadata = MLDatasetMetadata(
         instrument,
         DEVELOPMENT_START,
-        FINAL_TEST_END,
+        requested_end,
         ns_to_datetime(int(selected.open_time_ns[0])) if len(selected) else None,
         ns_to_datetime(int(selected.open_time_ns[-1])) if len(selected) else None,
         len(selected),
         gaps,
         len(VARIABLE_REGISTRY),
         MAXIMUM_HISTORICAL_LOOKBACK,
-        _fingerprint(instrument, selected),
+        _fingerprint(instrument, selected, requested_end),
     )
     targets = LazyTargetProvider(
         boundaries_ns=boundary_ns,

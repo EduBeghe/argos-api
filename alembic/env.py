@@ -1,3 +1,4 @@
+
 from asyncio import run
 from logging.config import fileConfig
 
@@ -8,6 +9,7 @@ from alembic import context
 from app.core.config import get_settings
 from app.core.database.base import Base
 from app.market import persistence  # noqa: F401
+from app.ml.refinement import models as ml_refinement_models  # noqa: F401
 from app.ml.screening import models as ml_screening_models  # noqa: F401
 from app.optimization import (
     edge_guided_memory,  # noqa: F401
