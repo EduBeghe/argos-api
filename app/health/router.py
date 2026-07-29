@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.database.session import get_db_session
-from app.health.schemas import HealthResponse
+from app.health.schemas import HealthResponse, PublicHealthResponse
 
 router = APIRouter(prefix="/health", tags=["health"])
 logger = logging.getLogger(__name__)
@@ -18,15 +18,11 @@ SettingsDependency = Annotated[Settings, Depends(get_settings)]
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 
 
-@router.get("", response_model=HealthResponse)
-async def health(settings: SettingsDependency) -> HealthResponse:
+@router.get("", response_model=PublicHealthResponse)
+async def health() -> PublicHealthResponse:
     """Report API process health without requiring database connectivity."""
 
-    return HealthResponse(
-        status="ok",
-        service=settings.service_name,
-        version=settings.version,
-    )
+    return PublicHealthResponse(status="ok")
 
 
 @router.get("/database", response_model=HealthResponse)

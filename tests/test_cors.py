@@ -27,21 +27,22 @@ def preflight(client: TestClient, origin: str) -> Response:
             headers={
                 "Origin": origin,
                 "Access-Control-Request-Method": "GET",
-                "Access-Control-Request-Headers": "Content-Type",
+                "Access-Control-Request-Headers": "Content-Type,X-CSRF-Token",
             },
         ),
     )
 
 
-def test_preflight_allows_configured_origin_without_credentials(
+def test_preflight_allows_configured_origin_with_credentials(
     cors_client: TestClient,
 ) -> None:
     response = preflight(cors_client, "https://web.example.com")
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "https://web.example.com"
-    assert response.headers["access-control-allow-methods"] == "GET, OPTIONS"
-    assert "access-control-allow-credentials" not in response.headers
+    assert response.headers["access-control-allow-methods"] == "GET, POST, OPTIONS"
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert "X-CSRF-Token" in response.headers["access-control-allow-headers"]
 
 
 def test_preflight_rejects_disallowed_origin(cors_client: TestClient) -> None:

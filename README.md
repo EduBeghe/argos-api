@@ -26,6 +26,7 @@ Every generated signal must retain its component scores, supporting metrics, and
 - [Experiment memory and experience-guided search](docs/008-experiment-memory.md)
 - [ML experiment dataset contract](docs/ml-experiment-contract.md)
 - [ML model screening and refinement](docs/ml-model-screening.md)
+- [API authentication and Railway rollout](docs/015-authentication.md)
 - [Architecture decisions](docs/decisions/)
 
 ## Current phase
@@ -36,7 +37,7 @@ performance history, historical simulation/refinement, Predictive Edge Map
 analysis, and edge-guided candidate qualification v2. The API exposes current
 and historical evidence to the separately deployed `argos-web` SPA. Candidate
 approval, parallel Strategy wallets, scheduled exploration, additional
-providers, ML, sentiment/news, authentication, and real-money trading are not
+providers, ML, sentiment/news, multi-user identity, and real-money trading are not
 implemented. See the [current system reference](docs/010-current-system.md).
 
 ## Development
@@ -62,7 +63,27 @@ uv sync
 make run
 ```
 
-The API is available at `http://localhost:8000`. Process health is reported by `GET /health`; PostgreSQL connectivity is reported independently by `GET /health/database`.
+The API is available at `http://localhost:8000`. Public process health is exactly
+`{\"status\":\"ok\"}` from `GET /health`; PostgreSQL connectivity is reported independently
+by `GET /health/database` and becomes private when authentication enforcement is enabled.
+
+### API authentication rollout
+
+Argos includes a single-administrator, HttpOnly-cookie session foundation. Enforcement
+defaults to `false` only as temporary migration scaffolding until the separately deployed
+frontend supports login. Do not describe a deployment as private until enforcement is
+enabled and unauthenticated data requests have been verified to return `401`.
+
+Generate the administrator Argon2id hash interactively:
+
+```sh
+python -m app.jobs.hash_admin_password
+```
+
+Set `ARGOS_ADMIN_USERNAME`, `ARGOS_ADMIN_PASSWORD_HASH`, a random
+`ARGOS_JWT_SECRET` of at least 32 UTF-8 bytes, and the exact frontend origin in
+`CORS_ALLOWED_ORIGINS`. See [API authentication and Railway rollout](docs/015-authentication.md)
+for the complete cookie, CSRF, rollout, rollback, and secret-rotation contract.
 
 ### Tests and quality checks
 

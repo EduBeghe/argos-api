@@ -23,7 +23,7 @@ The API container runs `scripts/start_api.sh`: migrations must succeed before Uv
 
 ## Environment
 
-Required/shared values include `DATABASE_URL` (normalized to asyncpg), `BINANCE_BASE_URL`, Binance connect/read timeouts and ingestion limit, `CORS_ALLOWED_ORIGINS`, `LOG_LEVEL`, and optional service/version values. Use `https://data-api.binance.vision` for public market data if the normal Binance endpoint returns HTTP 451 from the deployment location. Do not commit secrets or project UUIDs.
+Required/shared values include `DATABASE_URL` (normalized to asyncpg), `BINANCE_BASE_URL`, Binance connect/read timeouts and ingestion limit, `CORS_ALLOWED_ORIGINS`, `LOG_LEVEL`, and optional service/version values. The API service additionally uses the authentication variables documented in [API authentication](015-authentication.md); jobs do not require them. Use `https://data-api.binance.vision` for public market data if the normal Binance endpoint returns HTTP 451 from the deployment location. Do not commit secrets or project UUIDs.
 
 ## Operational commands
 

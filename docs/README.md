@@ -11,6 +11,7 @@ This index separates current system truth from historical decisions and future w
 | [API and frontend contract](011-api-and-frontend-contract.md) | Endpoint inventory, CORS, and `argos-web` integration | current |
 | [Railway operations](012-railway-operations.md) | Deployment, cron, diagnostics, and safe historical-job commands | current |
 | [Weekly Strategy research](014-weekly-strategy-research.md) | Complete candidate search, reuse, outcomes, and research runbook | current |
+| [API authentication](015-authentication.md) | Session, CSRF, CORS, and staged Railway rollout | current |
 | [Glossary](013-glossary.md) | Accessible domain and financial vocabulary | current |
 | [Domain model](003-domain-model.md) | Provider-independent vocabulary and relationships | current |
 | [Binance market-data contract](004-binance-market-data-contract.md) | Binance positional kline boundary and normalization | current |

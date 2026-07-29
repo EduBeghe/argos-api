@@ -6,8 +6,8 @@ The FastAPI application is currently a read-only HTTP surface. It does not conta
 
 | Group | Method and path | Main parameters and purpose | Result | Mutation |
 | --- | --- | --- | --- | --- |
-| Health | `GET /health` | Process liveness | service status/version | no |
-| Health | `GET /health/database` | PostgreSQL connectivity | status or 503 | no |
+| Health | `GET /health` | Process liveness | exact minimal status | no |
+| Health | `GET /health/database` | PostgreSQL connectivity | status or 503 | yes when enforcement is enabled |
 | Market | `GET /market/instruments` | none; catalog | configured identities/capabilities/display metadata | no |
 | Market | `GET /market/candles` | instrument, UTC range, order, limit | persisted candles | no |
 | Market | `GET /market/status` | none | Binance Spot 5m count/latest/freshness | no |
@@ -62,6 +62,6 @@ synthetic zero.
 
 ## CORS and `argos-web`
 
-`CORS_ALLOWED_ORIGINS` is a comma-separated list of exact HTTP/HTTPS origins. Wildcards, credentials, paths, queries, fragments, and empty entries are rejected. Allowed methods are GET and OPTIONS; credentials are disabled. Production should list the public `argos-web` origin, not a temporary or private Railway hostname.
+`CORS_ALLOWED_ORIGINS` is a comma-separated list of exact HTTP/HTTPS origins. Wildcards, credentials, paths, queries, fragments, and empty entries are rejected. Allowed methods are GET, POST, and OPTIONS; credentials are enabled for the HttpOnly session cookie. Allowed request headers are Accept, Content-Type, and X-CSRF-Token. Production must list the public `argos-web` origin, not a temporary or private Railway hostname. See [API authentication](015-authentication.md).
 
 The frontend consumes the aggregate dashboard, instrument catalog, Paper portfolio/performance/history, Scores, Decisions, and optimization candidate APIs. Its implementation lives in `EduBeghe/argos-web`. It is data-driven by complete catalog identities, does not hardcode BTC/ETH behavior, keeps visible copy in English, uses accessible low-brightness presentation and metric help, and gives charts axes, units, UTC references, gaps for absent evidence, and textual summaries. Authoritative financial calculations remain in the backend.

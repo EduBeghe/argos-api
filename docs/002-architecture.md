@@ -138,7 +138,7 @@ The read-only `GET /dashboard/overview` endpoint composes the initial screen fro
 
 The API orchestrates application use cases and maps them to explicit module interfaces. It does not contain core analytical or trading logic.
 
-In production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources and separate candle and feature transactions. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins.
+In production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources and separate candle and feature transactions. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins. API-only authentication settings and middleware do not participate in jobs or migrations.
 
 The one-shot Decision Cycle job is also separate from ingestion. At minute 02 and 32 it selects fresh compatible Score evidence no later than the corresponding :00 or :30 boundary, reads the persisted Paper Position, creates one Decision Snapshot, and simulates at most one Trade. NO_ACTION completes an auditable cycle without a Trade. It never contacts Binance.
 

@@ -4,9 +4,9 @@ This document describes the implementation on `master` after PR #46. It distingu
 
 ## Instruments and providers
 
-An instrument is the complete identity `(asset, provider, market_type, interval)`. Display symbols are metadata, not identity. The catalog currently contains BTC/USDT and ETH/USDT on Binance Spot with five-minute candles. Both enable ingestion, scoring, decisions, and Paper Trading. The public catalog reports all four capabilities; internally Paper Trading currently derives eligibility from the decision-enabled projection rather than maintaining a separate flag. The code exposes capability-specific catalog resolution instead of symbol branches.
+An instrument is the complete identity `(asset, provider, market_type, interval)`. Display symbols are metadata, not identity. The catalog currently contains BTC/USDT and ETH/USDT on Binance Spot with five-minute candles. Both enable ingestion, scoring, decisions, and Paper Trading. The API catalog reports all four capabilities; internally Paper Trading currently derives eligibility from the decision-enabled projection rather than maintaining a separate flag. The code exposes capability-specific catalog resolution instead of symbol branches.
 
-Binance is the only implemented provider. BTC and ETH are the current MVP configuration, not permanent architectural constants. SPY, stocks, ETFs, other providers, market calendars, and provider-specific jobs are future work. `/market/instruments` is the public catalog source.
+Binance is the only implemented provider. BTC and ETH are the current MVP configuration, not permanent architectural constants. SPY, stocks, ETFs, other providers, market calendars, and provider-specific jobs are future work. `/market/instruments` is the catalog source and becomes private when API authentication enforcement is enabled.
 
 ## Market data and backfill
 
@@ -98,4 +98,4 @@ Predictive Edge Discovery v4.1 adds bounded research for directional signal × f
 context-regime interactions. Derived predictors remain in memory and do not modify live
 Features, Scores, ingestion, Decisions, Paper Trading, or candidate activation.
 
-Not implemented: candidate correction/approval or activation; parallel wallets per Strategy; stopping individual Strategies; additional providers/assets; ML; news/sentiment; authentication; or real-money trading. These are possible next steps, not production commitments.
+Not implemented: candidate correction/approval or activation; parallel wallets per Strategy; stopping individual Strategies; additional providers/assets; ML; news/sentiment; multi-user identity; or real-money trading. Single-administrator API authentication exists with temporarily disabled enforcement for the staged frontend rollout described in [API authentication](015-authentication.md). These are possible next steps, not production commitments.

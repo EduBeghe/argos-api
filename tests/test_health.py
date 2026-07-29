@@ -30,11 +30,7 @@ def test_health(client: TestClient) -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "service": "argos-api",
-        "version": "0.1.0",
-    }
+    assert response.json() == {"status": "ok"}
 
 
 def test_database_health_when_available(client: TestClient) -> None:
