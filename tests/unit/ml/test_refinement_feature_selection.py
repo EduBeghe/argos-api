@@ -1,4 +1,3 @@
-
 import numpy as np
 
 from app.ml.refinement.calculation import _selected_columns

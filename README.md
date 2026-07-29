@@ -1,4 +1,3 @@
-
 # Argos API
 
 Argos is a private, asset-agnostic quantitative research and predictive decision-support platform. It estimates probabilities from measurable evidence; it does not claim to predict the future with certainty or guarantee profitability.

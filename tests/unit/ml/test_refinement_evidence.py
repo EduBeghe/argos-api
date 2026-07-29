@@ -1,4 +1,3 @@
-
 import pytest
 
 from app.ml.refinement.contracts import RefinementClassification
