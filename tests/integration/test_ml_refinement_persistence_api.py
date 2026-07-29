@@ -26,6 +26,7 @@ from app.ml.refinement.persistence import (
 )
 from app.ml.refinement.planning import build_refinement_plan
 from app.ml.refinement.service import prepare_refinement
+from app.ml.screening.engines import library_versions
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
     MLModelScreeningRunRecord,
@@ -165,7 +166,7 @@ async def test_persistence_reuse_and_read_only_api(
     factory, source_run_id, source_result_id = refinement_factory
     refinement_request = request(source_run_id, source_result_id)
     plan = build_refinement_plan(refinement_request)
-    versions = {"scikit-learn": "1.9.0", "lightgbm": "4", "catboost": "1"}
+    versions = library_versions()
     key = experiment_key(
         request=refinement_request, dataset_fingerprint="d" * 64, versions=versions
     )
