@@ -25,6 +25,7 @@ Every generated signal must retain its component scores, supporting metrics, and
 - [Binance market-data contract](docs/004-binance-market-data-contract.md)
 - [Experiment memory and experience-guided search](docs/008-experiment-memory.md)
 - [ML experiment dataset contract](docs/ml-experiment-contract.md)
+- [ML model screening and refinement](docs/ml-model-screening.md)
 - [Architecture decisions](docs/decisions/)
 
 ## Current phase
@@ -812,7 +813,7 @@ The command parses money as `Decimal`, stops the active experiment, and creates 
 
 Weekly research includes a bounded progressive composite-feature search after targeted
 refinement. Training-only association determines signed weights, and separate economic
-and exploratory beams grow through real parent lineage across depths 2–7. Exploratory
+and exploratory beams grow through real parent lineage across depths 2-7. Exploratory
 parents may produce descendants but cannot enter validation or test themselves. Each
 walk-forward window freezes its own
 training median/IQR. Retained configurations use the historical Paper Trading simulator,
@@ -856,3 +857,16 @@ semantics are documented in
 [`docs/014-weekly-strategy-research.md`](docs/014-weekly-strategy-research.md).
 That runbook also documents the bounded targeted-refinement stage for economically
 promising v4.1 near misses and its read-only evidence endpoints.
+
+## ML model refinement
+
+Completed model-screening results can be refined through a versioned JSON contract without changing application code. The engine supports Ridge, LightGBM, and CatBoost; regression, direction, and cost-adjusted action objectives; fold-local feature selection; training-frozen confidence buckets; deterministic trial/runtime budgets; and persisted reuse.
+
+Use the documented placeholder configuration as a starting point:
+
+```bash
+python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refinement-catboost-30m.json --dry-run
+python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refinement-catboost-30m.json
+```
+
+Replace its two placeholder UUIDs with a completed screening run/result pair. Refinement reads development evidence only and cannot load the protected 2024-2026 final-test period. See [ML model screening and refinement](docs/ml-model-screening.md) for contracts, classifications, reuse, and read-only API endpoints.

@@ -6,6 +6,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.refinement.contracts import (
+    PredictionObjective,
+    RefinementClassification,
+    RefinementStatus,
+)
+from app.ml.refinement.read_service import (
+    MAX_REFINEMENT_PAGE_LIMIT,
+    RefinementReadNotFoundError,
+)
+from app.ml.refinement.read_service import (
+    get_evaluation as get_ml_refinement_evaluation,
+)
+from app.ml.refinement.read_service import (
+    get_run_detail as get_ml_refinement_run,
+)
+from app.ml.refinement.read_service import (
+    list_evaluations as list_ml_refinement_evaluations,
+)
+from app.ml.refinement.read_service import (
+    list_runs as list_ml_refinement_runs,
+)
+from app.ml.refinement.schemas import (
+    RefinementEvaluationDetail,
+    RefinementEvaluationPage,
+    RefinementRunDetail,
+    RefinementRunPage,
+)
 from app.ml.screening.config import ScreeningEngine
 from app.ml.screening.evidence import EvidenceClassification
 from app.ml.screening.read_service import (
@@ -132,6 +159,70 @@ from app.optimization.walk_forward_read import (
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 RunQuery = Annotated[RefinementRunQuery, Query()]
 CandidatesQuery = Annotated[CandidateQuery, Query()]
+
+
+@router.get("/ml-refinement-runs", response_model=RefinementRunPage)
+async def ml_refinement_runs(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    status: Annotated[RefinementStatus | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_REFINEMENT_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> RefinementRunPage:
+    return await list_ml_refinement_runs(
+        session, status=status, limit=limit, offset=offset
+    )
+
+
+@router.get("/ml-refinement-runs/{run_id}", response_model=RefinementRunDetail)
+async def ml_refinement_run(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> RefinementRunDetail:
+    try:
+        return await get_ml_refinement_run(session, run_id)
+    except RefinementReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/ml-refinement-runs/{run_id}/evaluations",
+    response_model=RefinementEvaluationPage,
+)
+async def ml_refinement_evaluations(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    engine: Annotated[ScreeningEngine | None, Query()] = None,
+    objective: Annotated[PredictionObjective | None, Query()] = None,
+    classification: Annotated[RefinementClassification | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_REFINEMENT_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> RefinementEvaluationPage:
+    try:
+        return await list_ml_refinement_evaluations(
+            session,
+            run_id,
+            engine=engine,
+            objective=objective,
+            classification=classification,
+            limit=limit,
+            offset=offset,
+        )
+    except RefinementReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/ml-refinement-runs/{run_id}/evaluations/{evaluation_id}",
+    response_model=RefinementEvaluationDetail,
+)
+async def ml_refinement_evaluation(
+    run_id: UUID,
+    evaluation_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> RefinementEvaluationDetail:
+    try:
+        return await get_ml_refinement_evaluation(session, run_id, evaluation_id)
+    except RefinementReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get("/ml-screening-runs", response_model=ScreeningRunPage)
