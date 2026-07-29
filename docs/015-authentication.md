@@ -4,7 +4,7 @@
 
 Argos uses one configured administrator, not a user-management system. A successful
 login creates an HMAC-signed, eight-hour session JWT in the HttpOnly `argos_session`
-cookie and an independently readable `argos_csrf` cookie. The design protects private
+cookie and a CSRF cookie scoped to the API origin. The design protects private
 API data from unauthenticated access, password disclosure, token tampering, and
 cross-site unsafe requests. It does not provide refresh tokens, per-device revocation,
 multiple users, OAuth, or protection after an attacker steals a valid JWT.
@@ -56,13 +56,39 @@ decision, research, migrations, and Alembic do not require these secrets.
 
 `POST /auth/login` accepts exactly `username` and `password`, returns `204`, and sets:
 
-- `argos_session`: HttpOnly, `SameSite=Strict`, `Path=/`, Secure in production;
-- `argos_csrf`: readable by the SPA, `SameSite=Strict`, `Path=/`, Secure in production.
+- production (`ARGOS_AUTH_COOKIE_SECURE=true`): both cookies are host-only, `Secure`,
+  `SameSite=None`, and `Path=/`; only `argos_session` is HttpOnly;
+- local HTTP (`ARGOS_AUTH_COOKIE_SECURE=false`): both cookies are host-only,
+  `SameSite=Lax`, not Secure, and `Path=/`; only `argos_session` is HttpOnly.
 
-The JWT itself is never returned in JSON. `GET /auth/me` returns only `username`, `role`,
-and the UTC expiration timestamp. For authenticated `POST`, `PUT`, `PATCH`, and `DELETE`,
-the SPA must send the `argos_csrf` cookie value in `X-CSRF-Token`. `POST /auth/logout`
-requires that proof and deletes both cookies. Browser requests must use credentials.
+The Railway deployment hosts `argos-web-production-e6cf.up.railway.app` and
+`argos-api-production-b48a.up.railway.app` are cross-site: `up.railway.app` is listed
+in the [Public Suffix List](https://publicsuffix.org/list/public_suffix_list.dat).
+Production therefore requires `Secure; SameSite=None`; browsers reject insecure
+`SameSite=None`, so local HTTP uses `SameSite=Lax`. No `Domain` attribute is set, and
+both cookies remain host-only API cookies rather than shared Railway cookies.
+
+The JWT itself is never returned in JSON or a readable response header. Because
+`argos-web` and `argos-api` have different origins, frontend JavaScript cannot and must
+not attempt to read the API-domain CSRF cookie through `document.cookie`. Successful
+login returns the same raw CSRF value in the exposed `X-CSRF-Token` response header.
+`GET /auth/me` returns only `username`, `role`, and the UTC expiration timestamp in JSON,
+and restores the same header after validating the submitted CSRF cookie against the JWT.
+Both responses use `Cache-Control: no-store`.
+
+`SameSite=None` is transport compatibility, not CSRF protection. Unsafe requests still
+require the session cookie, CSRF cookie, matching `X-CSRF-Token`, and the CSRF digest
+bound into the signed JWT. Exact-origin credentialed CORS limits which configured
+frontend origin may read the response. Browser policies that globally block third-party
+cookies may still prevent this Railway-domain arrangement.
+
+The SPA calls every API request with browser credentials enabled, keeps the response
+header value in memory only, and sends it as `X-CSRF-Token` on authenticated `POST`,
+`PUT`, `PATCH`, and `DELETE`. It never stores the CSRF value or JWT in local storage,
+session storage, IndexedDB, URLs, or logs. After a page reload it restores identity and
+the in-memory CSRF value through `/auth/me`; a `401` returns the user to login.
+`POST /auth/logout` requires the original cookie/header/JWT proof, deletes both cookies,
+returns no CSRF header, and uses `Cache-Control: no-store`.
 
 ## Railway rollout and rollback
 

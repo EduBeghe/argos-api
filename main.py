@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Accept", "Content-Type", "X-CSRF-Token"],
+        expose_headers=["X-CSRF-Token"],
     )
     application.include_router(auth_router)
     application.include_router(health_router)

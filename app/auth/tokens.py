@@ -85,6 +85,10 @@ def decode_session_token(token: str, *, secret: str) -> AuthenticatedPrincipal:
 
 
 def valid_csrf(principal: AuthenticatedPrincipal, cookie: str, header: str) -> bool:
-    return secrets.compare_digest(cookie, header) and secrets.compare_digest(
-        csrf_digest(cookie), principal.csrf_digest
+    return secrets.compare_digest(cookie, header) and valid_csrf_cookie(
+        principal, cookie
     )
+
+
+def valid_csrf_cookie(principal: AuthenticatedPrincipal, cookie: str) -> bool:
+    return secrets.compare_digest(csrf_digest(cookie), principal.csrf_digest)
