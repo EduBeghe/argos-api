@@ -6,6 +6,7 @@ from app.ml.refinement.calculation import (
     _aggregate_confidence_buckets,
     _confidence_bucket,
     _fit_predict,
+    _signed_classification_scores,
     _training_class_count,
 )
 from app.ml.refinement.contracts import PredictionObjective
@@ -91,6 +92,40 @@ def test_signed_binary_confidence_selects_both_directions() -> None:
     assert result["positive_signal_count"] == 1
     assert result["negative_signals"]["directional_accuracy"] == 1.0  # type: ignore[index]
     assert result["positive_signals"]["directional_accuracy"] == 1.0  # type: ignore[index]
+
+
+def test_direction_classification_uses_the_positive_class_column() -> None:
+    probabilities = np.asarray([[0.75, 0.25], [0.10, 0.90]], dtype=np.float64)
+
+    scores = _signed_classification_scores(
+        probabilities,
+        np.asarray([0, 1], dtype=np.int64),
+        PredictionObjective.FUTURE_DIRECTION_CLASSIFICATION,
+    )
+
+    assert scores.tolist() == pytest.approx([-0.5, 0.8])
+
+
+@pytest.mark.parametrize(
+    ("classes", "probabilities", "expected"),
+    [
+        ([0, 1], [[0.75, 0.25], [0.10, 0.90]], [-0.75, -0.10]),
+        ([0, 2], [[0.75, 0.25], [0.10, 0.90]], [-0.50, 0.80]),
+        ([1, 2], [[0.75, 0.25], [0.10, 0.90]], [0.25, 0.90]),
+    ],
+)
+def test_cost_adjusted_scores_preserve_partial_class_semantics(
+    classes: list[int],
+    probabilities: list[list[float]],
+    expected: list[float],
+) -> None:
+    scores = _signed_classification_scores(
+        np.asarray(probabilities, dtype=np.float64),
+        np.asarray(classes, dtype=np.int64),
+        PredictionObjective.COST_ADJUSTED_ACTION_CLASSIFICATION,
+    )
+
+    assert scores.tolist() == pytest.approx(expected)
 
 
 @pytest.mark.parametrize(

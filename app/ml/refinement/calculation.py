@@ -139,13 +139,30 @@ def _fit_predict(
     validation_probability = np.asarray(
         model.predict_proba(validation_x), dtype=np.float64
     )
-    if training_probability.shape[1] == 2:
-        # Binary classifiers expose positive-class probability. Refinement uses a
-        # signed directional score so confidence and direction remain distinct.
-        return 2 * training_probability[:, 1] - 1, 2 * validation_probability[:, 1] - 1
-    classes = np.asarray(model.classes_)
-    signed = np.where(classes == 2, 1.0, np.where(classes == 0, -1.0, 0.0))
-    return training_probability @ signed, validation_probability @ signed
+    classes = np.asarray(model.classes_, dtype=np.int64)
+    return (
+        _signed_classification_scores(training_probability, classes, objective),
+        _signed_classification_scores(validation_probability, classes, objective),
+    )
+
+
+def _signed_classification_scores(
+    probabilities: NDArray[np.float64],
+    classes: NDArray[np.int64],
+    objective: PredictionObjective,
+) -> NDArray[np.float64]:
+    if objective is PredictionObjective.FUTURE_DIRECTION_CLASSIFICATION:
+        positive_class = np.flatnonzero(classes == 1)
+        if len(positive_class) != 1:
+            raise ValueError("direction classifier must expose the positive class")
+        return 2 * probabilities[:, int(positive_class[0])] - 1
+
+    if objective is not PredictionObjective.COST_ADJUSTED_ACTION_CLASSIFICATION:
+        raise ValueError("classification scores require a classification objective")
+    if np.any(~np.isin(classes, (0, 1, 2))):
+        raise ValueError("cost-adjusted classifier exposed an unknown class")
+    signed_classes = np.where(classes == 2, 1.0, np.where(classes == 0, -1.0, 0.0))
+    return probabilities @ signed_classes
 
 
 def _classification_metrics(
