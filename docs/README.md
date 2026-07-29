@@ -20,6 +20,7 @@ This index separates current system truth from historical decisions and future w
 | [Experiment memory](008-experiment-memory.md) | Refinement persistence, reuse, and experience-guided planning | current |
 | [Predictive Edge Map](009-predictive-edge-map.md) | Walk-forward predictive evidence and hypotheses | current |
 | [ML experiment dataset contract](ml-experiment-contract.md) | Leak-free variables, targets, temporal folds, and read-only validation | current |
+| [ML model screening](ml-model-screening.md) | Reproducible Ridge, LightGBM, and CatBoost development-fold screening | current |
 
 ## Architecture decisions
 

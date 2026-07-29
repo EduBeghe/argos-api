@@ -41,6 +41,12 @@ class Settings(BaseSettings):
         le=1000,
         validation_alias="BINANCE_INGESTION_LIMIT",
     )
+    ml_screening_thread_count: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        validation_alias="ML_SCREENING_THREAD_COUNT",
+    )
     cors_allowed_origins: Annotated[tuple[str, ...], NoDecode] = Field(
         default=("http://localhost:4200",),
         validation_alias="CORS_ALLOWED_ORIGINS",

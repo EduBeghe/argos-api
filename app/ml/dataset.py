@@ -106,7 +106,12 @@ class LazyTargetProvider:
         self._feature_eligible = feature_eligible
         self._continuity = continuity
 
-    def for_duration(self, duration: timedelta) -> TargetVector:
+    def for_duration(
+        self,
+        duration: timedelta,
+        *,
+        candidate_indices: NDArray[np.int64] | None = None,
+    ) -> TargetVector:
         if duration not in FUTURE_DURATIONS:
             raise MLDatasetError("duration is not part of contract version 1")
         row_count = len(self._boundaries_ns)
@@ -115,6 +120,10 @@ class LazyTargetProvider:
         reasons = np.full(row_count, "", dtype="U32")
         reasons[~self._feature_eligible] = "feature_ineligible"
         candidates = self._feature_eligible & (self._reference_indices >= 0)
+        if candidate_indices is not None:
+            requested = np.zeros(row_count, dtype=np.bool_)
+            requested[candidate_indices] = True
+            candidates &= requested
         duration_ns = int(duration.total_seconds() * 1_000_000_000)
         target_ns = self._boundaries_ns + duration_ns - CANDLE_INTERVAL_NS
         positions = np.searchsorted(self._open_time_ns, target_ns)
