@@ -43,3 +43,26 @@ python -u -m app.jobs.screen_ml_models --asset BTC/USDT --engine all --all-futur
 Dry-run imports scikit-learn, LightGBM, and CatBoost themselves, which verifies their native modules can load rather than checking package metadata alone. Completion logs distinguish computed and reused executions. Peak-memory reporting prefers Linux `VmHWM`, which includes native engine allocations, and falls back to Python traced memory where `/proc` is unavailable.
 
 Untouched final-test evaluation, candidate Strategy construction, after-cost economic testing, model-artifact design, and explicit activation remain future work. Live Decisions and Paper Trading are unchanged.
+# Read-only screening evidence API
+
+Persisted model-screening evidence is available through bounded, read-only optimization endpoints:
+
+- `GET /optimization/ml-screening-runs`
+- `GET /optimization/ml-screening-runs/latest?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m`
+- `GET /optimization/ml-screening-runs/{run_id}`
+- `GET /optimization/ml-screening-runs/{run_id}/results`
+- `GET /optimization/ml-screening-runs/{run_id}/results/{result_id}`
+
+Run and result collections support the documented filters plus `limit`/`offset` pagination, with a maximum page size of 200 and deterministic ordering. The result detail reads only the seven fold rows matching the result's run, engine, and future duration.
+
+Evidence classification version 1 derives a label exclusively from the seven chronological development folds:
+
+- **Promising** means every consistency, error-improvement, directional-accuracy, and positive-correlation gate passes.
+- **Insufficient** means the complete result has partial combined positive evidence but misses one or more promising gates.
+- **Discarded** means the complete result does not contain enough combined positive evidence under screening version 1. It is neither deleted nor declared permanently unusable.
+- **Incomplete** means seven folds or required median correlations are missing.
+
+Each result exposes the stable identifiers of failed promising rules and a concise explanation. Pareto retention remains a separate relative comparison: non-dominated does not mean predictive, approved, or suitable for trading.
+
+These endpoints do not read the protected 2024â€“2026 final-test period, generate Strategies, serialize models, create wallets, or make trading recommendations.
+

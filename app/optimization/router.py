@@ -6,6 +6,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.screening.config import ScreeningEngine
+from app.ml.screening.evidence import EvidenceClassification
+from app.ml.screening.read_service import (
+    MAX_SCREENING_PAGE_LIMIT,
+    ScreeningReadNotFoundError,
+    get_screening_result_detail,
+    get_screening_run_detail,
+    latest_completed_screening_run,
+    list_screening_results,
+    list_screening_runs,
+)
+from app.ml.screening.schemas import (
+    ScreeningResultDetail,
+    ScreeningResultPage,
+    ScreeningRunDetail,
+    ScreeningRunPage,
+    ScreeningRunSummary,
+)
 from app.optimization.composite_search import (
     CompositeCandidateStatus,
     CompositeSelectionTrack,
@@ -114,6 +132,114 @@ from app.optimization.walk_forward_read import (
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 RunQuery = Annotated[RefinementRunQuery, Query()]
 CandidatesQuery = Annotated[CandidateQuery, Query()]
+
+
+@router.get("/ml-screening-runs", response_model=ScreeningRunPage)
+async def ml_screening_runs(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    asset: Annotated[Asset | None, Query()] = None,
+    provider: Annotated[Provider | None, Query()] = None,
+    market_type: Annotated[MarketType | None, Query()] = None,
+    interval: Annotated[Interval | None, Query()] = None,
+    status: Annotated[Literal["running", "completed", "failed"] | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_SCREENING_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ScreeningRunPage:
+    return await list_screening_runs(
+        session,
+        asset=asset,
+        provider=provider,
+        market_type=market_type,
+        interval=interval,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/ml-screening-runs/latest", response_model=ScreeningRunSummary)
+async def latest_ml_screening_run(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    asset: Annotated[Asset, Query()],
+    provider: Annotated[Provider, Query()],
+    market_type: Annotated[MarketType, Query()],
+    interval: Annotated[Interval, Query()],
+) -> ScreeningRunSummary:
+    try:
+        return await latest_completed_screening_run(
+            session,
+            asset=asset,
+            provider=provider,
+            market_type=market_type,
+            interval=interval,
+        )
+    except ScreeningReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/ml-screening-runs/{run_id}", response_model=ScreeningRunDetail)
+async def ml_screening_run(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> ScreeningRunDetail:
+    try:
+        return await get_screening_run_detail(session, run_id)
+    except ScreeningReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/ml-screening-runs/{run_id}/results", response_model=ScreeningResultPage)
+async def ml_screening_results(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    engine: Annotated[ScreeningEngine | None, Query()] = None,
+    pareto_retained: Annotated[bool | None, Query()] = None,
+    evidence_classification: Annotated[EvidenceClassification | None, Query()] = None,
+    minimum_future_duration_seconds: Annotated[int | None, Query(ge=1)] = None,
+    maximum_future_duration_seconds: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_SCREENING_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ScreeningResultPage:
+    if (
+        minimum_future_duration_seconds is not None
+        and maximum_future_duration_seconds is not None
+        and maximum_future_duration_seconds < minimum_future_duration_seconds
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "maximum future duration must be greater than or equal to "
+                "minimum future duration"
+            ),
+        )
+    try:
+        return await list_screening_results(
+            session,
+            run_id,
+            engine=engine,
+            pareto_retained=pareto_retained,
+            evidence_classification=evidence_classification,
+            minimum_future_duration_seconds=minimum_future_duration_seconds,
+            maximum_future_duration_seconds=maximum_future_duration_seconds,
+            limit=limit,
+            offset=offset,
+        )
+    except ScreeningReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/ml-screening-runs/{run_id}/results/{result_id}",
+    response_model=ScreeningResultDetail,
+)
+async def ml_screening_result(
+    run_id: UUID,
+    result_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ScreeningResultDetail:
+    try:
+        return await get_screening_result_detail(session, run_id, result_id)
+    except ScreeningReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get(
@@ -602,3 +728,4 @@ async def walk_forward_candidate_windows(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
