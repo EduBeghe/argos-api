@@ -28,22 +28,29 @@ class MLRefinementRunRecord(Base):
             name="ck_ml_refinement_run_status",
         ),
         CheckConstraint(
-            "(status = 'queued' AND started_at IS NULL "
-            "AND completed_at IS NULL AND failed_at IS NULL) OR "
+            "(status = 'queued' AND started_at IS NULL AND completed_at IS NULL "
+            "AND failed_at IS NULL AND worker_id IS NULL AND claimed_at IS NULL "
+            "AND heartbeat_at IS NULL) OR "
             "(status = 'running' AND started_at IS NOT NULL "
-            "AND completed_at IS NULL AND failed_at IS NULL) OR "
+            "AND completed_at IS NULL AND failed_at IS NULL AND worker_id IS NOT NULL "
+            "AND claimed_at IS NOT NULL AND heartbeat_at IS NOT NULL) OR "
             "(status = 'completed' AND started_at IS NOT NULL "
-            "AND completed_at IS NOT NULL AND failed_at IS NULL) OR "
+            "AND completed_at IS NOT NULL AND failed_at IS NULL AND worker_id IS NULL "
+            "AND claimed_at IS NULL AND heartbeat_at IS NULL) OR "
             "(status = 'failed' AND started_at IS NOT NULL "
-            "AND completed_at IS NULL AND failed_at IS NOT NULL) OR "
-            "(status = 'cancelled' AND started_at IS NOT NULL "
-            "AND completed_at IS NOT NULL AND failed_at IS NULL)",
+            "AND completed_at IS NULL AND failed_at IS NOT NULL AND worker_id IS NULL "
+            "AND claimed_at IS NULL AND heartbeat_at IS NULL) OR "
+            "(status = 'cancelled' AND completed_at IS NOT NULL "
+            "AND failed_at IS NULL AND worker_id IS NULL AND claimed_at IS NULL "
+            "AND heartbeat_at IS NULL)",
             name="ck_ml_refinement_run_lifecycle",
         ),
         CheckConstraint(
             "maximum_trials > 0 AND maximum_runtime_seconds > 0 "
             "AND combinations_planned >= 0 AND evaluations_computed >= 0 "
-            "AND evaluations_reused >= 0 AND evaluations_omitted >= 0",
+            "AND evaluations_reused >= 0 AND evaluations_omitted >= 0 "
+            "AND evaluations_selected >= 0 "
+            "AND evaluations_computed + evaluations_reused <= evaluations_selected",
             name="ck_ml_refinement_run_budgets",
         ),
         UniqueConstraint("experiment_key", name="uq_ml_refinement_experiment_key"),
@@ -77,6 +84,7 @@ class MLRefinementRunRecord(Base):
     evaluations_computed: Mapped[int] = mapped_column(Integer, nullable=False)
     evaluations_reused: Mapped[int] = mapped_column(Integer, nullable=False)
     evaluations_omitted: Mapped[int] = mapped_column(Integer, nullable=False)
+    evaluations_selected: Mapped[int] = mapped_column(Integer, nullable=False)
     budget_exhausted: Mapped[bool] = mapped_column(nullable=False)
     termination_reason: Mapped[str | None] = mapped_column(String(64))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -84,6 +92,12 @@ class MLRefinementRunRecord(Base):
     failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_type: Mapped[str | None] = mapped_column(String(128))
     failure_message: Mapped[str | None] = mapped_column(String(512))
+    worker_id: Mapped[str | None] = mapped_column(String(128))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     elapsed_seconds: Mapped[Decimal | None] = mapped_column(METRIC)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

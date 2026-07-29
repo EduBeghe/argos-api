@@ -11,7 +11,9 @@ from app.ml.screening.engines import library_versions
 
 from .calculation import evaluate_refinement_candidate
 from .contracts import MLRefinementRequest
+from .models import MLRefinementRunRecord
 from .persistence import (
+    cancel_claimed_run,
     complete_run,
     completed_run_is_complete,
     effective_evaluation_fingerprint,
@@ -26,6 +28,7 @@ from .persistence import (
     start_run,
 )
 from .planning import RefinementPlan, build_refinement_plan
+from .queue import heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +78,8 @@ async def execute_refinement(
     dataset: MLExperimentDataset,
     request: MLRefinementRequest,
     now: datetime | None = None,
+    claimed_run: MLRefinementRunRecord | None = None,
+    worker_id: str | None = None,
 ) -> RefinementExecutionResult:
     await resolve_source(session, request)
     versions = library_versions()
@@ -84,7 +89,11 @@ async def execute_refinement(
         versions=versions,
     )
     existing = await find_completed_run(session, key)
-    if existing is not None and await completed_run_is_complete(session, existing):
+    if (
+        claimed_run is None
+        and existing is not None
+        and await completed_run_is_complete(session, existing)
+    ):
         return RefinementExecutionResult(
             existing.id,
             key,
@@ -98,15 +107,22 @@ async def execute_refinement(
         )
     plan = build_refinement_plan(request)
     timestamp = now or datetime.now(UTC)
-    run = await start_run(
-        session=session,
-        request=request,
-        plan=plan,
-        key=key,
-        dataset_fingerprint=dataset.metadata.fingerprint,
-        versions=versions,
-        now=timestamp,
-    )
+    if claimed_run is not None:
+        if worker_id is None or claimed_run.worker_id != worker_id:
+            raise RuntimeError("claimed refinement worker does not own the lease")
+        if claimed_run.experiment_key != key:
+            raise RuntimeError("DatasetFingerprintChanged")
+        run = claimed_run
+    else:
+        run = await start_run(
+            session=session,
+            request=request,
+            plan=plan,
+            key=key,
+            dataset_fingerprint=dataset.metadata.fingerprint,
+            versions=versions,
+            now=timestamp,
+        )
     logger.info(
         "ML refinement started",
         extra={
@@ -125,6 +141,25 @@ async def execute_refinement(
     reason = "trial_plan_completed"
     try:
         for index, candidate in enumerate(plan.evaluations):
+            if worker_id is not None:
+                await session.refresh(run)
+                if run.cancellation_requested_at is not None:
+                    await cancel_claimed_run(
+                        session, run.id, worker_id=worker_id, now=datetime.now(UTC)
+                    )
+                    return RefinementExecutionResult(
+                        run.id,
+                        key,
+                        False,
+                        plan.total_combinations,
+                        computed,
+                        reused_count,
+                        omitted + len(plan.evaluations) - index,
+                        True,
+                        "cancelled_by_user",
+                    )
+                if not await heartbeat(session, run.id, worker_id):
+                    raise RuntimeError("worker lost the refinement lease")
             if perf_counter() - started >= request.maximum_runtime_seconds:
                 omitted += len(plan.evaluations) - index
                 reason = "maximum_runtime_seconds"
@@ -140,7 +175,11 @@ async def execute_refinement(
             if retained is not None:
                 reused_count += 1
                 await record_progress(
-                    session, run.id, computed=computed, reused=reused_count
+                    session,
+                    run.id,
+                    computed=computed,
+                    reused=reused_count,
+                    worker_id=worker_id,
                 )
                 continue
             reused = await reusable_evaluation(session, fingerprint)
@@ -169,8 +208,16 @@ async def execute_refinement(
                     now=datetime.now(UTC),
                 )
                 computed += 1
+            if worker_id is not None and not await heartbeat(
+                session, run.id, worker_id
+            ):
+                raise RuntimeError("worker lost the refinement lease")
             await record_progress(
-                session, run.id, computed=computed, reused=reused_count
+                session,
+                run.id,
+                computed=computed,
+                reused=reused_count,
+                worker_id=worker_id,
             )
             if (index + 1) % 10 == 0 or index + 1 == len(plan.evaluations):
                 logger.info(
@@ -196,9 +243,10 @@ async def execute_refinement(
             reason=reason,
             elapsed=elapsed,
             now=datetime.now(UTC),
+            worker_id=worker_id,
         )
     except Exception as error:
-        await fail_run(session, run.id, error, datetime.now(UTC))
+        await fail_run(session, run.id, error, datetime.now(UTC), worker_id=worker_id)
         logger.exception(
             "ML refinement failed",
             extra={

@@ -2,12 +2,13 @@ import hashlib
 import json
 import math
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ml.contract import MISSING_DATA_POLICY_VERSION, VARIABLE_REGISTRY_VERSION
@@ -142,9 +143,14 @@ async def start_run(
                 evaluations_computed=0,
                 evaluations_reused=0,
                 evaluations_omitted=plan.omitted_by_trial_budget,
+                evaluations_selected=len(plan.evaluations),
                 budget_exhausted=plan.omitted_by_trial_budget > 0,
                 termination_reason=None,
                 elapsed_seconds=None,
+                worker_id="direct-cli",
+                claimed_at=now,
+                heartbeat_at=now,
+                cancellation_requested_at=None,
             )
         )
         await session.commit()
@@ -170,6 +176,7 @@ async def start_run(
         evaluations_computed=0,
         evaluations_reused=0,
         evaluations_omitted=plan.omitted_by_trial_budget,
+        evaluations_selected=len(plan.evaluations),
         budget_exhausted=plan.omitted_by_trial_budget > 0,
         termination_reason=None,
         started_at=now,
@@ -178,6 +185,10 @@ async def start_run(
         failure_type=None,
         failure_message=None,
         elapsed_seconds=None,
+        worker_id="direct-cli",
+        claimed_at=now,
+        heartbeat_at=now,
+        cancellation_requested_at=None,
         created_at=now,
     )
     session.add(record)
@@ -338,14 +349,16 @@ async def complete_run(
     reason: str,
     elapsed: float,
     now: datetime,
+    worker_id: str | None = None,
 ) -> None:
-    await session.execute(
-        update(MLRefinementRunRecord)
-        .where(
-            MLRefinementRunRecord.id == run_id,
-            MLRefinementRunRecord.status == "running",
-        )
-        .values(
+    statement = update(MLRefinementRunRecord).where(
+        MLRefinementRunRecord.id == run_id,
+        MLRefinementRunRecord.status == "running",
+    )
+    if worker_id is not None:
+        statement = statement.where(MLRefinementRunRecord.worker_id == worker_id)
+    result = await session.execute(
+        statement.values(
             status="completed",
             completed_at=now,
             evaluations_computed=computed,
@@ -354,40 +367,96 @@ async def complete_run(
             budget_exhausted=budget_exhausted,
             termination_reason=reason,
             elapsed_seconds=decimal_metric(elapsed),
+            worker_id=None,
+            claimed_at=None,
+            heartbeat_at=None,
+            cancellation_requested_at=None,
         )
     )
+    if not cast(CursorResult[object], result).rowcount:
+        await session.rollback()
+        raise MLRefinementError("worker lost the refinement lease")
     await session.commit()
 
 
 async def record_progress(
-    session: AsyncSession, run_id: UUID, *, computed: int, reused: int
+    session: AsyncSession,
+    run_id: UUID,
+    *,
+    computed: int,
+    reused: int,
+    worker_id: str | None = None,
 ) -> None:
-    await session.execute(
-        update(MLRefinementRunRecord)
-        .where(
-            MLRefinementRunRecord.id == run_id,
-            MLRefinementRunRecord.status == "running",
-        )
-        .values(evaluations_computed=computed, evaluations_reused=reused)
+    statement = update(MLRefinementRunRecord).where(
+        MLRefinementRunRecord.id == run_id,
+        MLRefinementRunRecord.status == "running",
     )
+    if worker_id is not None:
+        statement = statement.where(MLRefinementRunRecord.worker_id == worker_id)
+    result = await session.execute(
+        statement.values(
+            evaluations_computed=computed,
+            evaluations_reused=reused,
+            heartbeat_at=datetime.now(UTC),
+        )
+    )
+    if not cast(CursorResult[object], result).rowcount:
+        await session.rollback()
+        raise MLRefinementError("worker lost the refinement lease")
     await session.commit()
 
 
 async def fail_run(
-    session: AsyncSession, run_id: UUID, error: Exception, now: datetime
+    session: AsyncSession,
+    run_id: UUID,
+    error: Exception,
+    now: datetime,
+    *,
+    worker_id: str | None = None,
 ) -> None:
     await session.rollback()
+    statement = update(MLRefinementRunRecord).where(
+        MLRefinementRunRecord.id == run_id,
+        MLRefinementRunRecord.status == "running",
+    )
+    if worker_id is not None:
+        statement = statement.where(MLRefinementRunRecord.worker_id == worker_id)
     await session.execute(
-        update(MLRefinementRunRecord)
-        .where(
-            MLRefinementRunRecord.id == run_id,
-            MLRefinementRunRecord.status == "running",
-        )
-        .values(
+        statement.values(
             status="failed",
             failed_at=now,
             failure_type=type(error).__name__[:128],
             failure_message=(" ".join(str(error).split()) or "refinement failed")[:512],
+            worker_id=None,
+            claimed_at=None,
+            heartbeat_at=None,
+            cancellation_requested_at=None,
         )
     )
+    await session.commit()
+
+
+async def cancel_claimed_run(
+    session: AsyncSession, run_id: UUID, *, worker_id: str, now: datetime
+) -> None:
+    result = await session.execute(
+        update(MLRefinementRunRecord)
+        .where(
+            MLRefinementRunRecord.id == run_id,
+            MLRefinementRunRecord.status == "running",
+            MLRefinementRunRecord.worker_id == worker_id,
+        )
+        .values(
+            status="cancelled",
+            completed_at=now,
+            termination_reason="cancelled_by_user",
+            worker_id=None,
+            claimed_at=None,
+            heartbeat_at=None,
+            cancellation_requested_at=None,
+        )
+    )
+    if not cast(CursorResult[object], result).rowcount:
+        await session.rollback()
+        raise MLRefinementError("worker lost the refinement lease")
     await session.commit()
