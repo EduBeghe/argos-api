@@ -27,6 +27,19 @@ def test_safe_ratio_has_explicit_finite_zero_and_invalid_semantics() -> None:
     assert not np.isinf(result).any()
 
 
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_safe_ratio_converts_finite_overflow_to_nan_without_warning(
+    sign: float,
+) -> None:
+    numerator = np.asarray([sign * np.finfo(np.float64).max])
+    denominator = np.asarray([np.finfo(np.float64).tiny])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        result = _safe_ratio(numerator, denominator)
+    assert np.isnan(result[0])
+    assert not np.isinf(result).any()
+
+
 @pytest.mark.parametrize(
     ("calculation", "current_volume", "expected"),
     [

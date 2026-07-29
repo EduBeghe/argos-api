@@ -206,12 +206,14 @@ def _safe_ratio(numerator: ArrayLike, denominator: ArrayLike) -> NDArray[np.floa
     result = np.full(numerator_array.shape, np.nan, dtype=np.float64)
     finite = np.isfinite(numerator_array) & np.isfinite(denominator_array)
     divisible = finite & (denominator_array != 0)
-    np.divide(
-        numerator_array,
-        denominator_array,
-        out=result,
-        where=divisible,
-    )
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        np.divide(
+            numerator_array,
+            denominator_array,
+            out=result,
+            where=divisible,
+        )
+    result[~np.isfinite(result)] = np.nan
     result[finite & (numerator_array == 0) & (denominator_array == 0)] = 0.0
     return result
 
