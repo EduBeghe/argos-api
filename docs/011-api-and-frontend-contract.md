@@ -52,12 +52,13 @@ The FastAPI application is currently a read-only HTTP surface. It does not conta
 | Optimization | `GET /optimization/edge-guided/candidates` | run/instrument/status/action/predictor/condition/page | candidate evaluations | no |
 | Optimization | `GET /optimization/edge-guided/candidates/{candidate_evaluation_id}` | evaluation ID | candidate plus window evidence | no |
 
-FastAPIâ€™s generated `/docs`, `/redoc`, and `/openapi.json` are the schema-level reference. This inventory intentionally summarizes rather than duplicates Pydantic models.
+FastAPI’s generated `/docs`, `/redoc`, and `/openapi.json` are the schema-level reference. This inventory intentionally summarizes rather than duplicates Pydantic models.
 
 Edge-guided candidate and run responses add complete-Strategy family, entry/exit,
-cadence, holding, cooldown, allocation, generation-contract, funnel, timing, and outcome
-fields. They remain backward compatible and nullable for legacy rows. `test_metrics` is
-null when validation did not authorize isolated test; it is never a synthetic zero.
+cadence, holding, cooldown, allocation, generation-contract, ranking, funnel, timing,
+and outcome fields. They remain additive and nullable for legacy rows.
+`test_metrics` is null when validation did not authorize isolated test; it is never a
+synthetic zero.
 
 ## CORS and `argos-web`
 

@@ -25,7 +25,7 @@ This index separates current system truth from historical decisions and future w
 
 ## Architecture decisions
 
-ADRs are historical decisions: they explain why a choice was made and are not a substitute for the current reference. ADR-001 through ADR-011 remain accepted. Where implementation has resolved an earlier â€œopen decisionâ€ sentence, the implementation and current reference are authoritative; the original decision record remains useful history. No ADR is currently marked superseded.
+ADRs are historical decisions: they explain why a choice was made and are not a substitute for the current reference. ADR-001 through ADR-011 remain accepted. Where implementation has resolved an earlier “open decision” sentence, the implementation and current reference are authoritative; the original decision record remains useful history. No ADR is currently marked superseded.
 
 ## Future work
 

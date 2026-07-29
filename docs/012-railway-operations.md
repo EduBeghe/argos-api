@@ -17,7 +17,7 @@ work must not be reported as newly computed.
 - ingest: every five minutes;
 - decide: `2,32 * * * *` (UTC), allowing boundary candles and Scores to be persisted before the 30-minute cycle.
 
-Railwayâ€™s Cron Run is a one-shot execution created by a schedule or **Run now**. It is distinct from a continuously serving deployment. **Active** means the process is currently running; **Completed** means it exited successfully; **Failed** means a non-zero exit or platform failure. Open the runâ€™s **Deploy Logs** for structured job output and traceback. Use **Run now** for one controlled retry. Disable a schedule before maintenance or expensive historical work and re-enable it only after verifying resources and configuration.
+Railway’s Cron Run is a one-shot execution created by a schedule or **Run now**. It is distinct from a continuously serving deployment. **Active** means the process is currently running; **Completed** means it exited successfully; **Failed** means a non-zero exit or platform failure. Open the run’s **Deploy Logs** for structured job output and traceback. Use **Run now** for one controlled retry. Disable a schedule before maintenance or expensive historical work and re-enable it only after verifying resources and configuration.
 
 The API container runs `scripts/start_api.sh`: migrations must succeed before Uvicorn starts, and `${PORT:-8000}` is honored. Jobs create their own resources and exit. `railway ssh` opens a shell in the selected service environment; confirm the service before running commands and never paste secrets into logs.
 
@@ -57,7 +57,7 @@ python -m app.jobs.refinement_storage
 python -m app.jobs.analyze_predictive_edges --asset BTC/USDT --provider binance --market-type spot --interval 5m --from 2025-01-01T00:00:00Z --to 2026-01-01T00:00:00Z --training-days 180 --validation-days 60 --test-days 60 --step-days 60 --maximum-windows 6 --bins 5 --persist --edge-guided-candidates --max-edge-guided-candidates 12 --initial-cash 10000
 ```
 
-Use each commandâ€™s `--help` as the parser-authoritative flag reference. `refinement_storage` intentionally has no flags.
+Use each command’s `--help` as the parser-authoritative flag reference. `refinement_storage` intentionally has no flags.
 
 ## Safety and diagnosis
 

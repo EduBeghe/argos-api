@@ -14,7 +14,7 @@ The live job requests Binance Spot `GET /api/v3/klines`, accepts only closed fiv
 
 `BINANCE_BASE_URL` is configurable. `https://api.binance.com` is the default; `https://data-api.binance.vision` is useful for public market-data access where the main endpoint returns HTTP 451 because of network-location restrictions. The URL changes transport only, not instrument identity or normalization.
 
-Historical backfill is candle-only. It does not create historical Feature or Score rows. Existing measurements observed approximately 308â€“327 bytes of additional table-and-index storage per candle; this is an environment-specific estimate, not a database guarantee. Persisting raw normalized candles preserves reproducible evidence, while historical Feature matrices are constructed in bounded memory for analysis. Live Feature/Score work remains restricted to the recent ingestion target window.
+Historical backfill is candle-only. It does not create historical Feature or Score rows. Existing measurements observed approximately 308–327 bytes of additional table-and-index storage per candle; this is an environment-specific estimate, not a database guarantee. Persisting raw normalized candles preserves reproducible evidence, while historical Feature matrices are constructed in bounded memory for analysis. Live Feature/Score work remains restricted to the recent ingestion target window.
 
 The 1,000-candle live context limit covers the current EMA 20, EMA 50, RSI 14, ATR 14, return 1, return 12, and relative-volume 20 model with conservative recovery room. It prevents an historical backfill from making live runtime and memory proportional to the full table.
 
@@ -34,19 +34,19 @@ The exact formulas and alignment rules are in [Analytical Features](005-analytic
 
 `baseline_technical` version 1 consumes all seven Features plus close price. It derives trend, RSI, one-candle return, twelve-candle return, volume activity, and volatility ratio. Directional weights are 0.55 trend, 0.1575 RSI, 0.09 return 1, and 0.2025 return 12; they sum exactly to 1. Volume confirmation has weight 0.25 and scales the directional score by a factor from 0.75 to 1. Persisted Decimals use scale 18 and round-half-even.
 
-`overall_score = directional_score Ã— volume_confirmation_factor`; `signal_strength = abs(overall_score)`. Interpretations range from strongly bearish through neutral to strongly bullish. They describe measured evidence, not an automatic instruction. The Strategy alone decides requested action. See [Baseline Score](006-baseline-score-model.md).
+`overall_score = directional_score × volume_confirmation_factor`; `signal_strength = abs(overall_score)`. Interpretations range from strongly bearish through neutral to strongly bullish. They describe measured evidence, not an automatic instruction. The Strategy alone decides requested action. See [Baseline Score](006-baseline-score-model.md).
 
 ## Baseline Strategy and action vocabulary
 
 `baseline_long_only` version 1, configuration version 1, consumes `baseline_technical` version 1. When no position exists, an overall Score of at least 0.60 requests `open_position` with a 15% target portfolio allocation. When a position exists, a Score at or above 0.20 produces `no_action`; below 0.20 it requests `sell_all` for 100% of that position.
 
-The enum also reserves `increase_position` and `sell_partial`, but version 1 rejects and never emits them. â€œOpen positionâ€ is intent at the eligible boundary, not an assertion that the price is a market peak or trough. The threshold uses several normalized signals and can occur during an established trend. A Decision Snapshot preserves requested sizing, rule, evidence identity, and explanation; a Trade is the separate simulated execution record.
+The enum also reserves `increase_position` and `sell_partial`, but version 1 rejects and never emits them. “Open position” is intent at the eligible boundary, not an assertion that the price is a market peak or trough. The threshold uses several normalized signals and can occur during an established trend. A Decision Snapshot preserves requested sizing, rule, evidence identity, and explanation; a Trade is the separate simulated execution record.
 
 Limitations include fixed thresholds and weights, long-only exposure, one position per instrument, one cadence, no order-book model, and no guarantee that historical behavior persists.
 
 ## Paper Trading
 
-Paper Trading uses versioned experiments (â€œrunsâ€), not real wallets or exchange accounts. Version 1 defaults to 10,000 USDT, a 0.10% fee per execution notional, and 0.05% adverse slippage. Buys use observed price multiplied by `1 + slippage_rate`; sells use observed price multiplied by `1 - slippage_rate`. Slippage is a simplified unfavorable execution assumption, not an exchange quote or a second fee.
+Paper Trading uses versioned experiments (“runs”), not real wallets or exchange accounts. Version 1 defaults to 10,000 USDT, a 0.10% fee per execution notional, and 0.05% adverse slippage. Buys use observed price multiplied by `1 + slippage_rate`; sells use observed price multiplied by `1 - slippage_rate`. Slippage is a simplified unfavorable execution assumption, not an exchange quote or a second fee.
 
 A run stores initial/current cash, configuration, status, timestamps, optional predecessor, Positions, immutable Trades, Decision Cycles, equity snapshots, and performance history. Valuation uses persisted compatible candles. Realized P&L comes from closed quantity; unrealized P&L marks open quantity; equity is cash plus marked position value. Performance includes return, P&L, drawdown, costs, activity, and snapshot boundaries.
 
@@ -94,8 +94,8 @@ Plain-language definitions:
 
 Implemented: live ingestion; bounded Features/Scores; Decisions; Paper execution; portfolio/performance and equity history; dashboard API; separate frontend; candle backfill; reproducible simulation; refinement persistence/reuse; Predictive Edge Discovery v4 diagnostics and bounded funnel contracts; complete edge-guided Strategy research; qualification v3; weekly research execution; and candidate APIs/UI.
 
-Predictive Edge Discovery v4.1 adds bounded research for directional signal Ã— frozen
+Predictive Edge Discovery v4.1 adds bounded research for directional signal × frozen
 context-regime interactions. Derived predictors remain in memory and do not modify live
 Features, Scores, ingestion, Decisions, Paper Trading, or candidate activation.
 
-Not implemented: candidate correction/approval or activation; parallel wallets per Strategy; stopping individual Strategies; additional providers/assets; multi-user identity; news/sentiment; or real-money trading. Single-administrator API authentication exists with temporarily disabled enforcement for the staged frontend rollout described in [API authentication](015-authentication.md). These are possible next steps, not production commitments.
+Not implemented: candidate correction/approval or activation; parallel wallets per Strategy; stopping individual Strategies; additional providers/assets; ML; news/sentiment; multi-user identity; or real-money trading. Single-administrator API authentication exists with temporarily disabled enforcement for the staged frontend rollout described in [API authentication](015-authentication.md). These are possible next steps, not production commitments.
