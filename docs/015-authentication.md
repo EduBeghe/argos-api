@@ -56,8 +56,17 @@ decision, research, migrations, and Alembic do not require these secrets.
 
 `POST /auth/login` accepts exactly `username` and `password`, returns `204`, and sets:
 
-- `argos_session`: HttpOnly, `SameSite=Strict`, `Path=/`, Secure in production;
-- `argos_csrf`: submitted automatically to the API, `SameSite=Strict`, `Path=/`, Secure in production.
+- production (`ARGOS_AUTH_COOKIE_SECURE=true`): both cookies are host-only, `Secure`,
+  `SameSite=None`, and `Path=/`; only `argos_session` is HttpOnly;
+- local HTTP (`ARGOS_AUTH_COOKIE_SECURE=false`): both cookies are host-only,
+  `SameSite=Lax`, not Secure, and `Path=/`; only `argos_session` is HttpOnly.
+
+The Railway deployment hosts `argos-web-production-e6cf.up.railway.app` and
+`argos-api-production-b48a.up.railway.app` are cross-site: `up.railway.app` is listed
+in the [Public Suffix List](https://publicsuffix.org/list/public_suffix_list.dat).
+Production therefore requires `Secure; SameSite=None`; browsers reject insecure
+`SameSite=None`, so local HTTP uses `SameSite=Lax`. No `Domain` attribute is set, and
+both cookies remain host-only API cookies rather than shared Railway cookies.
 
 The JWT itself is never returned in JSON or a readable response header. Because
 `argos-web` and `argos-api` have different origins, frontend JavaScript cannot and must
@@ -66,6 +75,12 @@ login returns the same raw CSRF value in the exposed `X-CSRF-Token` response hea
 `GET /auth/me` returns only `username`, `role`, and the UTC expiration timestamp in JSON,
 and restores the same header after validating the submitted CSRF cookie against the JWT.
 Both responses use `Cache-Control: no-store`.
+
+`SameSite=None` is transport compatibility, not CSRF protection. Unsafe requests still
+require the session cookie, CSRF cookie, matching `X-CSRF-Token`, and the CSRF digest
+bound into the signed JWT. Exact-origin credentialed CORS limits which configured
+frontend origin may read the response. Browser policies that globally block third-party
+cookies may still prevent this Railway-domain arrangement.
 
 The SPA calls every API request with browser credentials enabled, keeps the response
 header value in memory only, and sends it as `X-CSRF-Token` on authenticated `POST`,

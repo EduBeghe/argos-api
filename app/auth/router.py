@@ -20,7 +20,11 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
 def _cookie_options(*, secure: bool) -> dict[str, object]:
-    return {"secure": secure, "samesite": "strict", "path": "/"}
+    return {
+        "secure": secure,
+        "samesite": "none" if secure else "lax",
+        "path": "/",
+    }
 
 
 @router.post("/login", status_code=204)
@@ -73,3 +77,4 @@ def logout(response: Response, settings: AuthSettingsDependency) -> None:
     response.delete_cookie(SESSION_COOKIE, httponly=True, **options)  # type: ignore[arg-type]
     response.delete_cookie(CSRF_COOKIE, httponly=False, **options)  # type: ignore[arg-type]
     response.headers["Cache-Control"] = "no-store"
+
