@@ -26,16 +26,16 @@ For the consolidated current-state reference, see [Current System Reference](010
 
 ```text
 External data source
-→ Ingestion
-→ Storage
-→ Feature Engine
-→ Scoring
-→ Decision Engine
-→ Decision Snapshot
-→ Paper Trading
-→ Metrics
-→ API
-→ Web
+â†’ Ingestion
+â†’ Storage
+â†’ Feature Engine
+â†’ Scoring
+â†’ Decision Engine
+â†’ Decision Snapshot
+â†’ Paper Trading
+â†’ Metrics
+â†’ API
+â†’ Web
 ```
 
 The analytical pipeline runs independently of its presentation layers. The API exposes system information and actions; the Web application visualizes them and supports user interaction.
@@ -75,9 +75,9 @@ The first persisted model is the deterministic `baseline_technical` version 1 sc
 Illustrative output:
 
 ```text
-technical: 0.65 — price is above the selected moving average
-momentum: 0.40 — recent returns are positive but weakening
-volatility: 0.25 — current volatility increases downside uncertainty
+technical: 0.65 â€” price is above the selected moving average
+momentum: 0.40 â€” recent returns are positive but weakening
+volatility: 0.25 â€” current volatility increases downside uncertainty
 ```
 
 The score ranges, formulas, and explanations above are illustrative rather than selected model definitions.
@@ -138,7 +138,7 @@ The read-only `GET /dashboard/overview` endpoint composes the initial screen fro
 
 The API orchestrates application use cases and maps them to explicit module interfaces. It does not contain core analytical or trading logic.
 
-In production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources and separate candle and feature transactions. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins.
+In production, the API and one-shot ingestion job are separate processes. The API process applies migrations before Uvicorn starts and owns HTTP resource lifecycle. The ingestion job owns its database and Binance client resources and separate candle and feature transactions. The external platform owns five-minute scheduling; PostgreSQL natural uniqueness makes repeated and overlapping ingestion idempotent without distributed locks. Browser access is restricted to explicitly configured CORS origins. API-only authentication settings and middleware do not participate in jobs or migrations.
 
 The one-shot Decision Cycle job is also separate from ingestion. At minute 02 and 32 it selects fresh compatible Score evidence no later than the corresponding :00 or :30 boundary, reads the persisted Paper Position, creates one Decision Snapshot, and simulates at most one Trade. NO_ACTION completes an auditable cycle without a Trade. It never contacts Binance.
 
