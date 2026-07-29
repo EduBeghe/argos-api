@@ -11,6 +11,7 @@ from app.auth.tokens import (
     AuthenticationError,
     decode_session_token,
     valid_csrf,
+    valid_csrf_cookie,
 )
 
 AuthSettingsDependency = Annotated[AuthSettings, Depends(get_auth_settings)]
@@ -60,6 +61,16 @@ def require_csrf(request: Request, principal: PrincipalDependency) -> None:
     header = request.headers.get(CSRF_HEADER)
     if cookie is None or header is None or not valid_csrf(principal, cookie, header):
         raise HTTPException(status_code=403, detail="CSRF validation failed")
+
+
+def require_bound_csrf_cookie(request: Request, principal: PrincipalDependency) -> str:
+    cookie = request.cookies.get(CSRF_COOKIE)
+    if cookie is None or not valid_csrf_cookie(principal, cookie):
+        raise _unauthorized()
+    return cookie
+
+
+BoundCsrfCookieDependency = Annotated[str, Depends(require_bound_csrf_cookie)]
 
 
 def request_principal(request: Request) -> AuthenticatedPrincipal:

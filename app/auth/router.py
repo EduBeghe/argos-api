@@ -4,11 +4,17 @@ from app.auth.config import AuthConfigurationError
 from app.auth.contracts import LoginRequest, SessionResponse
 from app.auth.dependencies import (
     AuthSettingsDependency,
+    BoundCsrfCookieDependency,
     PrincipalDependency,
     require_csrf,
 )
 from app.auth.passwords import verify_admin_credentials
-from app.auth.tokens import CSRF_COOKIE, SESSION_COOKIE, create_session_token
+from app.auth.tokens import (
+    CSRF_COOKIE,
+    CSRF_HEADER,
+    SESSION_COOKIE,
+    create_session_token,
+)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -42,10 +48,18 @@ def login(
     options = _cookie_options(secure=settings.cookie_secure)
     response.set_cookie(SESSION_COOKIE, token, httponly=True, **options)  # type: ignore[arg-type]
     response.set_cookie(CSRF_COOKIE, csrf, httponly=False, **options)  # type: ignore[arg-type]
+    response.headers[CSRF_HEADER] = csrf
+    response.headers["Cache-Control"] = "no-store"
 
 
 @router.get("/me", response_model=SessionResponse)
-def me(principal: PrincipalDependency) -> SessionResponse:
+def me(
+    response: Response,
+    principal: PrincipalDependency,
+    csrf: BoundCsrfCookieDependency,
+) -> SessionResponse:
+    response.headers[CSRF_HEADER] = csrf
+    response.headers["Cache-Control"] = "no-store"
     return SessionResponse(
         username=principal.username,
         role="admin",
@@ -58,3 +72,4 @@ def logout(response: Response, settings: AuthSettingsDependency) -> None:
     options = _cookie_options(secure=settings.cookie_secure)
     response.delete_cookie(SESSION_COOKIE, httponly=True, **options)  # type: ignore[arg-type]
     response.delete_cookie(CSRF_COOKIE, httponly=False, **options)  # type: ignore[arg-type]
+    response.headers["Cache-Control"] = "no-store"

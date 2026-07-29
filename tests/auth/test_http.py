@@ -59,6 +59,16 @@ def test_login_sets_strict_session_and_csrf_cookies(auth_client: TestClient) -> 
     assert "HttpOnly" not in csrf
     assert "SameSite=strict" in session and "Path=/" in session
     assert "SameSite=strict" in csrf and "Path=/" in csrf
+    assert response.headers["X-CSRF-Token"] == auth_client.cookies["argos_csrf"]
+    assert response.headers["Cache-Control"] == "no-store"
+    session_value = auth_client.cookies["argos_session"]
+    assert all(
+        session_value not in value
+        for name, value in response.headers.items()
+        if name.lower() != "set-cookie"
+    )
+    assert session_value.encode() not in response.content
+    assert "authorization" not in response.headers
     assert response.content == b""
 
 
@@ -79,6 +89,10 @@ def test_wrong_username_and_password_are_indistinguishable(
         )
         == (401, {"detail": "Invalid credentials"})
     )
+    assert "X-CSRF-Token" not in wrong_user.headers
+    assert "X-CSRF-Token" not in wrong_password.headers
+    assert "set-cookie" not in wrong_user.headers
+    assert "set-cookie" not in wrong_password.headers
 
 
 def test_login_schema_is_exact(auth_client: TestClient) -> None:
@@ -91,11 +105,33 @@ def test_login_schema_is_exact(auth_client: TestClient) -> None:
 
 def test_me_returns_only_public_session_fields(auth_client: TestClient) -> None:
     login(auth_client)
+    csrf = auth_client.cookies["argos_csrf"]
     response = auth_client.get("/auth/me")
     assert response.status_code == 200
     assert set(response.json()) == {"username", "role", "expires_at"}
     assert response.json()["username"] == "admin"
     assert response.json()["role"] == "admin"
+    assert response.headers["X-CSRF-Token"] == csrf
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_me_requires_csrf_cookie_bound_to_session(auth_client: TestClient) -> None:
+    login(auth_client)
+    del auth_client.cookies["argos_csrf"]
+    missing = auth_client.get("/auth/me")
+    auth_client.cookies.set("argos_csrf", "mismatched")
+    mismatched = auth_client.get("/auth/me")
+    for response in (missing, mismatched):
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Authentication required"}
+        assert "X-CSRF-Token" not in response.headers
+
+
+def test_me_does_not_require_incoming_csrf_header(auth_client: TestClient) -> None:
+    login(auth_client)
+    response = auth_client.get("/auth/me")
+    assert response.status_code == 200
+    assert response.headers["X-CSRF-Token"] == auth_client.cookies["argos_csrf"]
 
 
 def test_logout_requires_csrf_and_clears_both_cookies(auth_client: TestClient) -> None:
@@ -110,6 +146,8 @@ def test_logout_requires_csrf_and_clears_both_cookies(auth_client: TestClient) -
     )
     response = auth_client.post("/auth/logout", headers={"X-CSRF-Token": csrf})
     assert response.status_code == 204
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "X-CSRF-Token" not in response.headers
     assert "argos_session" not in auth_client.cookies
     assert "argos_csrf" not in auth_client.cookies
 
@@ -173,6 +211,39 @@ def test_cors_preflight_bypasses_auth_and_never_reflects_unknown_origin(
     assert allowed.headers["access-control-allow-credentials"] == "true"
     assert denied.status_code == 400
     assert "access-control-allow-origin" not in denied.headers
+
+
+def test_allowed_origin_can_read_csrf_handoff_headers(
+    auth_client: TestClient,
+) -> None:
+    origin = "http://localhost:4200"
+    login_response = auth_client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "correct-password"},
+        headers={"Origin": origin},
+    )
+    me_response = auth_client.get("/auth/me", headers={"Origin": origin})
+    for response in (login_response, me_response):
+        assert response.headers["access-control-allow-origin"] == origin
+        assert response.headers["access-control-allow-credentials"] == "true"
+        assert response.headers["access-control-expose-headers"] == "X-CSRF-Token"
+        assert response.headers["X-CSRF-Token"] == auth_client.cookies["argos_csrf"]
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["http://localhost:4200.attacker.example", "http://attacker.localhost:4200"],
+)
+def test_attacker_origin_boundaries_are_not_authorized(
+    auth_client: TestClient, origin: str
+) -> None:
+    response = auth_client.post(
+        "/auth/login",
+        json={"username": "admin", "password": "correct-password"},
+        headers={"Origin": origin},
+    )
+    assert response.status_code == 204
+    assert "access-control-allow-origin" not in response.headers
 
 
 def test_registered_routes_do_not_expand_the_public_allowlist(
@@ -274,3 +345,5 @@ def test_disabled_mode_login_fails_safely_without_credentials(
         )
     assert response.status_code == 503
     assert response.json() == {"detail": "Authentication is not configured"}
+    assert "X-CSRF-Token" not in response.headers
+    assert "set-cookie" not in response.headers

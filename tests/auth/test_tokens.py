@@ -12,6 +12,7 @@ from app.auth.tokens import (
     csrf_digest,
     decode_session_token,
     valid_csrf,
+    valid_csrf_cookie,
 )
 
 SECRET = "s" * 32
@@ -41,7 +42,9 @@ def test_valid_token_round_trip_and_csrf_binding() -> None:
     assert principal.username == "admin"
     assert principal.expires_at == expires_at
     assert valid_csrf(principal, csrf, csrf)
+    assert valid_csrf_cookie(principal, csrf)
     assert not valid_csrf(principal, csrf, "different")
+    assert not valid_csrf_cookie(principal, "different")
 
 
 @pytest.mark.parametrize(
