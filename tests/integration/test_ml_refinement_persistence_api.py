@@ -254,7 +254,7 @@ async def test_persistence_reuse_and_read_only_api(
     assert evidence.status_code == 200
     assert evidence.json()["elapsed_seconds"] == "0.123456789012345680"
     assert client.get(f"/optimization/ml-refinement-runs/{uuid4()}").status_code == 404
-    assert client.post("/optimization/ml-refinement-runs").status_code == 405
+    assert client.post("/optimization/ml-refinement-runs").status_code == 422
 
     async with factory() as session:
         count = await session.scalar(select(func.count(MLRefinementRunRecord.id)))
