@@ -28,8 +28,8 @@ from app.ml.screening.config import (
     ModelScreeningConfiguration,
     ScreeningEngine,
 )
-from app.ml.screening.engines import library_versions
-from app.ml.screening.service import screen_models
+from app.ml.screening.engines import library_versions, validate_engine_dependencies
+from app.ml.screening.service import ScreeningExecutionResult, screen_models
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def _resolve_asset(asset: Asset) -> MarketInstrumentDefinition:
     )
 
 
-async def run(args: argparse.Namespace) -> None:
+async def run(args: argparse.Namespace) -> ScreeningExecutionResult | None:
     if args.dry_run and args.force_recompute:
         raise ValueError("--dry-run and --force-recompute cannot be combined")
     settings = get_settings()
@@ -92,6 +92,7 @@ async def run(args: argparse.Namespace) -> None:
             for value in dict.fromkeys(args.future_duration_seconds)
         )
     )
+    validate_engine_dependencies()
     versions = library_versions()
     engine = create_database_engine(settings)
     factory = create_session_factory(engine)
@@ -125,8 +126,8 @@ async def run(args: argparse.Namespace) -> None:
             if args.dry_run:
                 if session.new or session.dirty or session.deleted:
                     raise RuntimeError("dry-run attempted to mutate the session")
-                return
-            await screen_models(
+                return None
+            return await screen_models(
                 session=session,
                 dataset=dataset,
                 engines=engines,
@@ -142,7 +143,22 @@ async def run(args: argparse.Namespace) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    asyncio.run(run(build_parser().parse_args(argv)))
+    result = asyncio.run(run(build_parser().parse_args(argv)))
+    if result is not None:
+        logger.info(
+            "ML screening command finished",
+            extra={
+                "structured_fields": {
+                    "run_id": str(result.run_id),
+                    "experiment_key": result.experiment_key,
+                    "reused_existing_run": result.reused_existing_run,
+                    "evaluations_computed": result.evaluations_computed,
+                    "evaluations_reused": result.evaluations_reused,
+                    "results_generated": result.results_generated,
+                    "pareto_retained_count": result.pareto_retained_count,
+                }
+            },
+        )
 
 
 if __name__ == "__main__":

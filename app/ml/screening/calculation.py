@@ -7,8 +7,10 @@ from time import perf_counter
 
 import numpy as np
 
-from app.ml.dataset import MLExperimentDataset
+from app.ml.contract import TemporalFoldDefinition
+from app.ml.dataset import EligibleFoldIndices, MLExperimentDataset
 from app.ml.errors import MLDatasetError
+from app.ml.gaps import datetime_to_ns
 
 from .config import ModelScreeningConfiguration, ScreeningEngine
 from .engines import create_engine
@@ -46,13 +48,45 @@ class ScreeningResult:
 
 
 def assert_final_test_isolation(
-    dataset: MLExperimentDataset, training: np.ndarray, validation: np.ndarray
+    dataset: MLExperimentDataset,
+    training: np.ndarray,
+    validation: np.ndarray,
+    *,
+    definition: TemporalFoldDefinition,
+    duration: timedelta,
 ) -> None:
     final = dataset.final_test_indices
     if np.intersect1d(training, validation).size:
         raise MLDatasetError("training and validation indices overlap")
     if np.intersect1d(training, final).size or np.intersect1d(validation, final).size:
         raise MLDatasetError("protected final-test indices entered model screening")
+    duration_ns = int(duration.total_seconds() * 1_000_000_000)
+    training_completion = dataset.boundary_time_ns[training] + duration_ns
+    validation_completion = dataset.boundary_time_ns[validation] + duration_ns
+    if np.any(training_completion > datetime_to_ns(definition.training_end)):
+        raise MLDatasetError("training target crosses the training segment end")
+    if np.any(validation_completion > datetime_to_ns(definition.validation_end)):
+        raise MLDatasetError("validation target crosses the validation segment end")
+
+
+def _bounded_fold_indices(
+    *,
+    dataset: MLExperimentDataset,
+    definition: TemporalFoldDefinition,
+    training_indices: np.ndarray,
+    validation_indices: np.ndarray,
+    duration: timedelta,
+) -> EligibleFoldIndices:
+    duration_ns = int(duration.total_seconds() * 1_000_000_000)
+    training = training_indices[
+        dataset.boundary_time_ns[training_indices] + duration_ns
+        <= datetime_to_ns(definition.training_end)
+    ]
+    validation = validation_indices[
+        dataset.boundary_time_ns[validation_indices] + duration_ns
+        <= datetime_to_ns(definition.validation_end)
+    ]
+    return EligibleFoldIndices(training, validation)
 
 
 def evaluate_combination(
@@ -62,14 +96,45 @@ def evaluate_combination(
     duration: timedelta,
     configuration: ModelScreeningConfiguration,
 ) -> tuple[FoldEvaluation, ...]:
-    target = dataset.targets.for_duration(duration)
+    bounded_folds = tuple(
+        (
+            fold,
+            _bounded_fold_indices(
+                dataset=dataset,
+                definition=fold.definition,
+                training_indices=fold.training_indices,
+                validation_indices=fold.validation_indices,
+                duration=duration,
+            ),
+        )
+        for fold in dataset.folds
+    )
+    candidate_indices = np.unique(
+        np.concatenate(
+            [
+                indices
+                for _, bounded in bounded_folds
+                for indices in (
+                    bounded.training_indices,
+                    bounded.validation_indices,
+                )
+            ]
+        )
+    ).astype(np.int64)
+    target = dataset.targets.for_duration(duration, candidate_indices=candidate_indices)
     evaluations: list[FoldEvaluation] = []
-    for fold in dataset.folds:
-        indices = dataset.eligible_indices(
-            fold_name=fold.definition.name, duration=duration
+    for fold, bounded in bounded_folds:
+        eligible = dataset.feature_eligible & target.eligible
+        indices = EligibleFoldIndices(
+            bounded.training_indices[eligible[bounded.training_indices]],
+            bounded.validation_indices[eligible[bounded.validation_indices]],
         )
         assert_final_test_isolation(
-            dataset, indices.training_indices, indices.validation_indices
+            dataset,
+            indices.training_indices,
+            indices.validation_indices,
+            definition=fold.definition,
+            duration=duration,
         )
         if not len(indices.training_indices) or not len(indices.validation_indices):
             continue

@@ -8,7 +8,9 @@ Training fits an engine on historical features and exact future returns. Ridge i
 
 ## Temporal contract
 
-A future duration is the elapsed time between a decision boundary and the return being predicted. All 80 contract durations are supported. Only the seven chronological development folds are used. Preprocessing and fitting use training rows only; validation rows are later in time and rows are never shuffled. A guard rejects overlap with the protected 2024–2026 final test, preserving it for later candidate validation.
+A future duration is the elapsed time between a decision boundary and the return being predicted. All 80 contract durations are supported. Only the seven chronological development folds are used. Preprocessing and fitting use training rows only; validation rows are later in time and rows are never shuffled. A guard rejects overlap with the protected 2024-2026 final test, preserving it for later candidate validation.
+
+Eligibility protects the complete target interval as well as its starting boundary. A training row is used only when `boundary + future duration <= training_end`; validation applies the equivalent rule against `validation_end`. Target construction is restricted to those bounded development rows, so a long horizon near the end of 2023 cannot read a 2024 final-test candle. This target bound is additional to the existing seven-day embargo.
 
 ## Fixed version 1 configuration
 
@@ -37,5 +39,7 @@ python -u -m app.jobs.screen_ml_models --asset BTC/USDT --engine all --all-futur
 ```
 
 `--dry-run` validates dependencies, dataset identity, and planned work without fitting or writes. `--force-recompute` bypasses completed-run reuse. Training is sequential, targets are lazy by duration, fold predictions are released promptly, and `ML_SCREENING_THREAD_COUNT` defaults to two. Full screening is CPU-intensive, so Railway operation should begin with a canary.
+
+Dry-run imports scikit-learn, LightGBM, and CatBoost themselves, which verifies their native modules can load rather than checking package metadata alone. Completion logs distinguish computed and reused executions. Peak-memory reporting prefers Linux `VmHWM`, which includes native engine allocations, and falls back to Python traced memory where `/proc` is unavailable.
 
 Untouched final-test evaluation, candidate Strategy construction, after-cost economic testing, model-artifact design, and explicit activation remain future work. Live Decisions and Paper Trading are unchanged.

@@ -17,6 +17,7 @@ from .calculation import (
 )
 from .config import ModelScreeningConfiguration, ScreeningEngine
 from .engines import library_versions
+from .memory import approximate_peak_resident_bytes
 from .persistence import (
     complete_run,
     create_run,
@@ -63,7 +64,7 @@ async def screen_models(
     if not force_recompute:
         existing = await find_completed_run(session, key)
         if existing is not None:
-            return ScreeningExecutionResult(
+            execution = ScreeningExecutionResult(
                 existing.id,
                 key,
                 True,
@@ -72,6 +73,23 @@ async def screen_models(
                 existing.results_generated,
                 existing.pareto_retained_count,
             )
+            logger.info(
+                "ML model screening completed",
+                extra={
+                    "structured_fields": {
+                        "run_id": str(existing.id),
+                        "experiment_key": key,
+                        "status": "completed",
+                        "reused_existing_run": True,
+                        "evaluations_reused": existing.evaluations_computed,
+                        "evaluations_computed": 0,
+                        "results_generated": existing.results_generated,
+                        "pareto_retained_count": existing.pareto_retained_count,
+                        "compute_avoided": existing.evaluations_computed,
+                    }
+                },
+            )
+            return execution
     timestamp = now or datetime.now(UTC)
     run_id = await create_run(
         session=session,
@@ -105,58 +123,63 @@ async def screen_models(
     )
     started = perf_counter()
     tracemalloc.start()
+    traced_peak = 0
     all_results: list[ScreeningResult] = []
     computed = 0
     try:
-        for engine in engines:
-            for duration in durations:
-                combination_started = perf_counter()
-                evaluations = evaluate_combination(
-                    dataset=dataset,
-                    engine_name=engine,
-                    duration=duration,
-                    configuration=configuration,
-                )
-                await persist_evaluations(session, run_id, evaluations, timestamp)
-                computed += len(evaluations)
-                all_results.append(aggregate_evaluations(evaluations))
-                logger.info(
-                    "ML screening combination completed",
-                    extra={
-                        "structured_fields": {
-                            "run_id": str(run_id),
-                            "engine": engine.value,
-                            "duration_seconds": int(duration.total_seconds()),
-                            "folds_completed": len(evaluations),
-                            "elapsed_seconds": perf_counter() - combination_started,
-                            "evaluations_computed": computed,
-                            "evaluations_reused": 0,
-                        }
-                    },
-                )
-        results = apply_pareto(tuple(all_results))
-        elapsed = perf_counter() - started
-        await complete_run(
-            session, run_id, results, computed, elapsed, datetime.now(UTC)
-        )
-    except Exception as error:
-        await fail_run(session, run_id, error, datetime.now(UTC))
-        raise
-    _, peak_memory = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+        try:
+            for engine in engines:
+                for duration in durations:
+                    combination_started = perf_counter()
+                    evaluations = evaluate_combination(
+                        dataset=dataset,
+                        engine_name=engine,
+                        duration=duration,
+                        configuration=configuration,
+                    )
+                    await persist_evaluations(session, run_id, evaluations, timestamp)
+                    computed += len(evaluations)
+                    all_results.append(aggregate_evaluations(evaluations))
+                    logger.info(
+                        "ML screening combination completed",
+                        extra={
+                            "structured_fields": {
+                                "run_id": str(run_id),
+                                "engine": engine.value,
+                                "duration_seconds": int(duration.total_seconds()),
+                                "folds_completed": len(evaluations),
+                                "elapsed_seconds": perf_counter() - combination_started,
+                                "evaluations_computed": computed,
+                                "evaluations_reused": 0,
+                            }
+                        },
+                    )
+            results = apply_pareto(tuple(all_results))
+            elapsed = perf_counter() - started
+            await complete_run(
+                session, run_id, results, computed, elapsed, datetime.now(UTC)
+            )
+        except Exception as error:
+            await fail_run(session, run_id, error, datetime.now(UTC))
+            raise
+    finally:
+        _, traced_peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+    peak_memory = approximate_peak_resident_bytes(traced_peak)
     logger.info(
         "ML model screening completed",
         extra={
             "structured_fields": {
                 "run_id": str(run_id),
                 "status": "completed",
+                "reused_existing_run": False,
                 "evaluations_computed": computed,
                 "evaluations_reused": 0,
                 "results_generated": len(results),
                 "pareto_retained_count": sum(item.pareto_retained for item in results),
                 "compute_avoided": 0,
                 "total_elapsed_seconds": elapsed,
-                "approximate_peak_resident_memory": peak_memory,
+                "approximate_peak_resident_bytes": peak_memory,
             }
         },
     )

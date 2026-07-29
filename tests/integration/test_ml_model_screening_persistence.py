@@ -15,6 +15,7 @@ from app.ml.screening.models import (
     MLModelScreeningResultRecord,
     MLModelScreeningRunRecord,
 )
+from app.ml.screening.persistence import fail_run, find_completed_run
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 EXPERIMENT_KEY = "m" * 64
@@ -42,12 +43,12 @@ async def factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     await engine.dispose()
 
 
-def _run(run_id: UUID) -> MLModelScreeningRunRecord:
+def _run(run_id: UUID, *, status: str = "completed") -> MLModelScreeningRunRecord:
     now = datetime(2036, 1, 1, tzinfo=UTC)
     return MLModelScreeningRunRecord(
         id=run_id,
         experiment_key=EXPERIMENT_KEY,
-        status="completed",
+        status=status,
         screening_version=1,
         experiment_contract_version=2,
         variable_registry_version=1,
@@ -63,7 +64,7 @@ def _run(run_id: UUID) -> MLModelScreeningRunRecord:
         deterministic_seed=1729,
         configuration={"thread_count": 2},
         started_at=now,
-        completed_at=now,
+        completed_at=now if status == "completed" else None,
         failure_type=None,
         failure_message=None,
         evaluations_computed=1,
@@ -140,3 +141,31 @@ async def test_unique_evaluation_and_result_constraints(
         with pytest.raises(IntegrityError):
             await session.commit()
         await session.rollback()
+
+
+async def test_only_completed_runs_are_reused_and_failure_is_terminal(
+    factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with factory() as session:
+        running = _run(uuid4(), status="running")
+        failed = _run(uuid4(), status="failed")
+        session.add_all((running, failed))
+        await session.commit()
+        assert await find_completed_run(session, EXPERIMENT_KEY) is None
+
+        await fail_run(
+            session,
+            running.id,
+            RuntimeError("native engine failed"),
+            datetime(2036, 1, 2, tzinfo=UTC),
+        )
+        await session.refresh(running)
+        assert running.status == "failed"
+        assert running.failure_type == "RuntimeError"
+
+        completed = _run(uuid4())
+        session.add(completed)
+        await session.commit()
+        reused = await find_completed_run(session, EXPERIMENT_KEY)
+        assert reused is not None
+        assert reused.id == completed.id

@@ -1,3 +1,4 @@
+from importlib import import_module
 from importlib.metadata import version
 from typing import Protocol
 
@@ -14,6 +15,13 @@ class RegressionEngine(Protocol):
         training_targets: NDArray[np.float32],
         validation_features: NDArray[np.float32],
     ) -> NDArray[np.float64]: ...
+
+
+def validate_engine_dependencies() -> None:
+    """Import every native-backed engine dependency and fail without substitution."""
+
+    for module_name in ("sklearn", "lightgbm", "catboost"):
+        import_module(module_name)
 
 
 def library_versions() -> dict[str, str]:
