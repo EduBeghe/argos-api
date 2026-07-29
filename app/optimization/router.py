@@ -6,13 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.refinement.contract_service import refinement_contract
 from app.ml.refinement.contracts import (
     MLRefinementRequest,
     PredictionObjective,
     RefinementClassification,
     RefinementStatus,
 )
-from app.ml.refinement.contract_service import refinement_contract
 from app.ml.refinement.persistence import MLRefinementError
 from app.ml.refinement.queue import (
     QueueDisposition,
