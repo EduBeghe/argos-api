@@ -2,6 +2,8 @@
 
 Argos is an asset-agnostic quantitative research and predictive decision-support platform. Its initial backend is a modular monolith, not a distributed microservices system. Modules are separated by responsibility so they can evolve independently and, if a demonstrated operational need appears, later be extracted into independent services.
 
+The offline ML research boundary includes a sequential, reproducible model-screening job. It consumes the validated ML experiment dataset, fits Ridge, LightGBM, and CatBoost only on chronological development folds, and persists evidence without connecting models to live Decisions or Paper Trading. See [ML Model Screening](ml-model-screening.md).
+
 The frontend is a responsive Angular application maintained in the separate `argos-web` repository.
 
 ## Current Deployed Execution

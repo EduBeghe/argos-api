@@ -7,11 +7,14 @@ requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.14,<2",
     "asyncpg>=0.30,<1",
+    "catboost>=1.2.8,<2",
     "fastapi>=0.115,<1",
     "httpx>=0.28,<1",
+    "lightgbm>=4.6,<5",
     "numpy>=2.2,<3",
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.7,<3",
+    "scikit-learn>=1.7,<2",
     "sqlalchemy[asyncio]>=2.0.36,<3",
     "uvicorn[standard]>=0.34,<1",
 ]
@@ -44,4 +47,8 @@ files = ["app", "main.py", "tests"]
 
 [[tool.mypy.overrides]]
 module = "alembic.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "scipy.*", "catboost.*"]
 ignore_missing_imports = true
