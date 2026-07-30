@@ -62,7 +62,7 @@ def records(
 def test_three_way_identity_accepts_the_unchanged_pinned_dataset() -> None:
     source, queued, dataset = records()
     diagnostics = validate_dataset_identity(
-        source=source, queued=queued, dataset=dataset
+        source=source, queued=queued, rebuilt=dataset.metadata
     )
     assert diagnostics.candle_count == 42
     assert diagnostics.historical_end_exclusive == FINAL_TEST_END.isoformat()
@@ -71,7 +71,9 @@ def test_three_way_identity_accepts_the_unchanged_pinned_dataset() -> None:
 def test_historical_mutation_reports_each_mismatched_identity() -> None:
     source, queued, dataset = records(rebuilt_fingerprint="b" * 64)
     with pytest.raises(DatasetFingerprintChanged) as captured:
-        validate_dataset_identity(source=source, queued=queued, dataset=dataset)
+        validate_dataset_identity(
+            source=source, queued=queued, rebuilt=dataset.metadata
+        )
     message = str(captured.value)
     assert "source-versus-rebuilt" in message
     assert "queue-versus-rebuilt" in message
@@ -83,11 +85,15 @@ def test_historical_mutation_reports_each_mismatched_identity() -> None:
 def test_malformed_persisted_fingerprint_fails_before_work(fingerprint: str) -> None:
     source, queued, dataset = records(source_fingerprint=fingerprint)
     with pytest.raises(DatasetProvenanceInvalid, match="malformed"):
-        validate_dataset_identity(source=source, queued=queued, dataset=dataset)
+        validate_dataset_identity(
+            source=source, queued=queued, rebuilt=dataset.metadata
+        )
 
 
 def test_incompatible_contract_version_is_not_live_data_drift() -> None:
     source, queued, dataset = records()
     source.variable_registry_version += 1
     with pytest.raises(DatasetProvenanceInvalid, match="variable registry"):
-        validate_dataset_identity(source=source, queued=queued, dataset=dataset)
+        validate_dataset_identity(
+            source=source, queued=queued, rebuilt=dataset.metadata
+        )

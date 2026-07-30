@@ -7,7 +7,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ml.dataset import MLExperimentDataset
+from app.ml.dataset import MLDatasetMetadata, MLExperimentDataset
 from app.ml.screening.engines import library_versions
 
 from .calculation import RefinementEvaluationResult, evaluate_refinement_candidate
@@ -130,7 +130,8 @@ async def prepare_refinement(
 async def execute_refinement(
     *,
     session: AsyncSession,
-    dataset: MLExperimentDataset,
+    identity_metadata: MLDatasetMetadata,
+    development_dataset: MLExperimentDataset,
     request: MLRefinementRequest,
     now: datetime | None = None,
     claimed_run: MLRefinementRunRecord | None = None,
@@ -141,7 +142,7 @@ async def execute_refinement(
     versions = library_versions()
     key = experiment_key(
         request=request,
-        dataset_fingerprint=dataset.metadata.fingerprint,
+        dataset_fingerprint=identity_metadata.fingerprint,
         versions=versions,
     )
     existing = await find_completed_run(session, key)
@@ -167,7 +168,7 @@ async def execute_refinement(
         if worker_id is None or claimed_run.worker_id != worker_id:
             raise RuntimeError("claimed refinement worker does not own the lease")
         diagnostics = validate_dataset_identity(
-            source=source_run, queued=claimed_run, dataset=dataset
+            source=source_run, queued=claimed_run, rebuilt=identity_metadata
         )
         if claimed_run.experiment_key != key:
             raise RuntimeError("claimed refinement experiment identity changed")
@@ -180,7 +181,7 @@ async def execute_refinement(
             request=request,
             plan=plan,
             key=key,
-            dataset_fingerprint=dataset.metadata.fingerprint,
+            dataset_fingerprint=identity_metadata.fingerprint,
             versions=versions,
             now=timestamp,
         )
@@ -189,6 +190,11 @@ async def execute_refinement(
         "experiment_key": key,
         "planned": plan.total_combinations,
         "selected": len(plan.evaluations),
+        "development_start": development_dataset.metadata.requested_start.isoformat(),
+        "development_end_exclusive": (
+            development_dataset.metadata.requested_end.isoformat()
+        ),
+        "development_candle_count": development_dataset.metadata.candle_count,
     }
     if claimed_run is not None:
         structured_fields.update(diagnostics.structured_fields())
@@ -228,7 +234,7 @@ async def execute_refinement(
                 reason = "maximum_runtime_seconds"
                 break
             fingerprint = effective_evaluation_fingerprint(
-                dataset_fingerprint=dataset.metadata.fingerprint,
+                dataset_fingerprint=identity_metadata.fingerprint,
                 candidate_fingerprint=candidate.fingerprint,
                 engine=candidate.engine.value,
                 versions=versions,
@@ -260,7 +266,9 @@ async def execute_refinement(
             else:
                 if worker_id is None:
                     result = evaluate_refinement_candidate(
-                        dataset=dataset, candidate=candidate, request=request
+                        dataset=development_dataset,
+                        candidate=candidate,
+                        request=request,
                     )
                 else:
                     assert heartbeat_interval_seconds is not None
@@ -269,7 +277,7 @@ async def execute_refinement(
                         run_id=run.id,
                         worker_id=worker_id,
                         heartbeat_interval_seconds=heartbeat_interval_seconds,
-                        dataset=dataset,
+                        dataset=development_dataset,
                         candidate=candidate,
                         request=request,
                     )
