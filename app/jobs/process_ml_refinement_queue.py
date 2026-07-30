@@ -13,6 +13,7 @@ from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
 from app.ml.refinement.contracts import MLRefinementRequest
+from app.ml.refinement.identity import DatasetIdentityError
 from app.ml.refinement.persistence import fail_run
 from app.ml.refinement.queue import claim_next_run, fail_stale_runs
 from app.ml.refinement.service import execute_refinement
@@ -21,10 +22,6 @@ from app.ml.screening.engines import validate_engine_dependencies
 from .refine_ml_screening_result import load_refinement_dataset
 
 logger = logging.getLogger(__name__)
-
-
-class DatasetFingerprintChanged(RuntimeError):
-    pass
 
 
 def heartbeat_interval_seconds(stale_after_seconds: int) -> float:
@@ -81,10 +78,6 @@ async def process_once(
             request = MLRefinementRequest.model_validate(request_payload)
             validate_engine_dependencies()
             dataset = await load_refinement_dataset(session, request)
-            if dataset.metadata.fingerprint != run.dataset_fingerprint:
-                raise DatasetFingerprintChanged(
-                    "source dataset fingerprint changed after refinement was queued"
-                )
             await execute_refinement(
                 session=session,
                 dataset=dataset,
@@ -99,15 +92,19 @@ async def process_once(
             await fail_run(
                 session, run.id, error, datetime.now(UTC), worker_id=worker_id
             )
+            failure_fields: dict[str, object] = {
+                "run_id": str(run.id),
+                "worker_id": worker_id,
+                "failure_type": type(error).__name__,
+            }
+            if (
+                isinstance(error, DatasetIdentityError)
+                and error.diagnostics is not None
+            ):
+                failure_fields.update(error.diagnostics.structured_fields())
             logger.exception(
                 "ML refinement queue item failed",
-                extra={
-                    "structured_fields": {
-                        "run_id": str(run.id),
-                        "worker_id": worker_id,
-                        "failure_type": type(error).__name__,
-                    }
-                },
+                extra={"structured_fields": failure_fields},
             )
         return True
 

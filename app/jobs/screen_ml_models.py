@@ -15,14 +15,8 @@ from app.market.catalog import (
     resolve_instrument,
 )
 from app.market.enums import Asset
-from app.ml.contract import (
-    DEVELOPMENT_START,
-    FINAL_TEST_END,
-    FUTURE_DURATIONS,
-    temporal_fold_definitions,
-)
-from app.ml.dataset import build_ml_experiment_dataset
-from app.ml.reader import read_ml_experiment_candles
+from app.ml.contract import FUTURE_DURATIONS, temporal_fold_definitions
+from app.ml.loading import load_canonical_ml_experiment_dataset
 from app.ml.screening.config import (
     ALL_ENGINES,
     ModelScreeningConfiguration,
@@ -98,14 +92,8 @@ async def run(args: argparse.Namespace) -> ScreeningExecutionResult | None:
     factory = create_session_factory(engine)
     try:
         async with factory() as session:
-            candles = await read_ml_experiment_candles(
-                session=session,
-                instrument=definition.instrument,
-                start=DEVELOPMENT_START,
-                end=FINAL_TEST_END,
-            )
-            dataset = build_ml_experiment_dataset(
-                instrument=definition.instrument, columns=candles.columns
+            dataset = await load_canonical_ml_experiment_dataset(
+                session=session, instrument=definition.instrument
             )
             planned = len(engines) * len(durations) * len(temporal_fold_definitions())
             logger.info(
