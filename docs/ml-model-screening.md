@@ -90,13 +90,25 @@ python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refineme
 
 The normalized configuration, dataset fingerprint, source result, costs, contract versions, library versions, and seed form the experiment key. Evaluation reuse additionally freezes the variable registry, missing-data policy, classification contract, relevant engine-library version, and deterministic seed. An identical completed experiment is returned without recomputation. Compatible completed individual evaluations are copied as reused evidence. A failed run retains its transactionally complete evaluations; retrying the same experiment reuses them and calculates only missing combinations. Trial and runtime budgets stop creation of new evaluations only between transactional writes and record computed, reused, and omitted counts plus the termination reason. Dry-run output reports any engine, objective, duration, or feature policy left uncovered by a budget too small for the requested dimensions.
 
-Run states are `queued`, `running`, `completed`, `failed`, and `cancelled`; external cancellation is intentionally not exposed yet. Evaluation classifications are `promising_for_strategy_simulation`, `insufficient_evidence`, `discarded`, and `incomplete`. Promising evidence only permits later economic simulation: it is not a Strategy approval and still requires protected final-test evaluation in a separate, explicitly governed workflow.
+Run states are `queued`, `running`, `completed`, `failed`, and `cancelled`. Evaluation classifications are `promising_for_strategy_simulation`, `insufficient_evidence`, `discarded`, and `incomplete`. Promising evidence only permits later economic simulation: it is not a Strategy approval and still requires protected final-test evaluation in a separate, explicitly governed workflow.
 
-Read-only inspection is available at:
+The private API exposes the authoritative contract and durable queue controls:
 
+- `GET /optimization/ml-refinement-contract`
+- `POST /optimization/ml-refinement-runs`
+- `POST /optimization/ml-refinement-runs/{run_id}/cancel`
+- `POST /optimization/ml-refinement-runs/{run_id}/retry`
 - `GET /optimization/ml-refinement-runs`
 - `GET /optimization/ml-refinement-runs/{run_id}`
 - `GET /optimization/ml-refinement-runs/{run_id}/evaluations`
 - `GET /optimization/ml-refinement-runs/{run_id}/evaluations/{evaluation_id}`
 
-The API cannot create, execute, cancel, or delete refinements.
+Enqueue validates the source and deterministic plan but never loads candles or trains a model. Identical submissions converge on one run and report whether it was queued, already active, requeued, or reused. Cancellation is immediate before claim and cooperative between evaluations after claim. Failed and cancelled runs can be explicitly retried while retaining compatible evaluation evidence.
+
+Run the durable Railway `argos-research` worker as one replica initially:
+
+```bash
+python -m app.jobs.process_ml_refinement_queue
+```
+
+`--poll-seconds` accepts 1 through 300, `--stale-after-seconds` accepts 300 through 86400, and `--once` processes at most one available run. PostgreSQL row locks make multiple workers safe, but one replica controls research compute cost. Deploy the migration and API first, then start or redeploy this worker. A stale lease is marked failed and requires explicit retry; it is never silently executed again.

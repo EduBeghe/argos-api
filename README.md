@@ -891,3 +891,12 @@ python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refineme
 ```
 
 Replace its two placeholder UUIDs with a completed screening run/result pair. Refinement reads development evidence only and cannot load the protected 2024-2026 final-test period. See [ML model screening and refinement](docs/ml-model-screening.md) for contracts, classifications, reuse, and read-only API endpoints.
+
+
+Authenticated clients can discover the exact request contract with `GET /optimization/ml-refinement-contract` and enqueue it with `POST /optimization/ml-refinement-runs`. The API only validates and persists queued work; it never loads the historical dataset or trains models. Run the dedicated Railway research worker as one replica initially:
+
+```bash
+python -m app.jobs.process_ml_refinement_queue
+```
+
+Deploy migrations and the API before starting or redeploying the worker. Queue claims are durable and concurrency-safe in PostgreSQL; cancellation and retry use the run endpoints documented in [ML model screening and refinement](docs/ml-model-screening.md).

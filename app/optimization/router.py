@@ -1,15 +1,32 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.refinement.contract_service import refinement_contract
 from app.ml.refinement.contracts import (
+    MLRefinementRequest,
     PredictionObjective,
     RefinementClassification,
     RefinementStatus,
+)
+from app.ml.refinement.persistence import (
+    SourceScreeningIncompleteError,
+    SourceScreeningMismatchError,
+    SourceScreeningResultNotFoundError,
+    SourceScreeningRunNotFoundError,
+)
+from app.ml.refinement.queue import (
+    QueueDisposition,
+    RefinementQueueConflictError,
+    RefinementQueueNotFoundError,
+    RefinementQueueValidationError,
+    cancel_refinement,
+    enqueue_refinement,
+    retry_refinement,
 )
 from app.ml.refinement.read_service import (
     MAX_REFINEMENT_PAGE_LIMIT,
@@ -28,10 +45,13 @@ from app.ml.refinement.read_service import (
     list_runs as list_ml_refinement_runs,
 )
 from app.ml.refinement.schemas import (
+    RefinementContractResponse,
+    RefinementEnqueueResponse,
     RefinementEvaluationDetail,
     RefinementEvaluationPage,
     RefinementRunDetail,
     RefinementRunPage,
+    RefinementRunResponse,
 )
 from app.ml.screening.config import ScreeningEngine
 from app.ml.screening.evidence import EvidenceClassification
@@ -159,6 +179,83 @@ from app.optimization.walk_forward_read import (
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 RunQuery = Annotated[RefinementRunQuery, Query()]
 CandidatesQuery = Annotated[CandidateQuery, Query()]
+
+
+@router.get("/ml-refinement-contract", response_model=RefinementContractResponse)
+async def ml_refinement_contract() -> RefinementContractResponse:
+    return refinement_contract()
+
+
+@router.post(
+    "/ml-refinement-runs",
+    response_model=RefinementEnqueueResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def enqueue_ml_refinement_run(
+    request: MLRefinementRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> RefinementEnqueueResponse:
+    try:
+        result = await enqueue_refinement(session, request)
+    except (
+        SourceScreeningRunNotFoundError,
+        SourceScreeningResultNotFoundError,
+    ) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (SourceScreeningMismatchError, SourceScreeningIncompleteError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except RefinementQueueValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RefinementQueueConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if result.disposition is QueueDisposition.REUSED_COMPLETED:
+        response.status_code = status.HTTP_200_OK
+    location = f"/optimization/ml-refinement-runs/{result.run.id}"
+    response.headers["Location"] = location
+    return RefinementEnqueueResponse(
+        disposition=result.disposition,
+        run=RefinementRunResponse.model_validate(result.run),
+        location=location,
+    )
+
+
+@router.post(
+    "/ml-refinement-runs/{run_id}/cancel", response_model=RefinementRunResponse
+)
+async def cancel_ml_refinement_run(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> RefinementRunResponse:
+    try:
+        record = await cancel_refinement(session, run_id)
+    except RefinementQueueNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return RefinementRunResponse.model_validate(record)
+
+
+@router.post(
+    "/ml-refinement-runs/{run_id}/retry",
+    response_model=RefinementEnqueueResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_ml_refinement_run(
+    run_id: UUID,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> RefinementEnqueueResponse:
+    try:
+        result = await retry_refinement(session, run_id)
+    except RefinementQueueNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except RefinementQueueConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    location = f"/optimization/ml-refinement-runs/{run_id}"
+    response.headers["Location"] = location
+    return RefinementEnqueueResponse(
+        disposition=result.disposition,
+        run=RefinementRunResponse.model_validate(result.run),
+        location=location,
+    )
 
 
 @router.get("/ml-refinement-runs", response_model=RefinementRunPage)

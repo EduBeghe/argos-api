@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -28,6 +29,14 @@ from app.ml.refinement.persistence import (
     start_run,
 )
 from app.ml.refinement.planning import build_refinement_plan
+from app.ml.refinement.queue import (
+    QueueDisposition,
+    cancel_refinement,
+    claim_next_run,
+    enqueue_refinement,
+    fail_stale_runs,
+    retry_refinement,
+)
 from app.ml.refinement.service import prepare_refinement
 from app.ml.screening.engines import library_versions
 from app.ml.screening.models import (
@@ -254,7 +263,7 @@ async def test_persistence_reuse_and_read_only_api(
     assert evidence.status_code == 200
     assert evidence.json()["elapsed_seconds"] == "0.123456789012345680"
     assert client.get(f"/optimization/ml-refinement-runs/{uuid4()}").status_code == 404
-    assert client.post("/optimization/ml-refinement-runs").status_code == 405
+    assert client.post("/optimization/ml-refinement-runs").status_code == 422
 
     async with factory() as session:
         count = await session.scalar(select(func.count(MLRefinementRunRecord.id)))
@@ -367,3 +376,94 @@ async def test_failed_run_retains_complete_evaluations_for_retry(
         assert recovered.status == "completed"
         assert recovered.evaluations_computed == 1
         assert recovered.evaluations_reused == 1
+
+
+async def test_queue_api_location_cancel_retry_and_claim_lifecycle(
+    client: TestClient,
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    payload = request(source_run_id, source_result_id).model_dump(mode="json")
+
+    response = client.post("/optimization/ml-refinement-runs", json=payload)
+    assert response.status_code == 202
+    body = response.json()
+    assert body["disposition"] == "queued"
+    assert response.headers["location"] == body["location"]
+    run_id = UUID(body["run"]["id"])
+
+    duplicate = client.post("/optimization/ml-refinement-runs", json=payload)
+    assert duplicate.status_code == 202
+    assert duplicate.json()["disposition"] == "already_queued"
+    assert duplicate.json()["run"]["id"] == str(run_id)
+
+    cancelled = client.post(f"/optimization/ml-refinement-runs/{run_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["started_at"] is None
+
+    retry = client.post(f"/optimization/ml-refinement-runs/{run_id}/retry")
+    assert retry.status_code == 202
+    assert retry.json()["disposition"] == "requeued_cancelled"
+    assert retry.headers["location"] == retry.json()["location"]
+
+    async with factory() as session:
+        claimed = await claim_next_run(session, worker_id="worker-a", now=NOW)
+        assert claimed is not None and claimed.id == run_id
+        running_cancel = await cancel_refinement(
+            session, run_id, now=NOW + timedelta(seconds=1)
+        )
+        assert running_cancel.status == "running"
+        assert running_cancel.cancellation_requested_at is not None
+
+
+async def test_concurrent_enqueue_skip_locked_and_stale_recovery(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    refinement_request = request(source_run_id, source_result_id)
+
+    async def enqueue_once() -> tuple[UUID, QueueDisposition]:
+        async with factory() as session:
+            result = await enqueue_refinement(session, refinement_request, now=NOW)
+            return result.run.id, result.disposition
+
+    first, second = await asyncio.gather(enqueue_once(), enqueue_once())
+    assert first[0] == second[0]
+    assert {first[1], second[1]} == {
+        QueueDisposition.QUEUED,
+        QueueDisposition.ALREADY_QUEUED,
+    }
+
+    async with factory() as session_one, factory() as session_two:
+        claimed_one, claimed_two = await asyncio.gather(
+            claim_next_run(session_one, worker_id="worker-one", now=NOW),
+            claim_next_run(session_two, worker_id="worker-two", now=NOW),
+        )
+        assert sum(item is not None for item in (claimed_one, claimed_two)) == 1
+
+    async with factory() as session:
+        expired = await fail_stale_runs(
+            session, stale_after=timedelta(seconds=300), now=NOW + timedelta(hours=1)
+        )
+        assert expired == 1
+        record = await session.get(MLRefinementRunRecord, first[0])
+        assert record is not None
+        assert record.status == "failed"
+        assert record.failure_type == "WorkerLeaseExpired"
+        evaluation_count = await session.scalar(
+            select(func.count(MLRefinementEvaluationRecord.id)).where(
+                MLRefinementEvaluationRecord.run_id == record.id
+            )
+        )
+        retried = await retry_refinement(session, record.id)
+        assert retried.disposition is QueueDisposition.REQUEUED_FAILED
+        assert retried.run.status == "queued"
+        assert (
+            await session.scalar(
+                select(func.count(MLRefinementEvaluationRecord.id)).where(
+                    MLRefinementEvaluationRecord.run_id == record.id
+                )
+            )
+            == evaluation_count
+        )
