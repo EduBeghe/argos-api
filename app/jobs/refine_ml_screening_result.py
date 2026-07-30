@@ -13,9 +13,8 @@ from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
 from app.market.catalog import InstrumentCapability, resolve_instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.ml.contract import DEVELOPMENT_END, DEVELOPMENT_START
-from app.ml.dataset import MLExperimentDataset, build_ml_experiment_dataset
-from app.ml.reader import read_ml_experiment_candles
+from app.ml.dataset import MLExperimentDataset
+from app.ml.loading import load_canonical_ml_experiment_dataset
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.persistence import resolve_source
 from app.ml.refinement.service import execute_refinement, prepare_refinement
@@ -52,16 +51,8 @@ async def load_refinement_dataset(
         interval=Interval(source_run.interval),
         capability=InstrumentCapability.SCORING,
     )
-    candles = await read_ml_experiment_candles(
-        session=session,
-        instrument=definition.instrument,
-        start=DEVELOPMENT_START,
-        end=DEVELOPMENT_END,
-    )
-    return build_ml_experiment_dataset(
-        instrument=definition.instrument,
-        columns=candles.columns,
-        requested_end=DEVELOPMENT_END,
+    return await load_canonical_ml_experiment_dataset(
+        session=session, instrument=definition.instrument
     )
 
 

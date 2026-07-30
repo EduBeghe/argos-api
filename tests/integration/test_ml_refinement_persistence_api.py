@@ -2,6 +2,8 @@ import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -11,8 +13,14 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.market.catalog import Instrument
+from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.contract import DEVELOPMENT_START, FINAL_TEST_END
+from app.ml.dataset import MLExperimentDataset
+from app.ml.refinement import service as refinement_service
 from app.ml.refinement.calculation import RefinementEvaluationResult
 from app.ml.refinement.contracts import MLRefinementRequest, RefinementClassification
+from app.ml.refinement.identity import DatasetFingerprintChanged
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
     MLRefinementRunRecord,
@@ -415,6 +423,93 @@ async def test_queue_api_location_cancel_retry_and_claim_lifecycle(
         )
         assert running_cancel.status == "running"
         assert running_cancel.cancellation_requested_at is not None
+
+
+async def test_zero_progress_fingerprint_failure_retries_the_same_run_and_advances(
+    client: TestClient,
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    refinement_request = request(source_run_id, source_result_id)
+    response = client.post(
+        "/optimization/ml-refinement-runs",
+        json=refinement_request.model_dump(mode="json"),
+    )
+    assert response.status_code == 202
+    run_id = UUID(response.json()["run"]["id"])
+
+    async with factory() as session:
+        claimed = await claim_next_run(session, worker_id="worker-old", now=NOW)
+        assert claimed is not None and claimed.id == run_id
+        await fail_run(
+            session,
+            run_id,
+            DatasetFingerprintChanged("pre-fix boundary mismatch"),
+            NOW + timedelta(seconds=1),
+            worker_id="worker-old",
+        )
+
+    retry = client.post(f"/optimization/ml-refinement-runs/{run_id}/retry")
+    assert retry.status_code == 202
+    assert UUID(retry.json()["run"]["id"]) == run_id
+
+    plan = build_refinement_plan(refinement_request)
+
+    async def evaluation(**kwargs: object) -> RefinementEvaluationResult:
+        candidate = kwargs["candidate"]
+        return RefinementEvaluationResult(
+            candidate,  # type: ignore[arg-type]
+            (),
+            {"fold_count": 0},
+            RefinementClassification.INCOMPLETE,
+            ("incomplete_fold_count",),
+            0.01,
+        )
+
+    monkeypatch.setattr(refinement_service, "_evaluate_with_heartbeat", evaluation)
+    instrument = Instrument(
+        Asset.BTC_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
+    )
+    dataset = cast(
+        MLExperimentDataset,
+        SimpleNamespace(
+            metadata=SimpleNamespace(
+                fingerprint="d" * 64,
+                instrument=instrument,
+                requested_start=DEVELOPMENT_START,
+                requested_end=FINAL_TEST_END,
+                candle_count=55_000,
+            )
+        ),
+    )
+    async with factory() as session:
+        claimed = await claim_next_run(
+            session, worker_id="worker-new", now=NOW + timedelta(seconds=2)
+        )
+        assert claimed is not None and claimed.id == run_id
+        result = await refinement_service.execute_refinement(
+            session=session,
+            dataset=dataset,
+            request=refinement_request,
+            claimed_run=claimed,
+            worker_id="worker-new",
+            heartbeat_interval_seconds=1,
+            now=NOW + timedelta(seconds=2),
+        )
+        await session.refresh(claimed)
+        assert result.run_id == run_id
+        assert result.evaluations_computed == len(plan.evaluations) == 1
+        assert claimed.status == "completed"
+        assert claimed.failure_type is None
+        assert (
+            await session.scalar(
+                select(func.count(MLRefinementEvaluationRecord.id)).where(
+                    MLRefinementEvaluationRecord.run_id == run_id
+                )
+            )
+            == 1
+        )
 
 
 async def test_concurrent_enqueue_skip_locked_and_stale_recovery(

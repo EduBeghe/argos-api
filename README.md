@@ -64,7 +64,7 @@ make run
 ```
 
 The API is available at `http://localhost:8000`. Public process health is exactly
-`{\"status\":\"ok\"}` from `GET /health`; PostgreSQL connectivity is reported independently
+`{"status":"ok"}` from `GET /health`; PostgreSQL connectivity is reported independently
 by `GET /health/database` and becomes private when authentication enforcement is enabled.
 
 ### API authentication rollout
@@ -834,7 +834,7 @@ The command parses money as `Decimal`, stops the active experiment, and creates 
 
 Weekly research includes a bounded progressive composite-feature search after targeted
 refinement. Training-only association determines signed weights, and separate economic
-and exploratory beams grow through real parent lineage across depths 2-7. Exploratory
+and exploratory beams grow through real parent lineage across depths 2–7. Exploratory
 parents may produce descendants but cannot enter validation or test themselves. Each
 walk-forward window freezes its own
 training median/IQR. Retained configurations use the historical Paper Trading simulator,
@@ -890,8 +890,7 @@ python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refineme
 python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refinement-catboost-30m.json
 ```
 
-Replace its two placeholder UUIDs with a completed screening run/result pair. Refinement reads development evidence only and cannot load the protected 2024-2026 final-test period. See [ML model screening and refinement](docs/ml-model-screening.md) for contracts, classifications, reuse, and read-only API endpoints.
-
+Replace its two placeholder UUIDs with a completed screening run/result pair. Screening and refinement rebuild the same closed experiment range for fingerprint identity, while refinement calculations remain restricted to development folds and cannot use protected 2024-2026 final-test evidence for tuning. See [ML model screening and refinement](docs/ml-model-screening.md) for contracts, classifications, reuse, and read-only API endpoints.
 
 Authenticated clients can discover the exact request contract with `GET /optimization/ml-refinement-contract` and enqueue it with `POST /optimization/ml-refinement-runs`. The API only validates and persists queued work; it never loads the historical dataset or trains models. Run the dedicated Railway research worker as one replica initially:
 
@@ -899,4 +898,4 @@ Authenticated clients can discover the exact request contract with `GET /optimiz
 python -m app.jobs.process_ml_refinement_queue
 ```
 
-Deploy migrations and the API before starting or redeploying the worker. Queue claims are durable and concurrency-safe in PostgreSQL; cancellation and retry use the run endpoints documented in [ML model screening and refinement](docs/ml-model-screening.md).
+Deploy migrations and the API before starting or redeploying the worker. Queue claims are durable and concurrency-safe in PostgreSQL; cancellation and retry use the run endpoints documented in [ML model screening and refinement](docs/ml-model-screening.md). A zero-progress `DatasetFingerprintChanged` run may be retried explicitly after a reconstruction fix: retry preserves its run ID and identity. If pinned historical candles truly changed, it fails before evaluation again and requires a new screening run.

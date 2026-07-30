@@ -79,14 +79,11 @@ async def test_dry_run_imports_dependencies_without_writes_or_fitting(
     )
     monkeypatch.setattr(
         screen_ml_models,
-        "read_ml_experiment_candles",
-        AsyncMock(return_value=SimpleNamespace(columns=object())),
-    )
-    monkeypatch.setattr(
-        screen_ml_models,
-        "build_ml_experiment_dataset",
-        lambda **kwargs: SimpleNamespace(
-            metadata=SimpleNamespace(fingerprint="d" * 64), folds=(object(),) * 7
+        "load_canonical_ml_experiment_dataset",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                metadata=SimpleNamespace(fingerprint="d" * 64), folds=(object(),) * 7
+            )
         ),
     )
     fit = AsyncMock()

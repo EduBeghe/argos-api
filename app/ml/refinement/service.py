@@ -12,6 +12,7 @@ from app.ml.screening.engines import library_versions
 
 from .calculation import RefinementEvaluationResult, evaluate_refinement_candidate
 from .contracts import MLRefinementRequest
+from .identity import validate_dataset_identity
 from .models import MLRefinementRunRecord
 from .persistence import (
     cancel_claimed_run,
@@ -136,7 +137,7 @@ async def execute_refinement(
     worker_id: str | None = None,
     heartbeat_interval_seconds: float | None = None,
 ) -> RefinementExecutionResult:
-    await resolve_source(session, request)
+    source_run, _ = await resolve_source(session, request)
     versions = library_versions()
     key = experiment_key(
         request=request,
@@ -165,8 +166,11 @@ async def execute_refinement(
     if claimed_run is not None:
         if worker_id is None or claimed_run.worker_id != worker_id:
             raise RuntimeError("claimed refinement worker does not own the lease")
+        diagnostics = validate_dataset_identity(
+            source=source_run, queued=claimed_run, dataset=dataset
+        )
         if claimed_run.experiment_key != key:
-            raise RuntimeError("DatasetFingerprintChanged")
+            raise RuntimeError("claimed refinement experiment identity changed")
         run = claimed_run
         if heartbeat_interval_seconds is None or heartbeat_interval_seconds <= 0:
             raise ValueError("claimed execution requires a positive heartbeat interval")
@@ -180,16 +184,18 @@ async def execute_refinement(
             versions=versions,
             now=timestamp,
         )
+    structured_fields: dict[str, object] = {
+        "run_id": str(run.id),
+        "experiment_key": key,
+        "planned": plan.total_combinations,
+        "selected": len(plan.evaluations),
+    }
+    if claimed_run is not None:
+        structured_fields.update(diagnostics.structured_fields())
+        structured_fields["retry_start"] = run.evaluations_computed == 0
     logger.info(
         "ML refinement started",
-        extra={
-            "structured_fields": {
-                "run_id": str(run.id),
-                "experiment_key": key,
-                "planned": plan.total_combinations,
-                "selected": len(plan.evaluations),
-            }
-        },
+        extra={"structured_fields": structured_fields},
     )
     started = perf_counter()
     computed = 0
