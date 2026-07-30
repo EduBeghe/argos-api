@@ -6,7 +6,7 @@ from app.ml.contract import (
     ML_EXPERIMENT_CONTRACT_VERSION,
     VARIABLE_REGISTRY_VERSION,
 )
-from app.ml.dataset import MLExperimentDataset
+from app.ml.dataset import MLDatasetMetadata
 from app.ml.screening.models import MLModelScreeningRunRecord
 
 from .models import MLRefinementRunRecord
@@ -62,23 +62,23 @@ def validate_dataset_identity(
     *,
     source: MLModelScreeningRunRecord,
     queued: MLRefinementRunRecord,
-    dataset: MLExperimentDataset,
+    rebuilt: MLDatasetMetadata,
 ) -> DatasetIdentityDiagnostics:
     diagnostics = DatasetIdentityDiagnostics(
         source.dataset_fingerprint,
         queued.dataset_fingerprint,
-        dataset.metadata.fingerprint,
+        rebuilt.fingerprint,
         "/".join(
             (
-                dataset.metadata.instrument.asset.value,
-                dataset.metadata.instrument.provider.value,
-                dataset.metadata.instrument.market_type.value,
-                dataset.metadata.instrument.interval.value,
+                rebuilt.instrument.asset.value,
+                rebuilt.instrument.provider.value,
+                rebuilt.instrument.market_type.value,
+                rebuilt.instrument.interval.value,
             )
         ),
-        dataset.metadata.requested_start.isoformat(),
-        dataset.metadata.requested_end.isoformat(),
-        dataset.metadata.candle_count,
+        rebuilt.requested_start.isoformat(),
+        rebuilt.requested_end.isoformat(),
+        rebuilt.candle_count,
         source.experiment_contract_version,
         source.variable_registry_version,
         source.missing_data_policy_version,
@@ -130,16 +130,16 @@ def validate_dataset_identity(
     mismatches: list[str] = []
     if source.dataset_fingerprint != queued.dataset_fingerprint:
         mismatches.append("source-versus-queue")
-    if source.dataset_fingerprint != dataset.metadata.fingerprint:
+    if source.dataset_fingerprint != rebuilt.fingerprint:
         mismatches.append("source-versus-rebuilt")
-    if queued.dataset_fingerprint != dataset.metadata.fingerprint:
+    if queued.dataset_fingerprint != rebuilt.fingerprint:
         mismatches.append("queue-versus-rebuilt")
     if mismatches:
         message = (
             f"dataset fingerprint mismatch ({', '.join(mismatches)}); "
             f"source={source.dataset_fingerprint}; "
             f"queue={queued.dataset_fingerprint}; "
-            f"rebuilt={dataset.metadata.fingerprint}; "
+            f"rebuilt={rebuilt.fingerprint}; "
             f"range=[{diagnostics.historical_start},"
             f"{diagnostics.historical_end_exclusive}); "
             f"candles={diagnostics.candle_count}"

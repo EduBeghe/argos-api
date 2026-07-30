@@ -12,14 +12,15 @@ from app.core.config import get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
+from app.ml.loading import load_ml_development_dataset
 from app.ml.refinement.contracts import MLRefinementRequest
-from app.ml.refinement.identity import DatasetIdentityError
-from app.ml.refinement.persistence import fail_run
+from app.ml.refinement.identity import DatasetIdentityError, validate_dataset_identity
+from app.ml.refinement.persistence import fail_run, resolve_source
 from app.ml.refinement.queue import claim_next_run, fail_stale_runs
 from app.ml.refinement.service import execute_refinement
 from app.ml.screening.engines import validate_engine_dependencies
 
-from .refine_ml_screening_result import load_refinement_dataset
+from .refine_ml_screening_result import load_refinement_identity_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -77,10 +78,24 @@ async def process_once(
             request_payload["notes"] = run.notes
             request = MLRefinementRequest.model_validate(request_payload)
             validate_engine_dependencies()
-            dataset = await load_refinement_dataset(session, request)
+            identity_metadata = await load_refinement_identity_metadata(
+                session, request
+            )
+            source_run, _ = await resolve_source(session, request)
+            diagnostics = validate_dataset_identity(
+                source=source_run, queued=run, rebuilt=identity_metadata
+            )
+            logger.info(
+                "ML refinement dataset identity verified",
+                extra={"structured_fields": diagnostics.structured_fields()},
+            )
+            development_dataset = await load_ml_development_dataset(
+                session=session, instrument=identity_metadata.instrument
+            )
             await execute_refinement(
                 session=session,
-                dataset=dataset,
+                identity_metadata=identity_metadata,
+                development_dataset=development_dataset,
                 request=request,
                 claimed_run=run,
                 worker_id=worker_id,

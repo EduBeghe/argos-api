@@ -6,13 +6,13 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.jobs import refine_ml_screening_result as job
-from app.ml.contract import FINAL_TEST_END
+from app.ml.contract import FINAL_TEST_END, FINAL_TEST_START
 from app.ml.refinement.contracts import MLRefinementRequest
 from tests.unit.ml.test_refinement_contracts import request_payload
 
 
 @pytest.mark.asyncio
-async def test_dry_and_real_job_use_the_canonical_screening_dataset_loader(
+async def test_dry_and_real_job_use_separated_refinement_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = MLRefinementRequest.model_validate(request_payload())
@@ -31,19 +31,26 @@ async def test_dry_and_real_job_use_the_canonical_screening_dataset_loader(
 
     async def loader(**kwargs: object) -> object:
         requested_instruments.append(kwargs["instrument"])
-        return SimpleNamespace(metadata=SimpleNamespace(requested_end=FINAL_TEST_END))
+        return SimpleNamespace(
+            identity_metadata=SimpleNamespace(requested_end=FINAL_TEST_END),
+            development_dataset=SimpleNamespace(
+                metadata=SimpleNamespace(requested_end=FINAL_TEST_START)
+            ),
+        )
 
     monkeypatch.setattr(job, "resolve_source", source)
-    monkeypatch.setattr(job, "load_canonical_ml_experiment_dataset", loader)
+    monkeypatch.setattr(job, "load_refinement_dataset_inputs", loader)
     session = cast(AsyncSession, object())
 
-    dry_dataset = await job.load_refinement_dataset(session, request)
-    real_dataset = await job.load_refinement_dataset(session, request)
+    dry_inputs = await job.load_refinement_inputs(session, request)
+    real_inputs = await job.load_refinement_inputs(session, request)
 
     assert len(requested_instruments) == 2
     assert requested_instruments[0] == requested_instruments[1]
-    assert dry_dataset.metadata.requested_end == FINAL_TEST_END
-    assert real_dataset.metadata.requested_end == FINAL_TEST_END
+    assert dry_inputs.identity_metadata.requested_end == FINAL_TEST_END
+    assert real_inputs.identity_metadata.requested_end == FINAL_TEST_END
+    assert dry_inputs.development_dataset.metadata.requested_end == FINAL_TEST_START
+    assert real_inputs.development_dataset.metadata.requested_end == FINAL_TEST_START
 
 
 def test_refinement_contract_has_no_final_test_override() -> None:

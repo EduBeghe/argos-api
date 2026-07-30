@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import get_settings
 from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.ml.contract import DEVELOPMENT_START, FINAL_TEST_END
-from app.ml.dataset import MLExperimentDataset
+from app.ml.contract import DEVELOPMENT_START, FINAL_TEST_END, FINAL_TEST_START
+from app.ml.dataset import MLDatasetMetadata, build_ml_experiment_dataset
+from app.ml.reader import candle_columns
 from app.ml.refinement import service as refinement_service
 from app.ml.refinement.calculation import RefinementEvaluationResult
 from app.ml.refinement.contracts import MLRefinementRequest, RefinementClassification
@@ -428,7 +429,6 @@ async def test_queue_api_location_cancel_retry_and_claim_lifecycle(
 async def test_zero_progress_fingerprint_failure_retries_the_same_run_and_advances(
     client: TestClient,
     refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     factory, source_run_id, source_result_id = refinement_factory
     refinement_request = request(source_run_id, source_result_id)
@@ -455,33 +455,21 @@ async def test_zero_progress_fingerprint_failure_retries_the_same_run_and_advanc
     assert UUID(retry.json()["run"]["id"]) == run_id
 
     plan = build_refinement_plan(refinement_request)
-
-    async def evaluation(**kwargs: object) -> RefinementEvaluationResult:
-        candidate = kwargs["candidate"]
-        return RefinementEvaluationResult(
-            candidate,  # type: ignore[arg-type]
-            (),
-            {"fold_count": 0},
-            RefinementClassification.INCOMPLETE,
-            ("incomplete_fold_count",),
-            0.01,
-        )
-
-    monkeypatch.setattr(refinement_service, "_evaluate_with_heartbeat", evaluation)
     instrument = Instrument(
         Asset.BTC_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
     )
-    dataset = cast(
-        MLExperimentDataset,
-        SimpleNamespace(
-            metadata=SimpleNamespace(
-                fingerprint="d" * 64,
-                instrument=instrument,
-                requested_start=DEVELOPMENT_START,
-                requested_end=FINAL_TEST_END,
-                candle_count=55_000,
-            )
+    dataset = build_ml_experiment_dataset(
+        instrument=instrument,
+        columns=candle_columns(
+            open_times=[],
+            close_times=[],
+            open_prices=[],
+            high_prices=[],
+            low_prices=[],
+            close_prices=[],
+            volumes=[],
         ),
+        requested_end=FINAL_TEST_START,
     )
     async with factory() as session:
         claimed = await claim_next_run(
@@ -490,7 +478,17 @@ async def test_zero_progress_fingerprint_failure_retries_the_same_run_and_advanc
         assert claimed is not None and claimed.id == run_id
         result = await refinement_service.execute_refinement(
             session=session,
-            dataset=dataset,
+            identity_metadata=cast(
+                MLDatasetMetadata,
+                SimpleNamespace(
+                    fingerprint="d" * 64,
+                    instrument=instrument,
+                    requested_start=DEVELOPMENT_START,
+                    requested_end=FINAL_TEST_END,
+                    candle_count=55_000,
+                ),
+            ),
+            development_dataset=dataset,
             request=refinement_request,
             claimed_run=claimed,
             worker_id="worker-new",

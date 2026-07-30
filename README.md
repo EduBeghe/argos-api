@@ -890,7 +890,7 @@ python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refineme
 python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refinement-catboost-30m.json
 ```
 
-Replace its two placeholder UUIDs with a completed screening run/result pair. Screening and refinement rebuild the same closed experiment range for fingerprint identity, while refinement calculations remain restricted to development folds and cannot use protected 2024-2026 final-test evidence for tuning. See [ML model screening and refinement](docs/ml-model-screening.md) for contracts, classifications, reuse, and read-only API endpoints.
+Replace its two placeholder UUIDs with a completed screening run/result pair. Refinement first reconstructs the closed 2020-2026 screening range only to verify persisted identity, releases its feature matrix, and then builds a separate development-only dataset ending at 2024 for every calculation. Matching fingerprint identity never authorizes feature selection, fitting, targets, metrics, or classification to consume protected 2024-2026 final-test evidence. See [ML model screening and refinement](docs/ml-model-screening.md) for contracts, classifications, reuse, and read-only API endpoints.
 
 Authenticated clients can discover the exact request contract with `GET /optimization/ml-refinement-contract` and enqueue it with `POST /optimization/ml-refinement-runs`. The API only validates and persists queued work; it never loads the historical dataset or trains models. Run the dedicated Railway research worker as one replica initially:
 

@@ -11,10 +11,14 @@ from app.core.config import get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
-from app.market.catalog import InstrumentCapability, resolve_instrument
+from app.market.catalog import Instrument, InstrumentCapability, resolve_instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.ml.dataset import MLExperimentDataset
-from app.ml.loading import load_canonical_ml_experiment_dataset
+from app.ml.dataset import MLDatasetMetadata
+from app.ml.loading import (
+    RefinementDatasetInputs,
+    load_canonical_ml_experiment_metadata,
+    load_refinement_dataset_inputs,
+)
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.persistence import resolve_source
 from app.ml.refinement.service import execute_refinement, prepare_refinement
@@ -40,9 +44,9 @@ def load_request(path: Path) -> MLRefinementRequest:
     return MLRefinementRequest.model_validate(payload)
 
 
-async def load_refinement_dataset(
+async def resolve_refinement_instrument(
     session: AsyncSession, request: MLRefinementRequest
-) -> MLExperimentDataset:
+) -> Instrument:
     source_run, _ = await resolve_source(session, request)
     definition = resolve_instrument(
         asset=Asset(source_run.asset),
@@ -51,9 +55,23 @@ async def load_refinement_dataset(
         interval=Interval(source_run.interval),
         capability=InstrumentCapability.SCORING,
     )
-    return await load_canonical_ml_experiment_dataset(
-        session=session, instrument=definition.instrument
+    return definition.instrument
+
+
+async def load_refinement_identity_metadata(
+    session: AsyncSession, request: MLRefinementRequest
+) -> MLDatasetMetadata:
+    instrument = await resolve_refinement_instrument(session, request)
+    return await load_canonical_ml_experiment_metadata(
+        session=session, instrument=instrument
     )
+
+
+async def load_refinement_inputs(
+    session: AsyncSession, request: MLRefinementRequest
+) -> RefinementDatasetInputs:
+    instrument = await resolve_refinement_instrument(session, request)
+    return await load_refinement_dataset_inputs(session=session, instrument=instrument)
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -65,12 +83,12 @@ async def run(args: argparse.Namespace) -> None:
     factory = create_session_factory(engine)
     try:
         async with factory() as session:
-            dataset = await load_refinement_dataset(session, request)
+            inputs = await load_refinement_inputs(session, request)
             if args.dry_run:
                 dry_run = await prepare_refinement(
                     session=session,
                     request=request,
-                    dataset_fingerprint=dataset.metadata.fingerprint,
+                    dataset_fingerprint=inputs.identity_metadata.fingerprint,
                 )
                 logger.info(
                     "ML refinement dry run completed",
@@ -105,7 +123,10 @@ async def run(args: argparse.Namespace) -> None:
                     )
                 return
             result = await execute_refinement(
-                session=session, dataset=dataset, request=request
+                session=session,
+                identity_metadata=inputs.identity_metadata,
+                development_dataset=inputs.development_dataset,
+                request=request,
             )
             logger.info(
                 "ML refinement command finished",
