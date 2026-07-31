@@ -432,93 +432,7 @@ majority baselines. Signed gross return, long-aligned net return, avoided downsi
 net movement magnitude after friction remain distinct. Without `--persist`, the job is
 strictly read-only and does not record reuse. The command never creates executable
 Strategies or mutates Paper Trading. See
-[`docs/009-predictive-edge-map.md`](docs/009-predictive-edge-map.md).
-
-To evaluate at most one historical candidate per confirmed bin hypothesis, add:
-
-```bash
-python -m app.jobs.analyze_predictive_edges \
-  --asset BTC/USDT --provider binance --market-type spot --interval 5m \
-  --from 2024-01-01T00:00:00Z --to 2026-01-01T00:00:00Z \
-  --fee-rate 0.001 --slippage-rate 0.0005 --initial-cash 10000 \
-  --edge-guided-candidates --max-edge-guided-candidates 12
-```
-
-This opt-in stage reuses the historical simulator and existing walk-forward windows,
-preserves each hypothesis's frozen bin and condition, compares isolated test evidence
-with production and buy-and-hold, and reports
-`rejected_validation`, `rejected_test`, or `confirmed_candidate`. Without `--persist`
-it remains strictly in memory. With both `--edge-guided-candidates` and `--persist`,
-Argos atomically records the evaluation run, individually queryable candidates, and
-their walk-forward window evidence. Repeating the exact experiment reconstructs the
-persisted result without rerunning the candidate evaluator; any change to the source
-analysis, dataset, range, window configuration, capital, costs, cadence, candidate
-limit, contract version, or input hypotheses creates a different experiment identity.
-No candidate is activated or sent to Paper Trading, and historical confirmation is
-not a guarantee of future performance.
-
-Qualification contract v2 requires real trading activity, strictly positive aggregate
-training, validation, and test return after configured costs, strict validation and
-test superiority over production, acceptable drawdown, and the existing minimum-window
-and stability evidence. Buy-and-hold remains an independent comparison rather than an
-absolute rejection rule. The API exposes the five segment qualification flags and
-stable rejection reasons. Version-1 results remain readable as legacy evidence but are
-not reusable or eligible under v2. Detecting an edge or generating a candidate is not
-the same as confirming historical economic viability, and confirmation neither
-guarantees future performance nor activates a Strategy.
-
-Persisted edge-guided evidence is available through four read-only endpoints:
-
-- `GET /optimization/edge-guided/runs`
-- `GET /optimization/edge-guided/runs/{run_id}`
-- `GET /optimization/edge-guided/candidates`
-- `GET /optimization/edge-guided/candidates/{candidate_evaluation_id}`
-
-Run filters cover instrument identity and status. Candidate filters additionally cover
-run, candidate status, suggested action, predictor, and condition. List responses use
-bounded `limit`/`offset` pagination; candidate windows are returned only by candidate
-detail. These records are historical evaluation evidence, not active or recommended
-Strategies.
-
-## Historical optimization memory API
-
-Persisted refinement evidence is exposed through read-only endpoints:
-
-- `GET /optimization/refinement-runs`
-- `GET /optimization/refinement-runs/{run_id}`
-- `GET /optimization/refinement-runs/{run_id}/evaluations`
-- `GET /optimization/candidates`
-- `GET /optimization/candidates/{stable_candidate_id}`
-- `GET /optimization/refinement-runs/{run_id}/walk-forward`
-- `GET /optimization/walk-forward-runs/{walk_forward_run_id}`
-- `GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates`
-- `GET /optimization/walk-forward-runs/{walk_forward_run_id}/selections`
-- `GET /optimization/walk-forward-runs/{walk_forward_run_id}/candidates/{candidate_id}/windows`
-
-Run-list filters include `asset`, `provider`, `market_type`, `interval`, `status`,
-`recommendation_status`, `started_from`, and `started_to`. Candidate-list filters
-include the complete instrument identity, `evidence_classification`, Score and
-Strategy model names and versions, and `minimum_validation_runs`.
-
-Run summaries use deterministic `limit`/`offset` pagination. Candidate pages, run
-evaluations, and candidate evaluation history use stable keyset cursors and return
-`has_more` plus `next_cursor`; every page has a maximum size of 200. Candidate filtering
-scans bounded batches until the requested public page is complete, without a hidden
-global candidate cap. Filters use the complete asset, provider, market type, and interval identity.
-Responses preserve Decimal values and UTC evidence timestamps, expose explicit public
-models rather than PostgreSQL JSONB payloads, and never execute a refinement or contact
-an external provider.
-
-Examples:
-
-```sh
-curl "http://localhost:8000/optimization/refinement-runs?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&status=completed&limit=25&offset=0"
-curl "http://localhost:8000/optimization/candidates?asset=BTC%2FUSDT&provider=binance&market_type=spot&interval=5m&minimum_validation_runs=2&limit=25"
-curl "http://localhost:8000/optimization/refinement-runs/<run-id>/evaluations?limit=100"
-curl "http://localhost:8000/optimization/candidates/<stable-candidate-id>?limit=100"
-```
-
-See [Experiment memory and experience-guided search](docs/008-experiment-memory.md)
+[`docs/009-predictive-edge-map.md`](docs/009-predictive-…1236 tokens truncated…nt-memory.md)
 for the evidence-compatibility and planning contracts behind these read models.
 
 An optional persisted walk-forward pass evaluates the production baseline,
@@ -834,7 +748,7 @@ The command parses money as `Decimal`, stops the active experiment, and creates 
 
 Weekly research includes a bounded progressive composite-feature search after targeted
 refinement. Training-only association determines signed weights, and separate economic
-and exploratory beams grow through real parent lineage across depths 2–7. Exploratory
+and exploratory beams grow through real parent lineage across depths 2â€“7. Exploratory
 parents may produce descendants but cannot enter validation or test themselves. Each
 walk-forward window freezes its own
 training median/IQR. Retained configurations use the historical Paper Trading simulator,
@@ -899,3 +813,15 @@ python -m app.jobs.process_ml_refinement_queue
 ```
 
 Deploy migrations and the API before starting or redeploying the worker. Queue claims are durable and concurrency-safe in PostgreSQL; cancellation and retry use the run endpoints documented in [ML model screening and refinement](docs/ml-model-screening.md). A zero-progress `DatasetFingerprintChanged` run may be retried explicitly after a reconstruction fix: retry preserves its run ID and identity. If pinned historical candles truly changed, it fails before evaluation again and requires a new screening run.
+
+### Exhaustive OHLCV search campaign
+
+The versioned `exhaustive_ohlcv_v1` campaign coordinates the existing refinement
+queue across every declared engine, future duration, objective, and supported feature
+variant. It guarantees stage-one breadth before cumulative 4/16/64-trial deepening,
+uses conservative configured costs, and persists auditable economic promotion or
+discard reasons. It never consumes the protected 2024-2026 final-test period.
+
+See [Exhaustive OHLCV ML Search Campaign](docs/ml-search-campaign.md) for API, CLI,
+Railway deployment, monitoring, cancellation, outcomes, and rollback.
+
