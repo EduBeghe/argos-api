@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
+from app.ml.campaign.coordinator import coordinate_next_campaign
 from app.ml.loading import load_ml_development_dataset
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.identity import DatasetIdentityError, validate_dataset_identity
@@ -58,6 +59,7 @@ async def process_once(
     stale_after: timedelta,
 ) -> bool:
     async with factory() as session:
+        await coordinate_next_campaign(session)
         stale_count = await fail_stale_runs(session, stale_after=stale_after)
         if stale_count:
             logger.warning(

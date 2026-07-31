@@ -899,3 +899,14 @@ python -m app.jobs.process_ml_refinement_queue
 ```
 
 Deploy migrations and the API before starting or redeploying the worker. Queue claims are durable and concurrency-safe in PostgreSQL; cancellation and retry use the run endpoints documented in [ML model screening and refinement](docs/ml-model-screening.md). A zero-progress `DatasetFingerprintChanged` run may be retried explicitly after a reconstruction fix: retry preserves its run ID and identity. If pinned historical candles truly changed, it fails before evaluation again and requires a new screening run.
+
+### Exhaustive OHLCV search campaign
+
+The versioned `exhaustive_ohlcv_v1` campaign coordinates the existing refinement
+queue across every declared engine, future duration, objective, and supported feature
+variant. It guarantees stage-one breadth before cumulative 4/16/64-trial deepening,
+uses conservative configured costs, and persists auditable economic promotion or
+discard reasons. It never consumes the protected 2024-2026 final-test period.
+
+See [Exhaustive OHLCV ML Search Campaign](docs/ml-search-campaign.md) for API, CLI,
+Railway deployment, monitoring, cancellation, outcomes, and rollback.

@@ -8,6 +8,7 @@ from alembic import context
 from app.core.config import get_settings
 from app.core.database.base import Base
 from app.market import persistence  # noqa: F401
+from app.ml.campaign import models as ml_campaign_models  # noqa: F401
 from app.ml.refinement import models as ml_refinement_models  # noqa: F401
 from app.ml.screening import models as ml_screening_models  # noqa: F401
 from app.optimization import (

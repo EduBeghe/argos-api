@@ -2,10 +2,29 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.campaign.contracts import CampaignContract, CampaignRequest
+from app.ml.campaign.models import MLSearchCampaignFamilyRecord, MLSearchCampaignRecord
+from app.ml.campaign.schemas import (
+    CampaignEnqueueResponse,
+    CampaignPage,
+    CampaignResponse,
+    FamilyPage,
+    FamilyResponse,
+)
+from app.ml.campaign.service import (
+    CampaignConflictError,
+    CampaignNotFoundError,
+    CampaignSourceError,
+    cancel_campaign,
+    enqueue_campaign,
+    get_campaign,
+    retry_campaign,
+)
 from app.ml.refinement.contract_service import refinement_contract
 from app.ml.refinement.contracts import (
     MLRefinementRequest,
@@ -179,6 +198,218 @@ from app.optimization.walk_forward_read import (
 router = APIRouter(prefix="/optimization", tags=["optimization"])
 RunQuery = Annotated[RefinementRunQuery, Query()]
 CandidatesQuery = Annotated[CandidateQuery, Query()]
+
+
+@router.get("/ml-search-campaign-contract", response_model=CampaignContract)
+async def ml_search_campaign_contract() -> CampaignContract:
+    return CampaignContract()
+
+
+@router.post(
+    "/ml-search-campaigns",
+    response_model=CampaignEnqueueResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def enqueue_ml_search_campaign(
+    request: CampaignRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> CampaignEnqueueResponse:
+    try:
+        result = await enqueue_campaign(session, request)
+    except CampaignSourceError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    location = f"/optimization/ml-search-campaigns/{result.campaign.id}"
+    response.headers["Location"] = location
+    if not result.created and result.campaign.status == "completed":
+        response.status_code = status.HTTP_200_OK
+    return CampaignEnqueueResponse(
+        created=result.created,
+        campaign=CampaignResponse.model_validate(result.campaign),
+        location=location,
+    )
+
+
+@router.get("/ml-search-campaigns", response_model=CampaignPage)
+async def list_ml_search_campaigns(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    campaign_status: str | None = Query(default=None, alias="status"),
+    outcome: str | None = None,
+    source_screening_run_id: UUID | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> CampaignPage:
+    statement = select(MLSearchCampaignRecord)
+    count_statement = select(func.count()).select_from(MLSearchCampaignRecord)
+    predicates = []
+    if campaign_status is not None:
+        predicates.append(MLSearchCampaignRecord.status == campaign_status)
+    if outcome is not None:
+        predicates.append(MLSearchCampaignRecord.outcome == outcome)
+    if source_screening_run_id is not None:
+        from app.ml.campaign.models import MLSearchCampaignSourceRecord
+
+        predicates.append(
+            MLSearchCampaignRecord.id.in_(
+                select(MLSearchCampaignSourceRecord.campaign_id).where(
+                    MLSearchCampaignSourceRecord.source_screening_run_id
+                    == source_screening_run_id
+                )
+            )
+        )
+    statement = statement.where(*predicates)
+    count_statement = count_statement.where(*predicates)
+    total = int(await session.scalar(count_statement) or 0)
+    rows = tuple(
+        (
+            await session.scalars(
+                statement.order_by(
+                    MLSearchCampaignRecord.created_at.desc(), MLSearchCampaignRecord.id
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    return CampaignPage(
+        items=tuple(CampaignResponse.model_validate(item) for item in rows),
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=offset + len(rows) < total,
+    )
+
+
+@router.get("/ml-search-campaigns/{campaign_id}", response_model=CampaignResponse)
+async def get_ml_search_campaign(
+    campaign_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> CampaignResponse:
+    try:
+        return CampaignResponse.model_validate(await get_campaign(session, campaign_id))
+    except CampaignNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/ml-search-campaigns/{campaign_id}/families", response_model=FamilyPage)
+async def list_ml_search_campaign_families(
+    campaign_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    engine: ScreeningEngine | None = None,
+    objective: PredictionObjective | None = None,
+    feature_strategy: str | None = None,
+    minimum_duration_seconds: int | None = Query(default=None, ge=1),
+    maximum_duration_seconds: int | None = Query(default=None, ge=1),
+    stage: int | None = Query(default=None, ge=0, le=4),
+    family_state: str | None = Query(default=None, alias="state"),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> FamilyPage:
+    await get_ml_search_campaign(campaign_id, session)
+    predicates = [MLSearchCampaignFamilyRecord.campaign_id == campaign_id]
+    for column, value in (
+        (MLSearchCampaignFamilyRecord.engine, engine),
+        (MLSearchCampaignFamilyRecord.objective, objective),
+        (MLSearchCampaignFamilyRecord.feature_variant, feature_strategy),
+        (MLSearchCampaignFamilyRecord.current_stage, stage),
+        (MLSearchCampaignFamilyRecord.state, family_state),
+    ):
+        if value is not None:
+            predicates.append(
+                column == (value.value if hasattr(value, "value") else value)
+            )
+    if minimum_duration_seconds is not None:
+        predicates.append(
+            MLSearchCampaignFamilyRecord.future_duration_seconds
+            >= minimum_duration_seconds
+        )
+    if maximum_duration_seconds is not None:
+        predicates.append(
+            MLSearchCampaignFamilyRecord.future_duration_seconds
+            <= maximum_duration_seconds
+        )
+    total = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(MLSearchCampaignFamilyRecord)
+            .where(*predicates)
+        )
+        or 0
+    )
+    rows = tuple(
+        (
+            await session.scalars(
+                select(MLSearchCampaignFamilyRecord)
+                .where(*predicates)
+                .order_by(
+                    MLSearchCampaignFamilyRecord.deterministic_ordinal,
+                    MLSearchCampaignFamilyRecord.id,
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    return FamilyPage(
+        items=tuple(FamilyResponse.model_validate(item) for item in rows),
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=offset + len(rows) < total,
+    )
+
+
+@router.get(
+    "/ml-search-campaigns/{campaign_id}/families/{family_id}",
+    response_model=FamilyResponse,
+)
+async def get_ml_search_campaign_family(
+    campaign_id: UUID,
+    family_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> FamilyResponse:
+    record = await session.scalar(
+        select(MLSearchCampaignFamilyRecord).where(
+            MLSearchCampaignFamilyRecord.campaign_id == campaign_id,
+            MLSearchCampaignFamilyRecord.id == family_id,
+        )
+    )
+    if record is None:
+        raise HTTPException(
+            status_code=404, detail=f"ML search campaign family {family_id} not found"
+        )
+    return FamilyResponse.model_validate(record)
+
+
+@router.post(
+    "/ml-search-campaigns/{campaign_id}/cancel", response_model=CampaignResponse
+)
+async def cancel_ml_search_campaign(
+    campaign_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> CampaignResponse:
+    try:
+        return CampaignResponse.model_validate(
+            await cancel_campaign(session, campaign_id)
+        )
+    except CampaignNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except CampaignConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/ml-search-campaigns/{campaign_id}/retry", response_model=CampaignResponse
+)
+async def retry_ml_search_campaign(
+    campaign_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> CampaignResponse:
+    try:
+        return CampaignResponse.model_validate(
+            await retry_campaign(session, campaign_id)
+        )
+    except CampaignNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except CampaignConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get("/ml-refinement-contract", response_model=RefinementContractResponse)
