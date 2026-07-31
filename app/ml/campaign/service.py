@@ -196,45 +196,46 @@ async def enqueue_campaign(
         created_at=timestamp,
     )
     session.add(campaign)
-    for source in sources:
-        session.add(
-            MLSearchCampaignSourceRecord(
-                campaign_id=campaign.id,
-                source_screening_run_id=UUID(source.source_run_id),
-                dataset_fingerprint=source.dataset_fingerprint,
-            )
-        )
-    session.add_all(
-        [
-            MLSearchCampaignFamilyRecord(
-                id=uuid4(),
-                campaign_id=campaign.id,
-                source_screening_run_id=UUID(item.source.source_run_id),
-                fingerprint=item.fingerprint,
-                dataset_fingerprint=item.source.dataset_fingerprint,
-                asset=item.source.asset,
-                provider=item.source.provider,
-                market_type=item.source.market_type,
-                interval=item.source.interval,
-                engine=item.engine.value,
-                future_duration_seconds=item.future_duration_seconds,
-                objective=item.objective.value,
-                feature_variant=item.feature_variant.value,
-                state="pending",
-                current_stage=0,
-                evaluations_planned=0,
-                evaluations_completed=0,
-                evaluations_reused=0,
-                best_evaluation_id=None,
-                best_metrics=None,
-                decision_reason=None,
-                deterministic_ordinal=ordinal,
-                created_at=timestamp,
-            )
-            for ordinal, item in enumerate(universe)
-        ]
-    )
     try:
+        await session.flush()
+        for source in sources:
+            session.add(
+                MLSearchCampaignSourceRecord(
+                    campaign_id=campaign.id,
+                    source_screening_run_id=UUID(source.source_run_id),
+                    dataset_fingerprint=source.dataset_fingerprint,
+                )
+            )
+        session.add_all(
+            [
+                MLSearchCampaignFamilyRecord(
+                    id=uuid4(),
+                    campaign_id=campaign.id,
+                    source_screening_run_id=UUID(item.source.source_run_id),
+                    fingerprint=item.fingerprint,
+                    dataset_fingerprint=item.source.dataset_fingerprint,
+                    asset=item.source.asset,
+                    provider=item.source.provider,
+                    market_type=item.source.market_type,
+                    interval=item.source.interval,
+                    engine=item.engine.value,
+                    future_duration_seconds=item.future_duration_seconds,
+                    objective=item.objective.value,
+                    feature_variant=item.feature_variant.value,
+                    state="pending",
+                    current_stage=0,
+                    evaluations_planned=0,
+                    evaluations_completed=0,
+                    evaluations_reused=0,
+                    best_evaluation_id=None,
+                    best_metrics=None,
+                    decision_reason=None,
+                    deterministic_ordinal=ordinal,
+                    created_at=timestamp,
+                )
+                for ordinal, item in enumerate(universe)
+            ]
+        )
         await session.commit()
     except IntegrityError:
         await session.rollback()
