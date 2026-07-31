@@ -282,7 +282,9 @@ async def test_two_campaigns_can_share_one_refinement_run_and_cancel_independent
     )
     run = refinement_run(source_id, result_id)
     async with sessions() as session:
-        session.add_all((first, second, first_family, second_family, run))
+        session.add_all((first, second))
+        await session.flush()
+        session.add_all((first_family, second_family, run))
         await session.flush()
         session.add_all(
             (
@@ -324,7 +326,11 @@ async def test_retry_requeues_same_campaign_child_and_refinement_run(
     run = refinement_run(source_id, result_id, status=run_status)
     link = child(record.id, family_record.id, run.id, reused=False)
     async with sessions() as session:
-        session.add_all((record, family_record, run, link))
+        session.add(record)
+        await session.flush()
+        session.add_all((family_record, run))
+        await session.flush()
+        session.add(link)
         await session.commit()
 
     async with sessions() as session:
