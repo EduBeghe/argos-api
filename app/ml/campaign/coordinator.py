@@ -150,7 +150,9 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
     best = min(evaluations, key=lambda row: row.fingerprint)
     family.current_stage = child.stage
     family.evaluations_completed = len(evaluations)
-    family.evaluations_reused = run.evaluations_reused
+    family.evaluations_reused = (
+        len(evaluations) if child.reused_completed_run else run.evaluations_reused
+    )
     family.best_evaluation_id = best.id
     family.best_metrics = {
         "observations": evidence.observations,
@@ -167,8 +169,12 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
         "complete_and_finite": evidence.complete_and_finite,
     }
     family.state = "survived"
-    campaign.evaluations_computed += run.evaluations_computed
-    campaign.evaluations_reused += run.evaluations_reused
+    campaign.evaluations_computed += (
+        0 if child.reused_completed_run else run.evaluations_computed
+    )
+    campaign.evaluations_reused += (
+        len(evaluations) if child.reused_completed_run else run.evaluations_reused
+    )
     if child.stage == 1:
         campaign.families_covered += 1
         campaign.families_uncovered -= 1
@@ -302,7 +308,7 @@ async def _request_for_family(
 
 async def _stage_child_run(
     session: AsyncSession, request: MLRefinementRequest, timestamp: datetime
-) -> MLRefinementRunRecord:
+) -> tuple[MLRefinementRunRecord, bool]:
     """Stage a child without releasing the campaign row lock."""
     source, _ = await resolve_source(session, request)
     plan = build_refinement_plan(request)
@@ -319,11 +325,11 @@ async def _stage_child_run(
     )
     if existing is not None:
         if existing.status in {"queued", "running"}:
-            return existing
+            return existing, False
         if existing.status == "completed" and await completed_run_is_complete(
             session, existing
         ):
-            return existing
+            return existing, True
         if existing.status not in {"failed", "cancelled"}:
             raise RuntimeError("identical completed child refinement is incomplete")
         existing.status = "queued"
@@ -343,7 +349,7 @@ async def _stage_child_run(
         existing.claimed_at = None
         existing.heartbeat_at = None
         existing.cancellation_requested_at = None
-        return existing
+        return existing, False
     record = MLRefinementRunRecord(
         id=uuid4(),
         experiment_key=key,
@@ -380,7 +386,7 @@ async def _stage_child_run(
         created_at=timestamp,
     )
     session.add(record)
-    return record
+    return record, False
 
 
 async def coordinate_next_campaign(
@@ -473,7 +479,7 @@ async def coordinate_next_campaign(
     request = await _request_for_family(
         session, family, stage, min(86_400, remaining_runtime)
     )
-    child_run = await _stage_child_run(session, request, timestamp)
+    child_run, reused_completed = await _stage_child_run(session, request, timestamp)
     await session.flush()
     session.add(
         MLSearchCampaignChildRecord(
@@ -483,6 +489,7 @@ async def coordinate_next_campaign(
             refinement_run_id=child_run.id,
             stage=stage,
             reserved_evaluations=additional,
+            reused_completed_run=reused_completed,
             created_at=timestamp,
         )
     )

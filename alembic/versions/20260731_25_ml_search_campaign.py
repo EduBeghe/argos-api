@@ -166,6 +166,7 @@ def upgrade() -> None:
         ),
         sa.Column("stage", sa.Integer(), nullable=False),
         sa.Column("reserved_evaluations", sa.Integer(), nullable=False),
+        sa.Column("reused_completed_run", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint(
             "campaign_id",

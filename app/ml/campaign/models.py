@@ -178,6 +178,7 @@ class MLSearchCampaignChildRecord(Base):
     )
     stage: Mapped[int] = mapped_column(Integer, nullable=False)
     reserved_evaluations: Mapped[int] = mapped_column(Integer, nullable=False)
+    reused_completed_run: Mapped[bool] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
