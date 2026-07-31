@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,8 @@ from app.ml.contract import (
     ML_EXPERIMENT_CONTRACT_VERSION,
     VARIABLE_REGISTRY_VERSION,
 )
+from app.ml.refinement.models import MLRefinementRunRecord
+from app.ml.refinement.persistence import completed_run_is_complete
 from app.ml.screening.config import ML_MODEL_SCREENING_VERSION, ScreeningEngine
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
@@ -30,11 +33,15 @@ from .contracts import (
     CampaignStatus,
 )
 from .models import (
+    MLSearchCampaignChildRecord,
     MLSearchCampaignFamilyRecord,
     MLSearchCampaignRecord,
     MLSearchCampaignSourceRecord,
 )
 from .planning import SourceInstrument, build_family_universe
+from .refinement_runs import reset_refinement_run
+
+logger = logging.getLogger(__name__)
 
 
 class CampaignNotFoundError(LookupError):
@@ -265,9 +272,53 @@ async def cancel_campaign(
         raise CampaignConflictError(f"{record.status} campaign cannot be cancelled")
     timestamp = now or datetime.now(UTC)
     record.cancellation_requested_at = timestamp
-    if record.status == "queued":
+    child = await session.scalar(
+        select(MLSearchCampaignChildRecord)
+        .where(MLSearchCampaignChildRecord.campaign_id == campaign_id)
+        .order_by(MLSearchCampaignChildRecord.created_at.desc())
+        .with_for_update()
+        .limit(1)
+    )
+    run = None
+    if child is not None:
+        run = await session.scalar(
+            select(MLRefinementRunRecord)
+            .where(MLRefinementRunRecord.id == child.refinement_run_id)
+            .with_for_update()
+        )
+    if run is None or run.status not in {"queued", "running"}:
         record.status = "cancelled"
         record.completed_at = timestamp
+    else:
+        other_dependents = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignChildRecord)
+                .join(
+                    MLSearchCampaignRecord,
+                    MLSearchCampaignRecord.id
+                    == MLSearchCampaignChildRecord.campaign_id,
+                )
+                .where(
+                    MLSearchCampaignChildRecord.refinement_run_id == run.id,
+                    MLSearchCampaignChildRecord.campaign_id != campaign_id,
+                    MLSearchCampaignRecord.status.in_(("queued", "running")),
+                    MLSearchCampaignRecord.cancellation_requested_at.is_(None),
+                )
+            )
+            or 0
+        )
+        if other_dependents:
+            record.status = "cancelled"
+            record.completed_at = timestamp
+        elif run.status == "queued":
+            run.status = "cancelled"
+            run.completed_at = timestamp
+            run.termination_reason = "cancelled_by_campaign"
+            record.status = "cancelled"
+            record.completed_at = timestamp
+        elif run.cancellation_requested_at is None:
+            run.cancellation_requested_at = timestamp
     await session.commit()
     return record
 
@@ -286,13 +337,63 @@ async def retry_campaign(
         raise CampaignConflictError(
             "only operationally failed campaigns can be retried"
         )
-    await session.execute(
-        update(MLSearchCampaignRecord)
-        .where(MLSearchCampaignRecord.id == campaign_id)
-        .values(
-            status="queued", failed_at=None, failure_type=None, failure_message=None
+    if record.cancellation_requested_at is not None:
+        raise CampaignConflictError(
+            "campaign retry is unavailable after cancellation was requested"
         )
+    child = await session.scalar(
+        select(MLSearchCampaignChildRecord)
+        .where(MLSearchCampaignChildRecord.campaign_id == campaign_id)
+        .order_by(
+            MLSearchCampaignChildRecord.created_at.desc(),
+            MLSearchCampaignChildRecord.id.desc(),
+        )
+        .with_for_update()
+        .limit(1)
     )
+    if child is None:
+        raise CampaignConflictError(
+            "failed campaign has no retryable responsible child"
+        )
+    run = await session.scalar(
+        select(MLRefinementRunRecord)
+        .where(MLRefinementRunRecord.id == child.refinement_run_id)
+        .with_for_update()
+    )
+    if run is None:
+        raise CampaignConflictError(
+            "failed campaign responsible child has no refinement run"
+        )
+    reset_required = run.status in {"failed", "cancelled"}
+    resume_shared = run.status in {"queued", "running"}
+    if run.status == "completed":
+        reset_required = not await completed_run_is_complete(session, run)
+        resume_shared = not reset_required
+    if not reset_required and not resume_shared:
+        raise CampaignConflictError(
+            "failed campaign responsible child is not retryable"
+        )
+    if reset_required:
+        try:
+            reset_refinement_run(run)
+        except (TypeError, ValueError) as error:
+            raise CampaignConflictError(
+                "failed campaign child configuration cannot be reconstructed"
+            ) from error
+    logger.info(
+        "ML search campaign retry accepted",
+        extra={
+            "structured_fields": {
+                "campaign_id": str(record.id),
+                "refinement_run_id": str(run.id),
+                "refinement_reset": reset_required,
+            }
+        },
+    )
+    record.status = "queued"
+    record.failed_at = None
+    record.failure_type = None
+    record.failure_message = None
     await session.commit()
     await session.refresh(record)
     return record

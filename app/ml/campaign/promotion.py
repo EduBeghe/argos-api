@@ -18,10 +18,20 @@ class EconomicEvidence:
 
 
 def economic_rank(item: EconomicEvidence) -> tuple[object, ...]:
+    median = (
+        item.median_net_return
+        if item.median_net_return is not None
+        else Decimal("-Infinity")
+    )
+    worst = (
+        item.worst_net_return
+        if item.worst_net_return is not None
+        else Decimal("-Infinity")
+    )
     return (
         -item.positive_net_folds,
-        -(item.median_net_return or Decimal("-Infinity")),
-        -(item.worst_net_return or Decimal("-Infinity")),
+        -median,
+        -worst,
         -item.folds_beating_benchmark,
         -item.observations,
         item.family_fingerprint,

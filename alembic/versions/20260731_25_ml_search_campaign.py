@@ -166,7 +166,7 @@ def upgrade() -> None:
         ),
         sa.Column("stage", sa.Integer(), nullable=False),
         sa.Column("reserved_evaluations", sa.Integer(), nullable=False),
-        sa.Column("reused_completed_run", sa.Boolean(), nullable=False),
+        sa.Column("reuses_existing_run", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint(
             "campaign_id",
@@ -174,17 +174,23 @@ def upgrade() -> None:
             "stage",
             name="uq_ml_search_campaign_child_stage",
         ),
-        sa.UniqueConstraint(
-            "refinement_run_id", name="uq_ml_search_campaign_child_run"
-        ),
         sa.CheckConstraint(
             "stage BETWEEN 1 AND 4 AND reserved_evaluations > 0",
             name="ck_ml_search_campaign_child_stage",
         ),
     )
+    op.create_index(
+        "ix_ml_search_campaign_child_run",
+        "ml_search_campaign_children",
+        ["refinement_run_id"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_ml_search_campaign_child_run",
+        table_name="ml_search_campaign_children",
+    )
     op.drop_table("ml_search_campaign_children")
     op.drop_index("ix_ml_search_family_order", table_name="ml_search_campaign_families")
     op.drop_table("ml_search_campaign_families")

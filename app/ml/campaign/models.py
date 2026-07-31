@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -154,7 +155,7 @@ class MLSearchCampaignChildRecord(Base):
             "stage",
             name="uq_ml_search_campaign_child_stage",
         ),
-        UniqueConstraint("refinement_run_id", name="uq_ml_search_campaign_child_run"),
+        Index("ix_ml_search_campaign_child_run", "refinement_run_id"),
         CheckConstraint(
             "stage BETWEEN 1 AND 4 AND reserved_evaluations > 0",
             name="ck_ml_search_campaign_child_stage",
@@ -178,7 +179,7 @@ class MLSearchCampaignChildRecord(Base):
     )
     stage: Mapped[int] = mapped_column(Integer, nullable=False)
     reserved_evaluations: Mapped[int] = mapped_column(Integer, nullable=False)
-    reused_completed_run: Mapped[bool] = mapped_column(nullable=False)
+    reuses_existing_run: Mapped[bool] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

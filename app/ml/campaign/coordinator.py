@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +26,6 @@ from app.ml.refinement.persistence import (
     resolve_source,
 )
 from app.ml.refinement.planning import build_refinement_plan
-from app.ml.refinement.queue import cancel_refinement
 from app.ml.screening.engines import library_versions
 from app.ml.screening.models import MLModelScreeningResultRecord
 
@@ -44,6 +45,12 @@ from .models import (
 )
 from .promotion import EconomicEvidence, capped_promotions, is_strong_candidate
 
+logger = logging.getLogger(__name__)
+
+
+class CampaignCoordinationError(RuntimeError):
+    """Expected persisted-state error that fails only the affected campaign."""
+
 
 def _number(value: object) -> Decimal | None:
     return None if value is None else Decimal(str(value))
@@ -57,15 +64,28 @@ def _integer(value: object) -> int:
     return int(str(value))
 
 
-def _evidence(
+@dataclass(frozen=True, slots=True)
+class SelectedEconomicEvidence:
+    evaluation: MLRefinementEvaluationRecord
+    evidence: EconomicEvidence
+
+
+def _missing_last_descending(value: Decimal | None) -> Decimal:
+    return -(value if value is not None else Decimal("-Infinity"))
+
+
+def select_economic_evidence(
     family: MLSearchCampaignFamilyRecord, rows: tuple[MLRefinementEvaluationRecord, ...]
-) -> EconomicEvidence:
+) -> SelectedEconomicEvidence:
+    if not rows:
+        raise ValueError("campaign child has no evaluation evidence")
+
     def key(row: MLRefinementEvaluationRecord) -> tuple[object, ...]:
         selected = _mapping(row.aggregate_metrics.get("selected_confidence_bucket"))
         return (
             -_integer(selected.get("folds_with_positive_net_return", 0)),
-            -(_number(selected.get("median_net_return")) or Decimal("-Infinity")),
-            -(_number(selected.get("worst_net_return")) or Decimal("-Infinity")),
+            _missing_last_descending(_number(selected.get("median_net_return"))),
+            _missing_last_descending(_number(selected.get("worst_net_return"))),
             -_integer(row.aggregate_metrics.get("folds_beating_benchmark", 0)),
             -_integer(selected.get("observation_count", 0)),
             row.fingerprint,
@@ -73,33 +93,77 @@ def _evidence(
 
     best = min(rows, key=key)
     selected = _mapping(best.aggregate_metrics.get("selected_confidence_bucket"))
-    return EconomicEvidence(
-        family.fingerprint,
-        str(family.source_screening_run_id),
-        family.engine,
-        _integer(selected.get("observation_count", 0)),
-        _integer(selected.get("folds_with_favorable_direction", 0)),
-        _integer(selected.get("folds_with_positive_net_return", 0)),
-        _integer(best.aggregate_metrics.get("folds_beating_benchmark", 0)),
-        _number(selected.get("median_net_return")),
-        _number(selected.get("worst_net_return")),
-        sum(row.classification == "promising_for_strategy_simulation" for row in rows),
-        _integer(best.aggregate_metrics.get("complete_fold_count", 0)) == 7,
+    return SelectedEconomicEvidence(
+        best,
+        EconomicEvidence(
+            family.fingerprint,
+            str(family.source_screening_run_id),
+            family.engine,
+            _integer(selected.get("observation_count", 0)),
+            _integer(selected.get("folds_with_favorable_direction", 0)),
+            _integer(selected.get("folds_with_positive_net_return", 0)),
+            _integer(best.aggregate_metrics.get("folds_beating_benchmark", 0)),
+            _number(selected.get("median_net_return")),
+            _number(selected.get("worst_net_return")),
+            sum(
+                row.classification == "promising_for_strategy_simulation"
+                for row in rows
+            ),
+            _integer(best.aggregate_metrics.get("complete_fold_count", 0)) == 7,
+        ),
     )
+
+
+async def _active_shared_dependents(
+    session: AsyncSession, campaign: MLSearchCampaignRecord, run_id: UUID
+) -> int:
+    return int(
+        await session.scalar(
+            select(func.count())
+            .select_from(MLSearchCampaignChildRecord)
+            .join(
+                MLSearchCampaignRecord,
+                MLSearchCampaignRecord.id == MLSearchCampaignChildRecord.campaign_id,
+            )
+            .where(
+                MLSearchCampaignChildRecord.refinement_run_id == run_id,
+                MLSearchCampaignChildRecord.campaign_id != campaign.id,
+                MLSearchCampaignRecord.status.in_(("queued", "running")),
+                MLSearchCampaignRecord.cancellation_requested_at.is_(None),
+            )
+        )
+        or 0
+    )
+
+
+async def _fail_campaign(
+    session: AsyncSession,
+    campaign: MLSearchCampaignRecord,
+    *,
+    failure_type: str,
+    message: str,
+) -> None:
+    logger.error(
+        "ML search campaign coordination failed",
+        extra={
+            "structured_fields": {
+                "campaign_id": str(campaign.id),
+                "failure_type": failure_type,
+            }
+        },
+    )
+    campaign.status = "failed"
+    campaign.failed_at = datetime.now(UTC)
+    campaign.failure_type = failure_type
+    campaign.failure_message = message[:512]
+    await session.commit()
 
 
 async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) -> bool:
     child = await session.scalar(
         select(MLSearchCampaignChildRecord)
-        .join(
-            MLRefinementRunRecord,
-            MLRefinementRunRecord.id == MLSearchCampaignChildRecord.refinement_run_id,
-        )
         .where(
             MLSearchCampaignChildRecord.campaign_id == campaign.id,
-            MLRefinementRunRecord.status.in_(
-                ("queued", "running", "completed", "failed", "cancelled")
-            ),
         )
         .order_by(MLSearchCampaignChildRecord.created_at.desc())
         .limit(1)
@@ -108,10 +172,30 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
         return False
     run = await session.get(MLRefinementRunRecord, child.refinement_run_id)
     family = await session.get(MLSearchCampaignFamilyRecord, child.family_id)
-    assert run is not None and family is not None
+    if run is None or family is None:
+        await _fail_campaign(
+            session,
+            campaign,
+            failure_type="MissingCampaignChildReference",
+            message=f"campaign child {child.id} references missing persisted state",
+        )
+        return True
     if run.status in {"queued", "running"}:
         if campaign.cancellation_requested_at is not None:
-            await cancel_refinement(session, run.id)
+            if await _active_shared_dependents(session, campaign, run.id):
+                campaign.status = "cancelled"
+                campaign.completed_at = datetime.now(UTC)
+                await session.commit()
+                return True
+            if run.status == "queued":
+                run.status = "cancelled"
+                run.completed_at = datetime.now(UTC)
+                run.termination_reason = "cancelled_by_campaign"
+                campaign.status = "cancelled"
+                campaign.completed_at = run.completed_at
+            elif run.cancellation_requested_at is None:
+                run.cancellation_requested_at = datetime.now(UTC)
+            await session.commit()
         return True
     if family.current_stage >= child.stage:
         return False
@@ -120,12 +204,13 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
             campaign.status = "cancelled"
             campaign.completed_at = datetime.now(UTC)
         else:
-            campaign.status = "failed"
-            campaign.failed_at = datetime.now(UTC)
-            campaign.failure_type = "ChildRefinementFailed"
-            campaign.failure_message = (
-                f"child refinement run {run.id} ended as {run.status}"
+            await _fail_campaign(
+                session,
+                campaign,
+                failure_type="ChildRefinementFailed",
+                message=f"child refinement run {run.id} ended as {run.status}",
             )
+            return True
         await session.commit()
         return True
     evaluations = tuple(
@@ -138,22 +223,21 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
         ).all()
     )
     if len(evaluations) != run.evaluations_selected:
-        campaign.status = "failed"
-        campaign.failed_at = datetime.now(UTC)
-        campaign.failure_type = "IncompleteChildEvidence"
-        campaign.failure_message = (
-            f"child refinement run {run.id} has incomplete evidence"
+        await _fail_campaign(
+            session,
+            campaign,
+            failure_type="IncompleteChildEvidence",
+            message=f"child refinement run {run.id} has incomplete evidence",
         )
-        await session.commit()
         return True
-    evidence = _evidence(family, evaluations)
-    best = min(evaluations, key=lambda row: row.fingerprint)
+    selected_evidence = select_economic_evidence(family, evaluations)
+    evidence = selected_evidence.evidence
     family.current_stage = child.stage
     family.evaluations_completed = len(evaluations)
     family.evaluations_reused = (
-        len(evaluations) if child.reused_completed_run else run.evaluations_reused
+        len(evaluations) if child.reuses_existing_run else run.evaluations_reused
     )
-    family.best_evaluation_id = best.id
+    family.best_evaluation_id = selected_evidence.evaluation.id
     family.best_metrics = {
         "observations": evidence.observations,
         "favorable_direction_folds": evidence.favorable_direction_folds,
@@ -170,10 +254,10 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
     }
     family.state = "survived"
     campaign.evaluations_computed += (
-        0 if child.reused_completed_run else run.evaluations_computed
+        0 if child.reuses_existing_run else run.evaluations_computed
     )
     campaign.evaluations_reused += (
-        len(evaluations) if child.reused_completed_run else run.evaluations_reused
+        len(evaluations) if child.reuses_existing_run else run.evaluations_reused
     )
     if child.stage == 1:
         campaign.families_covered += 1
@@ -278,7 +362,7 @@ async def _request_for_family(
         )
     )
     if source_result is None:
-        raise RuntimeError("campaign source result disappeared")
+        raise CampaignCoordinationError("campaign source result disappeared")
     variant = FeatureVariant(family.feature_variant)
     feature = (
         AllFeatures(strategy="all")
@@ -325,31 +409,20 @@ async def _stage_child_run(
     )
     if existing is not None:
         if existing.status in {"queued", "running"}:
-            return existing, False
+            return existing, True
         if existing.status == "completed" and await completed_run_is_complete(
             session, existing
         ):
             return existing, True
+        if existing.status == "completed":
+            raise CampaignCoordinationError(
+                "identical completed child refinement is incomplete"
+            )
         if existing.status not in {"failed", "cancelled"}:
-            raise RuntimeError("identical completed child refinement is incomplete")
-        existing.status = "queued"
-        existing.evaluations_selected = len(plan.evaluations)
-        existing.evaluations_computed = 0
-        existing.evaluations_reused = 0
-        existing.evaluations_omitted = plan.omitted_by_trial_budget
-        existing.budget_exhausted = plan.omitted_by_trial_budget > 0
-        existing.termination_reason = None
-        existing.started_at = None
-        existing.completed_at = None
-        existing.failed_at = None
-        existing.failure_type = None
-        existing.failure_message = None
-        existing.elapsed_seconds = None
-        existing.worker_id = None
-        existing.claimed_at = None
-        existing.heartbeat_at = None
-        existing.cancellation_requested_at = None
-        return existing, False
+            raise CampaignCoordinationError(
+                "identical child refinement has an invalid lifecycle"
+            )
+        return existing, True
     record = MLRefinementRunRecord(
         id=uuid4(),
         experiment_key=key,
@@ -466,7 +539,24 @@ async def coordinate_next_campaign(
         return True
     cumulative = STAGE_TRIALS[stage - 1]
     additional = cumulative - family.evaluations_completed
-    if campaign.evaluations_computed + additional > campaign.maximum_evaluations:
+    try:
+        request = await _request_for_family(
+            session, family, stage, min(86_400, remaining_runtime)
+        )
+        child_run, reuses_existing = await _stage_child_run(session, request, timestamp)
+    except CampaignCoordinationError as error:
+        await _fail_campaign(
+            session,
+            campaign,
+            failure_type=type(error).__name__,
+            message=str(error),
+        )
+        return True
+    if (
+        not reuses_existing
+        and campaign.evaluations_computed + additional > campaign.maximum_evaluations
+    ):
+        session.expunge(child_run)
         campaign.status = "completed"
         campaign.outcome = (
             "coverage_incomplete"
@@ -476,11 +566,19 @@ async def coordinate_next_campaign(
         campaign.completed_at = timestamp
         await session.commit()
         return True
-    request = await _request_for_family(
-        session, family, stage, min(86_400, remaining_runtime)
-    )
-    child_run, reused_completed = await _stage_child_run(session, request, timestamp)
     await session.flush()
+    logger.info(
+        "ML search campaign child selected",
+        extra={
+            "structured_fields": {
+                "campaign_id": str(campaign.id),
+                "family_id": str(family.id),
+                "refinement_run_id": str(child_run.id),
+                "stage": stage,
+                "reuses_existing_run": reuses_existing,
+            }
+        },
+    )
     session.add(
         MLSearchCampaignChildRecord(
             id=uuid4(),
@@ -489,7 +587,7 @@ async def coordinate_next_campaign(
             refinement_run_id=child_run.id,
             stage=stage,
             reserved_evaluations=additional,
-            reused_completed_run=reused_completed,
+            reuses_existing_run=reuses_existing,
             created_at=timestamp,
         )
     )

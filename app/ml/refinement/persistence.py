@@ -115,7 +115,11 @@ async def completed_run_is_complete(
             MLRefinementEvaluationRecord.run_id == run.id
         )
     )
-    return count == run.evaluations_computed + run.evaluations_reused
+    return (
+        count == run.evaluations_selected
+        and run.evaluations_computed + run.evaluations_reused
+        == run.evaluations_selected
+    )
 
 
 async def start_run(
