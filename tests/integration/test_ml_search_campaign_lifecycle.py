@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.ml.campaign.coordinator import coordinate_next_campaign
 from app.ml.campaign.models import (
     MLSearchCampaignChildRecord,
     MLSearchCampaignFamilyRecord,
@@ -20,7 +21,10 @@ from app.ml.campaign.service import (
     retry_campaign,
 )
 from app.ml.refinement.contracts import MLRefinementRequest
-from app.ml.refinement.models import MLRefinementRunRecord
+from app.ml.refinement.models import (
+    MLRefinementEvaluationRecord,
+    MLRefinementRunRecord,
+)
 from app.ml.refinement.planning import build_refinement_plan
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
@@ -58,7 +62,13 @@ def refinement_request(source_id: UUID, result_id: UUID) -> MLRefinementRequest:
     )
 
 
-def campaign(*, status: str = "running") -> MLSearchCampaignRecord:
+def campaign(
+    *,
+    status: str = "running",
+    first_claimed_at: datetime | None = NOW,
+    covered: bool = False,
+    maximum_evaluations: int = 3600,
+) -> MLSearchCampaignRecord:
     identifier = uuid4()
     return MLSearchCampaignRecord(
         id=identifier,
@@ -69,16 +79,16 @@ def campaign(*, status: str = "running") -> MLSearchCampaignRecord:
         policy_version=1,
         classification_version=1,
         normalized_request={},
-        maximum_evaluations=3600,
+        maximum_evaluations=maximum_evaluations,
         maximum_runtime_seconds=60,
         families_total=1,
-        families_covered=0,
-        families_uncovered=1,
+        families_covered=1 if covered else 0,
+        families_uncovered=0 if covered else 1,
         evaluations_computed=0,
         evaluations_reused=0,
         current_stage=1,
         cancellation_requested_at=None,
-        first_claimed_at=NOW,
+        first_claimed_at=first_claimed_at,
         completed_at=None,
         failed_at=NOW if status == "failed" else None,
         failure_type="ChildRefinementFailed" if status == "failed" else None,
@@ -87,7 +97,9 @@ def campaign(*, status: str = "running") -> MLSearchCampaignRecord:
     )
 
 
-def family(campaign_id: UUID, source_id: UUID) -> MLSearchCampaignFamilyRecord:
+def family(
+    campaign_id: UUID, source_id: UUID, *, state: str = "scheduled"
+) -> MLSearchCampaignFamilyRecord:
     identifier = uuid4()
     return MLSearchCampaignFamilyRecord(
         id=identifier,
@@ -103,7 +115,7 @@ def family(campaign_id: UUID, source_id: UUID) -> MLSearchCampaignFamilyRecord:
         future_duration_seconds=1800,
         objective="future_return_regression",
         feature_variant="all",
-        state="scheduled",
+        state=state,
         current_stage=0,
         evaluations_planned=1,
         evaluations_completed=0,
@@ -180,6 +192,40 @@ def child(
         stage=1,
         reserved_evaluations=1,
         reuses_existing_run=reused,
+        created_at=NOW,
+    )
+
+
+def evaluation(
+    run_id: UUID, fingerprint: str = "e" * 64
+) -> MLRefinementEvaluationRecord:
+    return MLRefinementEvaluationRecord(
+        id=uuid4(),
+        run_id=run_id,
+        reused_from_evaluation_id=None,
+        fingerprint=fingerprint,
+        engine="ridge",
+        future_duration_seconds=1800,
+        objective="future_return_regression",
+        hyperparameters={},
+        feature_policy={},
+        confidence_buckets=["0.10"],
+        fold_evidence=[],
+        aggregate_metrics={
+            "selected_confidence_bucket": {
+                "observation_count": 100,
+                "folds_with_favorable_direction": 5,
+                "folds_with_positive_net_return": 5,
+                "median_net_return": "0.01",
+                "worst_net_return": "-0.001",
+            },
+            "folds_beating_benchmark": 5,
+            "complete_fold_count": 7,
+        },
+        classification="promising_for_strategy_simulation",
+        classification_version=1,
+        failed_rules=[],
+        elapsed_seconds=Decimal("1"),
         created_at=NOW,
     )
 
@@ -371,3 +417,165 @@ async def test_failed_campaign_without_child_is_not_retryable(
             CampaignConflictError, match="no retryable responsible child"
         ):
             await retry_campaign(session, record.id)
+
+
+async def test_initial_coordinator_claim_sets_runtime_clock_once(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, _ = factory
+    claimed_at = datetime(2040, 1, 2, tzinfo=UTC)
+    record = campaign(status="queued", first_claimed_at=None)
+    family_record = family(record.id, source_id, state="pending")
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+    async with sessions() as session:
+        assert await coordinate_next_campaign(session, now=claimed_at)
+    async with sessions() as session:
+        persisted = await session.get(MLSearchCampaignRecord, record.id)
+        assert persisted is not None
+        assert persisted.status == "running"
+        assert persisted.first_claimed_at == claimed_at
+        assert (
+            await session.scalar(
+                select(func.count(MLSearchCampaignChildRecord.id)).where(
+                    MLSearchCampaignChildRecord.campaign_id == record.id
+                )
+            )
+            == 1
+        )
+
+
+async def test_retry_reclaim_preserves_original_runtime_clock(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="failed", first_claimed_at=NOW)
+    family_record = family(record.id, source_id)
+    run = refinement_run(source_id, result_id, status="failed")
+    link = child(record.id, family_record.id, run.id, reused=False)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add_all((family_record, run))
+        await session.flush()
+        session.add(link)
+        await session.commit()
+        await retry_campaign(session, record.id)
+    async with sessions() as session:
+        assert await coordinate_next_campaign(session, now=NOW.replace(second=30))
+        await session.commit()
+    async with sessions() as session:
+        persisted = await session.get(MLSearchCampaignRecord, record.id)
+        assert persisted is not None
+        assert persisted.status == "running"
+        assert persisted.first_claimed_at == NOW
+
+
+@pytest.mark.parametrize(
+    ("covered", "expected_outcome"),
+    [(False, "coverage_incomplete"), (True, "search_budget_exhausted")],
+)
+async def test_retry_at_original_runtime_limit_schedules_no_new_child(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    covered: bool,
+    expected_outcome: str,
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="failed", first_claimed_at=NOW, covered=covered)
+    family_record = family(record.id, source_id)
+    run = refinement_run(source_id, result_id, status="failed")
+    link = child(record.id, family_record.id, run.id, reused=False)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add_all((family_record, run))
+        await session.flush()
+        session.add(link)
+        await session.commit()
+        await retry_campaign(session, record.id)
+    async with sessions() as session:
+        assert await coordinate_next_campaign(
+            session,
+            now=NOW.replace(minute=1),
+        )
+    async with sessions() as session:
+        persisted = await session.get(MLSearchCampaignRecord, record.id)
+        assert persisted is not None
+        assert persisted.status == "completed"
+        assert persisted.outcome == expected_outcome
+        assert persisted.first_claimed_at == NOW
+        assert (
+            await session.scalar(
+                select(func.count(MLSearchCampaignChildRecord.id)).where(
+                    MLSearchCampaignChildRecord.campaign_id == record.id
+                )
+            )
+            == 1
+        )
+
+
+async def test_completed_child_reconciliation_is_idempotent_across_sessions(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(maximum_evaluations=1)
+    family_record = family(record.id, source_id)
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 1
+    run.evaluations_selected = 1
+    evidence = evaluation(run.id)
+    link = child(record.id, family_record.id, run.id, reused=False)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add_all((family_record, run))
+        await session.flush()
+        session.add_all((evidence, link))
+        await session.commit()
+    async with sessions() as session:
+        assert await coordinate_next_campaign(session, now=NOW)
+    async with sessions() as session:
+        first_campaign = await session.get(MLSearchCampaignRecord, record.id)
+        first_family = await session.get(MLSearchCampaignFamilyRecord, family_record.id)
+        assert first_campaign is not None
+        assert first_family is not None
+        snapshot = (
+            first_campaign.families_covered,
+            first_campaign.families_uncovered,
+            first_campaign.evaluations_computed,
+            first_campaign.evaluations_reused,
+            first_family.current_stage,
+            first_family.state,
+            first_family.best_evaluation_id,
+            first_family.best_metrics,
+            await session.scalar(
+                select(func.count(MLSearchCampaignChildRecord.id)).where(
+                    MLSearchCampaignChildRecord.campaign_id == record.id
+                )
+            ),
+        )
+    async with sessions() as session:
+        assert not await coordinate_next_campaign(session, now=NOW)
+    async with sessions() as session:
+        final_campaign = await session.get(MLSearchCampaignRecord, record.id)
+        final_family = await session.get(MLSearchCampaignFamilyRecord, family_record.id)
+        assert final_campaign is not None
+        assert final_family is not None
+        assert (
+            final_campaign.families_covered,
+            final_campaign.families_uncovered,
+            final_campaign.evaluations_computed,
+            final_campaign.evaluations_reused,
+            final_family.current_stage,
+            final_family.state,
+            final_family.best_evaluation_id,
+            final_family.best_metrics,
+            await session.scalar(
+                select(func.count(MLSearchCampaignChildRecord.id)).where(
+                    MLSearchCampaignChildRecord.campaign_id == record.id
+                )
+            ),
+        ) == snapshot

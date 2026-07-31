@@ -476,9 +476,25 @@ async def coordinate_next_campaign(
     if campaign is None:
         await session.rollback()
         return False
+    resumed = campaign.status == "queued" and campaign.first_claimed_at is not None
     if campaign.status == "queued":
         campaign.status = "running"
-        campaign.first_claimed_at = timestamp
+        if campaign.first_claimed_at is None:
+            campaign.first_claimed_at = timestamp
+    if (
+        resumed
+        and (timestamp - cast(datetime, campaign.first_claimed_at)).total_seconds()
+        >= campaign.maximum_runtime_seconds
+    ):
+        campaign.status = "completed"
+        campaign.outcome = (
+            "coverage_incomplete"
+            if campaign.families_uncovered
+            else "search_budget_exhausted"
+        )
+        campaign.completed_at = timestamp
+        await session.commit()
+        return True
     active = await _reconcile(session, campaign)
     if active or campaign.status not in {"queued", "running"}:
         return True
