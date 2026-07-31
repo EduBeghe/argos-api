@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -6,26 +7,36 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.ml.campaign import planning as campaign_planning
+from app.ml.campaign import service as campaign_service
+from app.ml.campaign.contracts import FAMILIES_PER_INSTRUMENT, CampaignRequest
 from app.ml.campaign.coordinator import coordinate_next_campaign
 from app.ml.campaign.models import (
     MLSearchCampaignChildRecord,
     MLSearchCampaignFamilyRecord,
     MLSearchCampaignRecord,
+    MLSearchCampaignSourceRecord,
 )
+from app.ml.campaign.planning import CampaignFamily, SourceInstrument
 from app.ml.campaign.service import (
     CampaignConflictError,
     cancel_campaign,
+    enqueue_campaign,
+    preview_campaign,
     retry_campaign,
 )
+from app.ml.contract import FUTURE_DURATIONS
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
     MLRefinementRunRecord,
 )
 from app.ml.refinement.planning import build_refinement_plan
+from app.ml.screening.config import ScreeningEngine
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
     MLModelScreeningRunRecord,
@@ -315,6 +326,227 @@ async def factory() -> AsyncIterator[
         )
         await session.commit()
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def enqueue_factory() -> AsyncIterator[
+    tuple[async_sessionmaker[AsyncSession], UUID]
+]:
+    engine = create_async_engine(get_settings().database_url)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    source_id = uuid4()
+    durations = tuple(int(item.total_seconds()) for item in FUTURE_DURATIONS)
+    engines = tuple(item.value for item in ScreeningEngine)
+    async with sessions() as session:
+        session.add(
+            MLModelScreeningRunRecord(
+                id=source_id,
+                experiment_key=f"{PREFIX}enqueue-source".ljust(64, "s")[:64],
+                status="completed",
+                screening_version=1,
+                experiment_contract_version=2,
+                variable_registry_version=1,
+                missing_data_policy_version=1,
+                dataset_fingerprint="q" * 64,
+                asset="BTC/USDT",
+                provider="binance",
+                market_type="spot",
+                interval="5m",
+                requested_engines=list(engines),
+                requested_future_durations=list(durations),
+                library_versions={},
+                deterministic_seed=1729,
+                configuration={},
+                started_at=NOW,
+                completed_at=NOW,
+                failure_type=None,
+                failure_message=None,
+                evaluations_computed=len(engines) * len(durations),
+                evaluations_reused=0,
+                results_generated=len(engines) * len(durations),
+                pareto_retained_count=1,
+                elapsed_seconds=Decimal("1"),
+                created_at=NOW,
+            )
+        )
+        await session.flush()
+        session.add_all(
+            [
+                MLModelScreeningResultRecord(
+                    id=uuid4(),
+                    run_id=source_id,
+                    engine=engine_name,
+                    future_duration_seconds=duration,
+                    folds_evaluated=7,
+                    total_validation_samples=700,
+                    median_mae_improvement_over_zero=Decimal("0.1"),
+                    worst_fold_mae_improvement_over_zero=Decimal("0.01"),
+                    median_directional_accuracy=Decimal("0.55"),
+                    worst_fold_directional_accuracy=Decimal("0.5"),
+                    median_pearson_correlation=Decimal("0.1"),
+                    median_spearman_correlation=Decimal("0.1"),
+                    folds_beating_zero=7,
+                    folds_with_positive_spearman=7,
+                    total_training_time_seconds=Decimal("1"),
+                    pareto_retained=True,
+                    display_rank=display_rank,
+                    created_at=NOW,
+                )
+                for display_rank, (engine_name, duration) in enumerate(
+                    (
+                        (engine_name, duration)
+                        for engine_name in engines
+                        for duration in durations
+                    ),
+                    start=1,
+                )
+            ]
+        )
+        await session.commit()
+    yield sessions, source_id
+    async with sessions() as session:
+        campaign_ids = select(MLSearchCampaignSourceRecord.campaign_id).where(
+            MLSearchCampaignSourceRecord.source_screening_run_id == source_id
+        )
+        await session.execute(
+            delete(MLSearchCampaignRecord).where(
+                MLSearchCampaignRecord.id.in_(campaign_ids)
+            )
+        )
+        await session.execute(
+            delete(MLModelScreeningRunRecord).where(
+                MLModelScreeningRunRecord.id == source_id
+            )
+        )
+        await session.commit()
+    await engine.dispose()
+
+
+async def test_enqueue_flushes_parent_before_3600_children_and_is_idempotent(
+    enqueue_factory: tuple[async_sessionmaker[AsyncSession], UUID],
+) -> None:
+    sessions, source_id = enqueue_factory
+    request = CampaignRequest(source_screening_run_ids=(source_id,))
+    async with sessions() as session:
+        first = await enqueue_campaign(session, request, now=NOW)
+    assert first.created is True
+    assert first.campaign.status == "queued"
+
+    async with sessions() as session:
+        source_campaign_ids = tuple(
+            (
+                await session.scalars(
+                    select(MLSearchCampaignSourceRecord.campaign_id).where(
+                        MLSearchCampaignSourceRecord.campaign_id == first.campaign.id
+                    )
+                )
+            ).all()
+        )
+        family_campaign_ids = tuple(
+            (
+                await session.scalars(
+                    select(MLSearchCampaignFamilyRecord.campaign_id).where(
+                        MLSearchCampaignFamilyRecord.campaign_id == first.campaign.id
+                    )
+                )
+            ).all()
+        )
+    assert source_campaign_ids == (first.campaign.id,)
+    assert len(family_campaign_ids) == FAMILIES_PER_INSTRUMENT
+    assert set(family_campaign_ids) == {first.campaign.id}
+
+    async with sessions() as session:
+        second = await enqueue_campaign(session, request, now=NOW)
+    assert second.created is False
+    assert second.campaign.id == first.campaign.id
+    async with sessions() as session:
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignRecord)
+                .where(
+                    MLSearchCampaignRecord.experiment_key
+                    == first.campaign.experiment_key
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignSourceRecord)
+                .where(MLSearchCampaignSourceRecord.campaign_id == first.campaign.id)
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignFamilyRecord)
+                .where(MLSearchCampaignFamilyRecord.campaign_id == first.campaign.id)
+            )
+            == FAMILIES_PER_INSTRUMENT
+        )
+
+
+async def test_child_integrity_failure_rolls_back_flushed_parent(
+    enqueue_factory: tuple[async_sessionmaker[AsyncSession], UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions, source_id = enqueue_factory
+    request = CampaignRequest(source_screening_run_ids=(source_id,))
+    async with sessions() as session:
+        _, _, experiment_key = await preview_campaign(session, request)
+    original_build = campaign_planning.build_family_universe
+    invalid_source_id = uuid4()
+
+    def invalid_family_universe(
+        sources: tuple[SourceInstrument, ...],
+    ) -> tuple[CampaignFamily, ...]:
+        universe = original_build(sources)
+        invalid_source = replace(
+            universe[0].source, source_run_id=str(invalid_source_id)
+        )
+        return (replace(universe[0], source=invalid_source), *universe[1:])
+
+    monkeypatch.setattr(
+        campaign_service, "build_family_universe", invalid_family_universe
+    )
+    async with sessions() as session:
+        with pytest.raises(IntegrityError):
+            await enqueue_campaign(session, request, now=NOW)
+
+    async with sessions() as session:
+        assert (
+            await session.scalar(
+                select(MLSearchCampaignRecord).where(
+                    MLSearchCampaignRecord.experiment_key == experiment_key
+                )
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignSourceRecord)
+                .where(
+                    MLSearchCampaignSourceRecord.source_screening_run_id == source_id
+                )
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignFamilyRecord)
+                .where(
+                    MLSearchCampaignFamilyRecord.source_screening_run_id.in_(
+                        (source_id, invalid_source_id)
+                    )
+                )
+            )
+            == 0
+        )
 
 
 async def test_two_campaigns_can_share_one_refinement_run_and_cancel_independently(
