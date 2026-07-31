@@ -490,4 +490,3 @@ async def coordinate_next_campaign(
     family.evaluations_planned = cumulative
     await session.commit()
     return True
-

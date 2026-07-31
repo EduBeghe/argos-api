@@ -562,7 +562,60 @@ async def ml_screening_runs(
     interval: Annotated[Interval | None, Query()] = None,
     status: Annotated[Literal["running", "completed", "failed"] | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_SCREENING_PAGE_LIMIT)] = 50,
-    offset: Annotated[int, Que…501 tokens truncated…ge=1, le=MAX_SCREENING_PAGE_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ScreeningRunPage:
+    return await list_screening_runs(
+        session,
+        asset=asset,
+        provider=provider,
+        market_type=market_type,
+        interval=interval,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/ml-screening-runs/latest", response_model=ScreeningRunSummary)
+async def latest_ml_screening_run(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    asset: Annotated[Asset, Query()],
+    provider: Annotated[Provider, Query()],
+    market_type: Annotated[MarketType, Query()],
+    interval: Annotated[Interval, Query()],
+) -> ScreeningRunSummary:
+    try:
+        return await latest_completed_screening_run(
+            session,
+            asset=asset,
+            provider=provider,
+            market_type=market_type,
+            interval=interval,
+        )
+    except ScreeningReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/ml-screening-runs/{run_id}", response_model=ScreeningRunDetail)
+async def ml_screening_run(
+    run_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
+) -> ScreeningRunDetail:
+    try:
+        return await get_screening_run_detail(session, run_id)
+    except ScreeningReadNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/ml-screening-runs/{run_id}/results", response_model=ScreeningResultPage)
+async def ml_screening_results(
+    run_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    engine: Annotated[ScreeningEngine | None, Query()] = None,
+    pareto_retained: Annotated[bool | None, Query()] = None,
+    evidence_classification: Annotated[EvidenceClassification | None, Query()] = None,
+    minimum_future_duration_seconds: Annotated[int | None, Query(ge=1)] = None,
+    maximum_future_duration_seconds: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_SCREENING_PAGE_LIMIT)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ScreeningResultPage:
     if (
@@ -1094,4 +1147,3 @@ async def walk_forward_candidate_windows(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-

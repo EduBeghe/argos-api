@@ -76,4 +76,3 @@ class FamilyPage(BaseModel):
     offset: int
     limit: int
     has_more: bool
-

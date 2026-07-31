@@ -296,4 +296,3 @@ async def retry_campaign(
     await session.commit()
     await session.refresh(record)
     return record
-

@@ -178,4 +178,3 @@ class CampaignContract(BaseModel):
     families_per_instrument: int = FAMILIES_PER_INSTRUMENT
     default_maximum_evaluations: int = DEFAULT_MAXIMUM_EVALUATIONS
     default_maximum_runtime_seconds: int = DEFAULT_MAXIMUM_RUNTIME_SECONDS
-

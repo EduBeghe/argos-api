@@ -94,4 +94,3 @@ def is_strong_candidate(item: EconomicEvidence) -> bool:
         and item.worst_net_return is not None
         and item.worst_net_return >= Decimal("-0.0015")
     )
-

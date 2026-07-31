@@ -189,4 +189,3 @@ def downgrade() -> None:
     op.drop_table("ml_search_campaign_families")
     op.drop_table("ml_search_campaign_sources")
     op.drop_table("ml_search_campaigns")
-

@@ -96,4 +96,3 @@ def build_family_universe(
         for families in by_source
         for family in (families[ordinal],)
     )
-

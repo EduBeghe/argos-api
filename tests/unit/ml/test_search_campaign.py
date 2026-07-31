@@ -146,4 +146,3 @@ def test_strong_gate_requires_every_economic_requirement() -> None:
     assert not is_strong_candidate(evidence(median_net_return=Decimal("0.000999")))
     assert not is_strong_candidate(evidence(worst_net_return=Decimal("-0.001501")))
     assert not is_strong_candidate(evidence(complete_and_finite=False))
-
