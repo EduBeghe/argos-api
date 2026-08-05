@@ -857,7 +857,9 @@ async def test_legacy_confidence_bucket_audits_and_enqueues_idempotently(
         async with sessions() as session:
             session.add(record)
             await session.flush()
-            session.add_all((run, evidence))
+            session.add(run)
+            await session.flush()
+            session.add(evidence)
             await session.flush()
             session.add_all((family_record, link))
             await session.commit()
@@ -993,7 +995,9 @@ async def test_other_evidence_failure_still_blocks_manifest_enqueue(
     async with sessions() as session:
         session.add(record)
         await session.flush()
-        session.add_all((run, evidence))
+        session.add(run)
+        await session.flush()
+        session.add(evidence)
         await session.flush()
         session.add_all((family_record, link))
         await session.commit()
@@ -1010,3 +1014,4 @@ async def test_other_evidence_failure_still_blocks_manifest_enqueue(
             )
             == 0
         )
+
