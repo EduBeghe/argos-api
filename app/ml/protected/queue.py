@@ -1,6 +1,7 @@
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -16,9 +17,11 @@ from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementR
 
 from .audit import assemble_family_audit
 from .contracts import (
+    DECISION_CADENCE_SECONDS,
     DEVELOPMENT_MANIFEST_RECONSTRUCTION_VERSION,
     FINAL_VALIDATION_POLICY_VERSION,
     FINAL_VALIDATION_SIMULATION_VERSION,
+    SUPPORTED_CONFIDENCE_BUCKET_FRACTIONS,
     TEMPORAL_MANIFEST_VERSION,
 )
 from .models import MLFinalValidationRecord, MLTemporalManifestRecord
@@ -172,6 +175,26 @@ async def enqueue_final_validation(
             "development_manifest_not_ready",
             "development evidence or temporal provenance is invalid",
         )
+    selected_confidence_bucket = evaluation.aggregate_metrics.get(
+        "selected_confidence_bucket"
+    )
+    if not isinstance(selected_confidence_bucket, dict):
+        raise ProtectedWorkError(
+            "invalid_confidence_bucket", "selected confidence bucket is invalid"
+        )
+    try:
+        confidence_fraction = Decimal(str(selected_confidence_bucket["fraction"]))
+    except (KeyError, InvalidOperation, ValueError) as error:
+        raise ProtectedWorkError(
+            "invalid_confidence_bucket", "selected confidence bucket is invalid"
+        ) from error
+    if (
+        not confidence_fraction.is_finite()
+        or confidence_fraction not in SUPPORTED_CONFIDENCE_BUCKET_FRACTIONS
+    ):
+        raise ProtectedWorkError(
+            "invalid_confidence_bucket", "selected confidence bucket is unsupported"
+        )
     frozen: dict[str, object] = {
         "campaign_id": str(campaign_id),
         "family_id": str(family_id),
@@ -192,9 +215,9 @@ async def enqueue_final_validation(
         "feature_policy": evaluation.feature_policy,
         "objective": evaluation.objective,
         "future_duration_seconds": evaluation.future_duration_seconds,
-        "selected_confidence_bucket": evaluation.aggregate_metrics.get(
-            "selected_confidence_bucket"
-        ),
+        "selected_confidence_bucket": selected_confidence_bucket,
+        "confidence_bucket_fraction": str(confidence_fraction),
+        "decision_cadence_seconds": DECISION_CADENCE_SECONDS,
         "normalized_configuration": run.normalized_configuration,
         "library_versions": run.library_versions,
         "policy_version": FINAL_VALIDATION_POLICY_VERSION,

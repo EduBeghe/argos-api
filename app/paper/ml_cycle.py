@@ -11,6 +11,7 @@ from app.market.catalog import Instrument
 from app.ml.dataset import build_live_ml_feature_vector
 from app.ml.gaps import ns_to_datetime
 from app.ml.protected.artifacts import ArtifactIntegrityError, load_trusted_artifact
+from app.ml.protected.contracts import DECISION_CADENCE_SECONDS
 from app.ml.protected.models import MLModelArtifactRecord, MLStrategySpecificationRecord
 from app.ml.reader import read_live_ml_candles
 from app.ml.screening.engines import library_versions
@@ -75,6 +76,7 @@ async def run_ml_instrument_cycle(
     )
     if specification is None or artifact is None:
         raise DecisionCycleError("ML Strategy specification or artifact is missing")
+    validate_ml_decision_cadence(specification.specification)
     cycle = await claim_cycle(
         session=session,
         run_id=run.id,
@@ -281,6 +283,8 @@ def _decimal_specification(payload: dict[str, object], key: str) -> Decimal:
         ) from error
     if not value.is_finite():
         raise DecisionCycleError(f"ML Strategy specification has invalid {key}")
+    if key == "signed_score_threshold" and not Decimal(0) <= value <= Decimal(1):
+        raise DecisionCycleError(f"ML Strategy specification has invalid {key}")
     return value
 
 
@@ -289,6 +293,14 @@ def _integer_specification(payload: dict[str, object], key: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise DecisionCycleError(f"ML Strategy specification has invalid {key}")
     return value
+
+
+def validate_ml_decision_cadence(payload: dict[str, object]) -> None:
+    cadence = _integer_specification(payload, "decision_cadence_seconds")
+    if cadence != DECISION_CADENCE_SECONDS:
+        raise DecisionCycleError(
+            "ML Strategy specification has unsupported decision cadence"
+        )
 
 
 def _cycle_result(cycle: object, *, skipped: bool) -> CycleResult:

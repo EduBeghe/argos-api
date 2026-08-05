@@ -5,12 +5,15 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import Table
 
+from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.paper.decision_cycles import PaperDecisionCycleRecord
+from app.ml.protected.models import MLModelArtifactRecord, MLStrategySpecificationRecord
+from app.paper.decision_cycles import DecisionCycleError, PaperDecisionCycleRecord
 from app.paper.decision_evidence import (
     MLDecisionSnapshot,
     MLDecisionSnapshotRecord,
@@ -18,7 +21,12 @@ from app.paper.decision_evidence import (
     persist_baseline_decision_identity,
     persist_ml_decision,
 )
+from app.paper.deployment_models import PaperDeploymentRecord
 from app.paper.execution import execute_decision
+from app.paper.ml_cycle import (
+    _snapshot,
+    validate_ml_decision_cadence,
+)
 from app.paper.models import NoTrade
 from app.strategies.baseline_long_only import StrategyAction
 
@@ -119,6 +127,48 @@ def test_common_identity_and_cycle_metadata_enforce_typed_xor() -> None:
     assert "fk_paper_cycles_baseline_identity_pair" in cycle_constraints
     assert "fk_paper_cycles_ml_identity_pair" in cycle_constraints
     assert MLDecisionSnapshotRecord.__table__.c.model_artifact_id.nullable is False
+
+
+def test_ml_decision_cycle_accepts_only_frozen_thirty_minute_cadence() -> None:
+    validate_ml_decision_cadence({"decision_cadence_seconds": 1800})
+    for cadence in (300, 3600):
+        with pytest.raises(DecisionCycleError, match="unsupported decision cadence"):
+            validate_ml_decision_cadence({"decision_cadence_seconds": cadence})
+
+
+@pytest.mark.parametrize(
+    ("score", "expected_action"),
+    [
+        (Decimal("0.79"), StrategyAction.NO_ACTION),
+        (Decimal("0.80"), StrategyAction.OPEN_POSITION),
+    ],
+)
+def test_ml_snapshot_uses_concrete_score_cutoff_not_bucket_fraction(
+    score: Decimal, expected_action: StrategyAction
+) -> None:
+    decision = _snapshot(
+        deployment=PaperDeploymentRecord(id=uuid4()),
+        specification=MLStrategySpecificationRecord(id=uuid4()),
+        artifact=MLModelArtifactRecord(
+            id=uuid4(), sha256="a" * 64, feature_schema=["ema_20"]
+        ),
+        instrument=Instrument(
+            Asset.BTC_USDT,
+            Provider.BINANCE,
+            MarketType.SPOT,
+            Interval.FIVE_MINUTES,
+        ),
+        boundary=NOW,
+        source_open=NOW - timedelta(minutes=5),
+        source_price=Decimal("60000"),
+        score=score,
+        threshold=Decimal("0.80"),
+        feature_values=np.asarray([1], dtype=np.float32),
+        position=None,
+        horizon=timedelta(hours=1),
+    )
+    assert decision.entry_threshold == Decimal("0.80")
+    assert decision.action is expected_action
 
 
 @pytest.mark.asyncio

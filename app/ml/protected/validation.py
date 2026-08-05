@@ -16,6 +16,12 @@ from app.ml.refinement.planning import PlannedEvaluation
 from app.ml.screening.config import ScreeningEngine
 from app.paper.config import SimulationConfiguration
 
+from .contracts import (
+    DECISION_CADENCE_SECONDS,
+    PROTECTED_END,
+    PROTECTED_START,
+    SUPPORTED_CONFIDENCE_BUCKET_FRACTIONS,
+)
 from .policy import FinalValidationPolicyEvidence, failed_final_validation_rules
 from .simulation import (
     ProtectedBenchmarkResult,
@@ -38,10 +44,77 @@ class ProtectedValidationCalculation:
     model: object
     candidate: PlannedEvaluation
     selected_column_indices: tuple[int, ...]
+    confidence_bucket_fraction: Decimal
+    confidence_score_cutoff: Decimal
+    decision_cadence_seconds: int
+    parity_development_row_indices: tuple[int, ...]
     development_row_count: int
     protected_row_count: int
     first_protected_boundary: datetime
     last_protected_boundary: datetime
+
+
+_NANOSECONDS_PER_SECOND = 1_000_000_000
+_DECISION_CADENCE_NS = DECISION_CADENCE_SECONDS * _NANOSECONDS_PER_SECOND
+
+
+def is_decision_boundary_ns(boundary_ns: int) -> bool:
+    """Return whether a UTC epoch nanosecond boundary is cadence-aligned."""
+
+    return boundary_ns % _DECISION_CADENCE_NS == 0
+
+
+def is_protected_decision_boundary_ns(boundary_ns: int) -> bool:
+    """Apply the protected half-open range and the frozen decision cadence."""
+
+    return datetime_to_ns(PROTECTED_START) <= boundary_ns < datetime_to_ns(
+        PROTECTED_END
+    ) and is_decision_boundary_ns(boundary_ns)
+
+
+def confidence_score_cutoff(
+    development_signed_scores: np.ndarray[tuple[int], np.dtype[np.float64]],
+    confidence_bucket_fraction: Decimal,
+) -> Decimal:
+    """Derive the frozen absolute-score cutoff from development evidence only."""
+
+    if (
+        not confidence_bucket_fraction.is_finite()
+        or confidence_bucket_fraction not in SUPPORTED_CONFIDENCE_BUCKET_FRACTIONS
+    ):
+        raise ValueError("unsupported confidence bucket fraction")
+    if (
+        development_signed_scores.ndim != 1
+        or development_signed_scores.size == 0
+        or not np.all(np.isfinite(development_signed_scores))
+    ):
+        raise ValueError("development signed scores must be finite and non-empty")
+    quantile = np.quantile(
+        np.abs(development_signed_scores),
+        1.0 - float(confidence_bucket_fraction),
+    )
+    cutoff = Decimal(str(quantile))
+    if not cutoff.is_finite() or not Decimal(0) <= cutoff <= Decimal(1):
+        raise ValueError("confidence score cutoff must be finite and between 0 and 1")
+    return cutoff
+
+
+def _signed_positive_scores(
+    *, model: object, values: np.ndarray[tuple[int, int], np.dtype[np.float32]]
+) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
+    if not hasattr(model, "predict_proba") or not hasattr(model, "classes_"):
+        raise ValueError("protected classifier does not expose class probabilities")
+    probabilities = np.asarray(model.predict_proba(values), dtype=np.float64)
+    classes = np.asarray(model.classes_, dtype=np.int64)
+    positive = np.flatnonzero(classes == 1)
+    if (
+        probabilities.ndim != 2
+        or probabilities.shape != (len(values), len(classes))
+        or len(positive) != 1
+        or not np.all(np.isfinite(probabilities))
+    ):
+        raise ValueError("protected classifier class probabilities are incompatible")
+    return 2 * probabilities[:, int(positive[0])] - 1
 
 
 def _candidate(evaluation: MLRefinementEvaluationRecord) -> PlannedEvaluation:
@@ -111,11 +184,21 @@ def calculate_protected_validation(
         & target.eligible
         & (dataset.boundary_time_ns < datetime_to_ns(FINAL_TEST_START))
     )
-    protected = np.flatnonzero(
+    protected_candidates = np.flatnonzero(
         dataset.feature_eligible
         & target.eligible
         & (dataset.boundary_time_ns >= datetime_to_ns(FINAL_TEST_START))
         & (dataset.boundary_time_ns < datetime_to_ns(FINAL_TEST_END))
+    )
+    protected = np.asarray(
+        [
+            row
+            for row in protected_candidates
+            if is_protected_decision_boundary_ns(
+                int(dataset.boundary_time_ns[int(row)])
+            )
+        ],
+        dtype=np.int64,
     )
     if not len(development) or not len(protected):
         raise ValueError("protected validation has incomplete eligible evidence")
@@ -128,15 +211,15 @@ def calculate_protected_validation(
         labels=(target.values[development] > 0).astype(np.int64),
         seed=seed,
     )
-    probabilities = np.asarray(
-        model.predict_proba(dataset.features[np.ix_(protected, columns)]),
-        dtype=np.float64,
+    development_scores = _signed_positive_scores(
+        model=model,
+        values=dataset.features[np.ix_(development, columns)],
     )
-    classes = np.asarray(model.classes_, dtype=np.int64)
-    positive = np.flatnonzero(classes == 1)
-    if len(positive) != 1:
-        raise ValueError("protected classifier does not expose the positive class")
-    scores = 2 * probabilities[:, int(positive[0])] - 1
+    cutoff = confidence_score_cutoff(development_scores, confidence_fraction)
+    scores = _signed_positive_scores(
+        model=model,
+        values=dataset.features[np.ix_(protected, columns)],
+    )
     predictions: list[ProtectedPrediction] = []
     for row, score in zip(protected, scores, strict=True):
         boundary_ns = int(dataset.boundary_time_ns[row])
@@ -154,12 +237,14 @@ def calculate_protected_validation(
                 Decimal(str(candles.close_price[candle_index])),
             )
         )
+    if not predictions:
+        raise ValueError("protected validation has no cadence-aligned market evidence")
     hold = timedelta(seconds=candidate.future_duration_seconds)
     results = tuple(
         simulate_fixed_horizon_long_only(
             predictions=tuple(predictions),
             instrument=instrument,
-            threshold=confidence_fraction,
+            threshold=cutoff,
             hold=hold,
             configuration=SimulationConfiguration(
                 fee_rate=Decimal("0.001") * multiplier,
@@ -211,8 +296,12 @@ def calculate_protected_validation(
         model,
         candidate,
         tuple(int(index) for index in columns),
+        confidence_fraction,
+        cutoff,
+        DECISION_CADENCE_SECONDS,
+        tuple(int(index) for index in development[:32]),
         len(development),
-        len(protected),
-        ns_to_datetime(int(dataset.boundary_time_ns[protected[0]])),
-        ns_to_datetime(int(dataset.boundary_time_ns[protected[-1]])),
+        len(predictions),
+        predictions[0].boundary,
+        predictions[-1].boundary,
     )

@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -9,15 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.market.catalog import InstrumentCapability, resolve_instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.ml.campaign.models import MLSearchCampaignFamilyRecord
+from app.ml.contract import FINAL_TEST_START
 from app.ml.loading import (
     load_canonical_ml_experiment_dataset,
     load_canonical_ml_experiment_metadata,
     load_ml_development_dataset,
 )
 from app.ml.reader import read_ml_experiment_candles
-from app.ml.refinement.calculation import _selected_columns, fit_refinement_model
 from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementRunRecord
-from app.ml.registry import VARIABLE_REGISTRY
 from app.ml.screening.models import MLModelScreeningRunRecord
 
 from .artifacts import (
@@ -25,7 +24,11 @@ from .artifacts import (
     load_trusted_artifact,
     serialize_trusted_artifact,
 )
-from .contracts import ARTIFACT_FORMAT_VERSION, EXECUTABLE_STRATEGY_VERSION
+from .contracts import (
+    ARTIFACT_FORMAT_VERSION,
+    EXECUTABLE_STRATEGY_VERSION,
+    FINAL_VALIDATION_SIMULATION_VERSION,
+)
 from .models import (
     MLFinalValidationRecord,
     MLFinalValidationTradeRecord,
@@ -205,6 +208,10 @@ async def process_final_validation(
         "protected_start": "2024-01-01T00:00:00+00:00",
         "protected_end_exclusive": "2026-01-01T00:00:00+00:00",
         "future_duration_seconds": evaluation.future_duration_seconds,
+        "confidence_bucket_fraction": str(calculation.confidence_bucket_fraction),
+        "signed_score_threshold": str(calculation.confidence_score_cutoff),
+        "decision_cadence_seconds": calculation.decision_cadence_seconds,
+        "simulation_version": FINAL_VALIDATION_SIMULATION_VERSION,
         "development_row_count": calculation.development_row_count,
         "protected_row_count": calculation.protected_row_count,
         "first_protected_boundary": calculation.first_protected_boundary.isoformat(),
@@ -231,36 +238,24 @@ async def process_final_validation(
                     exit_reason=trade.exit_reason,
                 )
             )
-    record.status = "completed"
-    record.completed_at = datetime.now(UTC)
-    record.worker_id = None
-    record.claimed_at = None
-    record.heartbeat_at = None
-    await session.commit()
     if calculation.failed_rules:
+        record.status = "completed"
+        record.completed_at = datetime.now(UTC)
+        record.worker_id = None
+        record.claimed_at = None
+        record.heartbeat_at = None
+        await session.commit()
         return
-    target = dataset.targets.for_duration(
-        timedelta(seconds=evaluation.future_duration_seconds)
-    )
-    rows = np.flatnonzero(dataset.feature_eligible & target.eligible)
-    full_columns = _selected_columns(
-        calculation.candidate, dataset.features[rows], target.values[rows]
-    )
-    columns = np.asarray(full_columns, dtype=np.int64)
-    selected_feature_names = tuple(VARIABLE_REGISTRY[index].name for index in columns)
-    deployable_model = fit_refinement_model(
-        candidate=calculation.candidate,
-        training_x=dataset.features[np.ix_(rows, columns)],
-        labels=(target.values[rows] > 0).astype(np.int64),
-        seed=seed_value,
-    )
+    columns = np.asarray(calculation.selected_column_indices, dtype=np.int64)
+    selected_feature_names = calculation.selected_feature_names
     specification_payload: dict[str, object] = {
         **record.frozen_inputs,
         "strategy_name": "ml_fixed_horizon_long_only",
         "strategy_version": EXECUTABLE_STRATEGY_VERSION,
         "selected_features": list(selected_feature_names),
-        "signed_score_threshold": str(selected["fraction"]),
-        "decision_cadence_seconds": 1800,
+        "confidence_bucket_fraction": str(calculation.confidence_bucket_fraction),
+        "signed_score_threshold": str(calculation.confidence_score_cutoff),
+        "decision_cadence_seconds": calculation.decision_cadence_seconds,
         "allocation_percentage": "100",
     }
     specification = MLStrategySpecificationRecord(
@@ -273,7 +268,7 @@ async def process_final_validation(
         created_at=datetime.now(UTC),
     )
     serialized = serialize_trusted_artifact(
-        {"model": deployable_model, "features": selected_feature_names}
+        {"model": calculation.model, "features": selected_feature_names}
     )
     versions = record.frozen_inputs.get("library_versions")
     if not isinstance(versions, dict) or not all(
@@ -294,8 +289,12 @@ async def process_final_validation(
     loaded_model = loaded.get("model")
     if loaded_model is None or not hasattr(loaded_model, "predict_proba"):
         raise RuntimeError("serialized artifact model round trip failed")
-    sample = dataset.features[np.ix_(rows[: min(32, len(rows))], columns)]
-    expected = np.asarray(deployable_model.predict_proba(sample), dtype=np.float64)
+    parity_rows = np.asarray(calculation.parity_development_row_indices, dtype=np.int64)
+    sample = dataset.features[np.ix_(parity_rows, columns)]
+    validated_model = calculation.model
+    if not hasattr(validated_model, "predict_proba"):
+        raise RuntimeError("validated artifact model does not support classification")
+    expected = np.asarray(validated_model.predict_proba(sample), dtype=np.float64)
     actual = np.asarray(loaded_model.predict_proba(sample), dtype=np.float64)
     if expected.shape != actual.shape or not np.array_equal(expected, actual):
         raise RuntimeError("serialized artifact prediction parity failed")
@@ -315,12 +314,21 @@ async def process_final_validation(
             feature_schema=list(selected_feature_names),
             training_identity={
                 "start": dataset.metadata.requested_start.isoformat(),
-                "end_exclusive": dataset.metadata.requested_end.isoformat(),
+                "end_exclusive": FINAL_TEST_START.isoformat(),
                 "dataset_fingerprint": dataset.metadata.fingerprint,
+                "temporal_manifest_id": str(record.temporal_manifest_id),
+                "temporal_manifest_fingerprint": record.frozen_inputs.get(
+                    "manifest_fingerprint"
+                ),
             },
             artifact=serialized.payload,
             load_validated_at=datetime.now(UTC),
             created_at=datetime.now(UTC),
         )
     )
+    record.status = "completed"
+    record.completed_at = datetime.now(UTC)
+    record.worker_id = None
+    record.claimed_at = None
+    record.heartbeat_at = None
     await session.commit()
