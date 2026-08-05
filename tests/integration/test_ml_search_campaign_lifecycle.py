@@ -29,7 +29,14 @@ from app.ml.campaign.service import (
     preview_campaign,
     retry_campaign,
 )
-from app.ml.contract import FUTURE_DURATIONS
+from app.ml.contract import FUTURE_DURATIONS, temporal_fold_definitions
+from app.ml.protected.audit import assemble_family_audit
+from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
+from app.ml.protected.queue import (
+    ProtectedWorkError,
+    enqueue_final_validation,
+    enqueue_manifest_reconstruction,
+)
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
@@ -811,3 +818,203 @@ async def test_completed_child_reconciliation_is_idempotent_across_sessions(
                 )
             ),
         ) == snapshot
+
+
+async def test_legacy_confidence_bucket_audits_and_enqueues_idempotently(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="completed", covered=True, maximum_evaluations=1)
+    family_record = family(record.id, source_id, state="strong_development_candidate")
+    family_record.current_stage = 4
+    family_record.objective = "future_direction_classification"
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 1
+    run.evaluations_selected = 1
+    evidence = evaluation(run.id)
+    evidence.objective = "future_direction_classification"
+    evidence.confidence_buckets = ["0.05", "0.10", "0.20"]
+    evidence.fold_evidence = [
+        {
+            "fold_name": definition.name,
+            "validation_row_count": 100,
+            "confidence_metrics": [],
+        }
+        for definition in temporal_fold_definitions()
+    ]
+    evidence.aggregate_metrics = {
+        **evidence.aggregate_metrics,
+        "selected_confidence_bucket": {
+            **evidence.aggregate_metrics["selected_confidence_bucket"],  # type: ignore[dict-item]
+            "fraction": "0.050000000000000000",
+        },
+        "complete_fold_count": 7,
+    }
+    family_record.best_evaluation_id = evidence.id
+    link = child(record.id, family_record.id, run.id, reused=False)
+    link.stage = 4
+    try:
+        async with sessions() as session:
+            session.add(record)
+            await session.flush()
+            session.add(run)
+            await session.flush()
+            session.add(evidence)
+            await session.flush()
+            session.add(family_record)
+            await session.flush()
+            session.add(link)
+            await session.commit()
+
+        async with sessions() as session:
+            audit = await assemble_family_audit(
+                session, campaign_id=record.id, family_id=family_record.id
+            )
+            assert audit is not None
+            assert audit.evidence_integrity.failure_codes == ()
+            assert audit.temporal_provenance_integrity.failure_codes == (
+                "development_manifest_missing",
+            )
+            persisted_evidence = await session.get(
+                MLRefinementEvaluationRecord, evidence.id
+            )
+            assert persisted_evidence is not None
+            nearby_metrics = dict(persisted_evidence.aggregate_metrics)
+            raw_nearby_selected = nearby_metrics["selected_confidence_bucket"]
+            assert isinstance(raw_nearby_selected, dict)
+            nearby_selected = dict(raw_nearby_selected)
+            nearby_selected["fraction"] = "0.050000000000000001"
+            nearby_metrics["selected_confidence_bucket"] = nearby_selected
+            persisted_evidence.aggregate_metrics = nearby_metrics
+            await session.commit()
+            nearby_audit = await assemble_family_audit(
+                session, campaign_id=record.id, family_id=family_record.id
+            )
+            assert nearby_audit is not None
+            assert "selected_confidence_bucket_mismatch" in (
+                nearby_audit.evidence_integrity.failure_codes
+            )
+            nearby_selected["fraction"] = "0.050000000000000000"
+            nearby_metrics["selected_confidence_bucket"] = nearby_selected
+            persisted_evidence.aggregate_metrics = nearby_metrics
+            await session.commit()
+            first = await enqueue_manifest_reconstruction(
+                session, campaign_id=record.id, family_id=family_record.id, now=NOW
+            )
+            second = await enqueue_manifest_reconstruction(
+                session, campaign_id=record.id, family_id=family_record.id, now=NOW
+            )
+            assert first.id == second.id
+            assert first.status == "queued"
+            assert (
+                await session.scalar(
+                    select(func.count(MLTemporalManifestRecord.id)).where(
+                        MLTemporalManifestRecord.evaluation_id == evidence.id
+                    )
+                )
+                == 1
+            )
+            first.status = "completed"
+            first.manifest_fingerprint = "m" * 64
+            first.manifest = {}
+            first.fingerprint_verified = True
+            first.counts_verified = True
+            first.completed_at = NOW
+            await session.commit()
+
+        async with sessions() as session:
+            persisted_evidence = await session.get(
+                MLRefinementEvaluationRecord, evidence.id
+            )
+            assert persisted_evidence is not None
+            invalid_metrics = dict(persisted_evidence.aggregate_metrics)
+            raw_invalid_selected = invalid_metrics["selected_confidence_bucket"]
+            assert isinstance(raw_invalid_selected, dict)
+            invalid_selected = dict(raw_invalid_selected)
+            invalid_selected["fraction"] = "0.15"
+            invalid_metrics["selected_confidence_bucket"] = invalid_selected
+            persisted_evidence.aggregate_metrics = invalid_metrics
+            await session.commit()
+            with pytest.raises(ProtectedWorkError) as invalid:
+                await enqueue_final_validation(
+                    session, campaign_id=record.id, family_id=family_record.id, now=NOW
+                )
+            assert invalid.value.code == "invalid_confidence_bucket"
+            assert (
+                await session.scalar(
+                    select(func.count(MLFinalValidationRecord.id)).where(
+                        MLFinalValidationRecord.evaluation_id == evidence.id
+                    )
+                )
+                == 0
+            )
+            invalid_selected["fraction"] = "0.050000000000000000"
+            invalid_metrics["selected_confidence_bucket"] = invalid_selected
+            persisted_evidence.aggregate_metrics = invalid_metrics
+            await session.commit()
+            validation = await enqueue_final_validation(
+                session, campaign_id=record.id, family_id=family_record.id, now=NOW
+            )
+            assert validation.status == "queued"
+            assert validation.protected_data_read_at is None
+            assert validation.frozen_inputs["confidence_bucket_fraction"] == "0.05"
+            selected = validation.frozen_inputs["selected_confidence_bucket"]
+            assert isinstance(selected, dict)
+            assert selected["fraction"] == "0.05"
+    finally:
+        async with sessions() as session:
+            await session.execute(
+                delete(MLFinalValidationRecord).where(
+                    MLFinalValidationRecord.evaluation_id == evidence.id
+                )
+            )
+            await session.execute(
+                delete(MLTemporalManifestRecord).where(
+                    MLTemporalManifestRecord.evaluation_id == evidence.id
+                )
+            )
+            await session.commit()
+
+
+async def test_other_evidence_failure_still_blocks_manifest_enqueue(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="completed", covered=True, maximum_evaluations=1)
+    family_record = family(record.id, source_id, state="strong_development_candidate")
+    family_record.current_stage = 4
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 1
+    run.evaluations_selected = 1
+    evidence = evaluation(run.id)
+    evidence.confidence_buckets = ["0.05", "0.10", "0.20"]
+    selected = evidence.aggregate_metrics["selected_confidence_bucket"]
+    assert isinstance(selected, dict)
+    selected["fraction"] = "0.050000000000000000"
+    family_record.best_evaluation_id = evidence.id
+    link = child(record.id, family_record.id, run.id, reused=False)
+    link.stage = 4
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(run)
+        await session.flush()
+        session.add(evidence)
+        await session.flush()
+        session.add(family_record)
+        await session.flush()
+        session.add(link)
+        await session.commit()
+        with pytest.raises(ProtectedWorkError) as raised:
+            await enqueue_manifest_reconstruction(
+                session, campaign_id=record.id, family_id=family_record.id, now=NOW
+            )
+        assert raised.value.code == "development_evidence_invalid"
+        assert (
+            await session.scalar(
+                select(func.count(MLTemporalManifestRecord.id)).where(
+                    MLTemporalManifestRecord.evaluation_id == evidence.id
+                )
+            )
+            == 0
+        )
