@@ -234,7 +234,6 @@ def upgrade() -> None:
     END $$;
     """
     )
-    op.alter_column("paper_trading_runs", "deployment_id", nullable=False)
     op.create_foreign_key(
         "fk_paper_runs_deployment",
         "paper_trading_runs",
@@ -249,7 +248,7 @@ def upgrade() -> None:
         "paper_trading_runs",
         ["current_run_id"],
         ["id"],
-        ondelete="RESTRICT",
+        ondelete="SET NULL",
     )
     op.create_index(
         "uq_paper_runs_active_deployment",

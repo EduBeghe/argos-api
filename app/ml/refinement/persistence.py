@@ -366,7 +366,11 @@ async def persist_evaluation(
         created_at=now,
     )
     session.add(record)
-    if development_dataset is not None and canonical_dataset_fingerprint is not None:
+    if (
+        development_dataset is not None
+        and canonical_dataset_fingerprint is not None
+        and len(result.folds) == len(development_dataset.folds)
+    ):
         manifest = reconstruct_temporal_manifest(
             dataset=development_dataset,
             evaluation=record,

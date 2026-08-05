@@ -60,7 +60,7 @@ class PaperDeploymentRecord(Base):
     )
     current_run_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey("paper_trading_runs.id", ondelete="RESTRICT"),
+        ForeignKey("paper_trading_runs.id", ondelete="SET NULL"),
     )
     is_primary: Mapped[bool] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(
