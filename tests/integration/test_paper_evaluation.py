@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.decisions.persistence import DecisionSnapshotRecord
 from app.market.persistence import MarketCandleRecord
 from app.paper.decision_cycles import PaperDecisionCycleRecord
+from app.paper.decision_evidence import PaperDecisionIdentityRecord
 from app.paper.equity_snapshots import (
     PaperPortfolioSnapshotRecord,
     PaperPositionSnapshotRecord,
@@ -297,12 +298,14 @@ class PersistedEvidence:
         self,
         score: MarketScoreRecord,
         decision: DecisionSnapshotRecord,
+        decision_identity: PaperDecisionIdentityRecord,
         position: PaperPositionRecord,
         trade: PaperTradeRecord,
         cycle: PaperDecisionCycleRecord,
     ) -> None:
         self.score = score
         self.decision = decision
+        self.decision_identity = decision_identity
         self.position = position
         self.trade = trade
         self.cycle = cycle
@@ -313,10 +316,32 @@ def _evidence(
 ) -> PersistedEvidence:
     score = _score(identity, timestamp)
     decision = _decision(identity, timestamp, score.id, action)
+    decision_identity = PaperDecisionIdentityRecord(
+        id=uuid4(),
+        kind="baseline",
+        baseline_snapshot_id=decision.id,
+        ml_snapshot_id=None,
+    )
     position = _position(run_id, identity, timestamp)
-    trade = _trade(run_id, identity, timestamp, decision.id, position.id)
-    cycle = _cycle(run_id, identity, timestamp, score.id, decision.id, trade.id, action)
-    return PersistedEvidence(score, decision, position, trade, cycle)
+    trade = _trade(
+        run_id,
+        identity,
+        timestamp,
+        decision.id,
+        decision_identity.id,
+        position.id,
+    )
+    cycle = _cycle(
+        run_id,
+        identity,
+        timestamp,
+        score.id,
+        decision.id,
+        decision_identity.id,
+        trade.id,
+        action,
+    )
+    return PersistedEvidence(score, decision, decision_identity, position, trade, cycle)
 
 
 async def _persist_evidence(session: AsyncSession, *values: PersistedEvidence) -> None:
@@ -325,6 +350,8 @@ async def _persist_evidence(session: AsyncSession, *values: PersistedEvidence) -
     session.add_all(
         [item for value in values for item in (value.decision, value.position)]
     )
+    await session.flush()
+    session.add_all([value.decision_identity for value in values])
     await session.flush()
     session.add_all([value.trade for value in values])
     await session.flush()
@@ -442,12 +469,14 @@ def _trade(
     identity: MarketIdentity,
     timestamp: datetime,
     decision_id: UUID,
+    decision_identity_id: UUID,
     position_id: UUID,
 ) -> PaperTradeRecord:
     return PaperTradeRecord(
         id=uuid4(),
         run_id=run_id,
         decision_snapshot_id=decision_id,
+        decision_identity_id=decision_identity_id,
         position_id=position_id,
         side="buy",
         **_identity_fields(identity),
@@ -471,6 +500,7 @@ def _cycle(
     timestamp: datetime,
     score_id: UUID,
     decision_id: UUID,
+    decision_identity_id: UUID,
     trade_id: UUID,
     action: str,
 ) -> PaperDecisionCycleRecord:
@@ -485,6 +515,9 @@ def _cycle(
         scheduled_boundary=timestamp - timedelta(minutes=1),
         source_score_id=score_id,
         decision_snapshot_id=decision_id,
+        ml_decision_snapshot_id=None,
+        decision_identity_id=decision_identity_id,
+        decision_kind="baseline",
         paper_trade_id=trade_id if result != "no_action" else None,
         result=result,
         started_at=timestamp - timedelta(seconds=30),

@@ -232,6 +232,12 @@ async def test_unique_active_run_is_enforced(
 ) -> None:
     await reset_paper_account(session=session, started_at=NOW)
     await session.commit()
+    deployment_id = await session.scalar(
+        select(PaperTradingRunRecord.deployment_id).where(
+            PaperTradingRunRecord.status == PaperRunStatus.ACTIVE.value
+        )
+    )
+    assert deployment_id is not None
     duplicate = PaperTradingRunRecord(
         id=uuid4(),
         status="active",
@@ -245,6 +251,7 @@ async def test_unique_active_run_is_enforced(
         stopped_at=None,
         stop_reason=None,
         predecessor_run_id=None,
+        deployment_id=deployment_id,
     )
     session.add(duplicate)
     with pytest.raises(IntegrityError):
