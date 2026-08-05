@@ -28,6 +28,7 @@ from .contracts import (
     ARTIFACT_FORMAT_VERSION,
     EXECUTABLE_STRATEGY_VERSION,
     FINAL_VALIDATION_SIMULATION_VERSION,
+    validate_final_validation_contract,
 )
 from .models import (
     MLFinalValidationRecord,
@@ -112,6 +113,7 @@ async def process_final_validation(
 ) -> None:
     if record.status != "running" or record.worker_id != worker_id:
         raise RuntimeError("worker does not own final-validation lease")
+    validate_final_validation_contract(record.frozen_inputs)
     family = await session.get(MLSearchCampaignFamilyRecord, record.family_id)
     evaluation = await session.get(MLRefinementEvaluationRecord, record.evaluation_id)
     if family is None or evaluation is None:

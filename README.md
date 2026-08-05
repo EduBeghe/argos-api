@@ -327,6 +327,12 @@ persists that concrete cutoff separately as `signed_score_threshold`. A passed
 deployment serializes the exact pre-2024 fitted model and ordered feature set that
 scored the protected 2024-2026 evidence; protected rows are never used to refit it.
 
+The protected worker and retry endpoint also require an exact frozen validation
+contract: simulation version 2, policy version 1, and a 1,800-second cadence.
+Legacy or otherwise incompatible identities remain readable but fail closed before
+any protected evidence is loaded; operators must enqueue a new current-version
+identity rather than reinterpret or retry legacy evidence.
+
 Read the latest persisted snapshot without triggering generation:
 
 ```sh

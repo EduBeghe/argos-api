@@ -108,7 +108,8 @@ async def process_once(
                     and owned_validation.worker_id == worker_id
                 ):
                     owned_validation.status = "failed"
-                    owned_validation.failure_code = type(error).__name__[:64]
+                    failure_code = getattr(error, "code", type(error).__name__)
+                    owned_validation.failure_code = str(failure_code)[:64]
                     owned_validation.failure_message = (
                         str(error) or "validation failed"
                     )[:512]

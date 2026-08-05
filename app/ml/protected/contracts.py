@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
+from typing import Final
 
 DEVELOPMENT_MANIFEST_RECONSTRUCTION_VERSION = 1
 TEMPORAL_MANIFEST_VERSION = 1
@@ -20,6 +21,28 @@ BASE_FEE_RATE = Decimal("0.001")
 BASE_SLIPPAGE_RATE = Decimal("0.0005")
 MAXIMUM_ARTIFACT_BYTES = 32 * 1024 * 1024
 PAPER_CASH_BUFFER_RATE = Decimal("0.000001")
+INCOMPATIBLE_FINAL_VALIDATION_CONTRACT: Final = "incompatible_final_validation_contract"
+
+
+class FinalValidationContractError(RuntimeError):
+    code = INCOMPATIBLE_FINAL_VALIDATION_CONTRACT
+
+
+def validate_final_validation_contract(frozen_inputs: object) -> None:
+    """Reject frozen validation evidence that is not the exact current contract."""
+
+    expected = (
+        ("simulation_version", FINAL_VALIDATION_SIMULATION_VERSION),
+        ("policy_version", FINAL_VALIDATION_POLICY_VERSION),
+        ("decision_cadence_seconds", DECISION_CADENCE_SECONDS),
+    )
+    inputs = frozen_inputs if isinstance(frozen_inputs, dict) else {}
+    for field, required in expected:
+        value = inputs.get(field)
+        if type(value) is not int or value != required:
+            raise FinalValidationContractError(
+                f"final-validation contract field {field} is incompatible"
+            )
 
 
 class WorkStatus(StrEnum):

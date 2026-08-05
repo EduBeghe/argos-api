@@ -23,6 +23,8 @@ from .contracts import (
     FINAL_VALIDATION_SIMULATION_VERSION,
     SUPPORTED_CONFIDENCE_BUCKET_FRACTIONS,
     TEMPORAL_MANIFEST_VERSION,
+    FinalValidationContractError,
+    validate_final_validation_contract,
 )
 from .models import MLFinalValidationRecord, MLTemporalManifestRecord
 
@@ -285,6 +287,10 @@ async def retry_final_validation(
         raise ProtectedWorkError(
             "final_validation_not_found", "final validation was not found"
         )
+    try:
+        validate_final_validation_contract(record.frozen_inputs)
+    except FinalValidationContractError as error:
+        raise ProtectedWorkError(error.code, str(error)) from error
     if record.protected_data_read_at is not None:
         raise ProtectedWorkError(
             "protected_evidence_already_consumed",
