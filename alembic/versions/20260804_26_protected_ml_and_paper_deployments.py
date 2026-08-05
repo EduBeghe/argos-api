@@ -258,6 +258,13 @@ def upgrade() -> None:
         postgresql_where=sa.text("status='active'"),
     )
     op.create_index(
+        "uq_paper_runs_active_legacy",
+        "paper_trading_runs",
+        ["status"],
+        unique=True,
+        postgresql_where=sa.text("status='active' AND deployment_id IS NULL"),
+    )
+    op.create_index(
         "uq_paper_deployment_primary",
         "paper_deployments",
         ["is_primary"],
@@ -370,12 +377,12 @@ def upgrade() -> None:
         sa.Column(
             "baseline_snapshot_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("decision_snapshots.id"),
+            sa.ForeignKey("decision_snapshots.id", ondelete="CASCADE"),
         ),
         sa.Column(
             "ml_snapshot_id",
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("ml_decision_snapshots.id"),
+            sa.ForeignKey("ml_decision_snapshots.id", ondelete="CASCADE"),
         ),
         sa.CheckConstraint(
             "(kind='baseline' AND baseline_snapshot_id IS NOT NULL AND ml_snapshot_id IS NULL) OR (kind='ml' AND baseline_snapshot_id IS NULL AND ml_snapshot_id IS NOT NULL)",
@@ -471,7 +478,6 @@ def upgrade() -> None:
         ["decision_identity_id", "decision_snapshot_id"],
         ["id", "baseline_snapshot_id"],
     )
-    op.alter_column("paper_trades", "decision_identity_id", nullable=False)
     op.alter_column("paper_trades", "decision_snapshot_id", nullable=True)
     op.drop_constraint(
         "ck_paper_cycles_lifecycle", "paper_decision_cycles", type_="check"
@@ -575,6 +581,7 @@ def downgrade() -> None:
     op.drop_constraint(
         "fk_paper_runs_deployment", "paper_trading_runs", type_="foreignkey"
     )
+    op.drop_index("uq_paper_runs_active_legacy", table_name="paper_trading_runs")
     op.drop_column("paper_trading_runs", "deployment_id")
     op.create_index(
         "uq_paper_runs_active_currency",

@@ -69,6 +69,12 @@ class PaperTradingRunRecord(Base):
             unique=True,
             postgresql_where=text("status = 'active'"),
         ),
+        Index(
+            "uq_paper_runs_active_legacy",
+            "status",
+            unique=True,
+            postgresql_where=text("status = 'active' AND deployment_id IS NULL"),
+        ),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
     deployment_id: Mapped[UUID | None] = mapped_column(
@@ -210,10 +216,9 @@ class PaperTradeRecord(Base):
         PostgreSQLUUID(as_uuid=True),
         ForeignKey(DecisionSnapshotRecord.id),
     )
-    decision_identity_id: Mapped[UUID] = mapped_column(
+    decision_identity_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("paper_decision_identities.id"),
-        nullable=False,
     )
     position_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("paper_positions.id"), nullable=False

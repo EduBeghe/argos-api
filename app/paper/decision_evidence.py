@@ -262,10 +262,12 @@ class PaperDecisionIdentityRecord(Base):
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     baseline_snapshot_id: Mapped[UUID | None] = mapped_column(
-        PostgreSQLUUID(as_uuid=True), ForeignKey(DecisionSnapshotRecord.id)
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(DecisionSnapshotRecord.id, ondelete="CASCADE"),
     )
     ml_snapshot_id: Mapped[UUID | None] = mapped_column(
-        PostgreSQLUUID(as_uuid=True), ForeignKey(MLDecisionSnapshotRecord.id)
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey(MLDecisionSnapshotRecord.id, ondelete="CASCADE"),
     )
 
 
