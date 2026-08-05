@@ -415,11 +415,19 @@ def upgrade() -> None:
           SELECT decision_snapshot_id FROM paper_decision_cycles WHERE decision_snapshot_id IS NOT NULL
           UNION
           SELECT decision_snapshot_id FROM paper_trades WHERE decision_snapshot_id IS NOT NULL
-        ) evidence;
+        ) evidence
+        """
+    )
+    op.execute(
+        """
         UPDATE paper_decision_cycles c SET decision_identity_id=i.id, decision_kind='baseline'
-        FROM paper_decision_identities i WHERE i.baseline_snapshot_id=c.decision_snapshot_id;
+        FROM paper_decision_identities i WHERE i.baseline_snapshot_id=c.decision_snapshot_id
+        """
+    )
+    op.execute(
+        """
         UPDATE paper_trades t SET decision_identity_id=i.id
-        FROM paper_decision_identities i WHERE i.baseline_snapshot_id=t.decision_snapshot_id;
+        FROM paper_decision_identities i WHERE i.baseline_snapshot_id=t.decision_snapshot_id
         """
     )
     op.create_foreign_key(
