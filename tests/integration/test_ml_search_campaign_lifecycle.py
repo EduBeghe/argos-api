@@ -861,7 +861,9 @@ async def test_legacy_confidence_bucket_audits_and_enqueues_idempotently(
             await session.flush()
             session.add(evidence)
             await session.flush()
-            session.add_all((family_record, link))
+            session.add(family_record)
+            await session.flush()
+            session.add(link)
             await session.commit()
 
         async with sessions() as session:
@@ -999,7 +1001,9 @@ async def test_other_evidence_failure_still_blocks_manifest_enqueue(
         await session.flush()
         session.add(evidence)
         await session.flush()
-        session.add_all((family_record, link))
+        session.add(family_record)
+        await session.flush()
+        session.add(link)
         await session.commit()
         with pytest.raises(ProtectedWorkError) as raised:
             await enqueue_manifest_reconstruction(
@@ -1014,4 +1018,3 @@ async def test_other_evidence_failure_still_blocks_manifest_enqueue(
             )
             == 0
         )
-
