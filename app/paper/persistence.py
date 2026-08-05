@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -23,6 +24,7 @@ from app.decisions.persistence import DecisionSnapshotRecord
 from app.market.enums import Asset, Interval, MarketType, Provider
 from app.market.history import HistoryOrder
 from app.paper.config import SimulationConfiguration
+from app.paper.deployment_models import PaperDeploymentRecord
 from app.paper.models import (
     PaperPosition,
     PaperPositionStatus,
@@ -62,13 +64,17 @@ class PaperTradingRunRecord(Base):
             name="ck_paper_runs_timestamps",
         ),
         Index(
-            "uq_paper_runs_active_currency",
-            "account_currency",
+            "uq_paper_runs_active_deployment",
+            "deployment_id",
             unique=True,
             postgresql_where=text("status = 'active'"),
         ),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    deployment_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("paper_deployments.id", ondelete="RESTRICT"),
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     account_currency: Mapped[str] = mapped_column(String(16), nullable=False)
     initial_cash: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
@@ -177,7 +183,21 @@ class PaperTradeRecord(Base):
             "(side = 'buy' AND cash_impact < 0) OR (side = 'sell' AND cash_impact > 0)",
             name="ck_paper_trades_cash_direction",
         ),
-        Index("uq_paper_trades_decision", "decision_snapshot_id", unique=True),
+        Index(
+            "uq_paper_trades_baseline_decision",
+            "decision_snapshot_id",
+            unique=True,
+            postgresql_where=text("decision_snapshot_id IS NOT NULL"),
+        ),
+        Index("uq_paper_trades_decision_identity", "decision_identity_id", unique=True),
+        ForeignKeyConstraint(
+            ["decision_identity_id", "decision_snapshot_id"],
+            [
+                "paper_decision_identities.id",
+                "paper_decision_identities.baseline_snapshot_id",
+            ],
+            name="fk_paper_trades_baseline_identity_pair",
+        ),
         Index("ix_paper_trades_run_executed", "run_id", "executed_at", "id"),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
@@ -186,9 +206,13 @@ class PaperTradeRecord(Base):
         ForeignKey("paper_trading_runs.id"),
         nullable=False,
     )
-    decision_snapshot_id: Mapped[UUID] = mapped_column(
+    decision_snapshot_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
         ForeignKey(DecisionSnapshotRecord.id),
+    )
+    decision_identity_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("paper_decision_identities.id"),
         nullable=False,
     )
     position_id: Mapped[UUID] = mapped_column(
@@ -257,9 +281,18 @@ def _position(record: PaperPositionRecord) -> PaperPosition:
 async def get_active_run(
     session: AsyncSession, *, currency: str, lock: bool = False
 ) -> PaperTradingRunRecord | None:
-    statement = select(PaperTradingRunRecord).where(
-        PaperTradingRunRecord.account_currency == currency,
-        PaperTradingRunRecord.status == PaperRunStatus.ACTIVE.value,
+    statement = (
+        select(PaperTradingRunRecord)
+        .join(
+            PaperDeploymentRecord,
+            PaperDeploymentRecord.id == PaperTradingRunRecord.deployment_id,
+        )
+        .where(
+            PaperTradingRunRecord.account_currency == currency,
+            PaperTradingRunRecord.status == PaperRunStatus.ACTIVE.value,
+            PaperDeploymentRecord.is_primary.is_(True),
+            PaperDeploymentRecord.lifecycle != "archived",
+        )
     )
     if lock:
         statement = statement.with_for_update()
@@ -301,9 +334,25 @@ async def create_run(
     configuration: SimulationConfiguration,
     started_at: datetime,
     predecessor_run_id: UUID | None = None,
+    deployment_id: UUID | None = None,
 ) -> PaperTradingRunRecord:
+    if deployment_id is None and predecessor_run_id is not None:
+        deployment_id = await session.scalar(
+            select(PaperTradingRunRecord.deployment_id).where(
+                PaperTradingRunRecord.id == predecessor_run_id
+            )
+        )
+    if deployment_id is None:
+        deployment_id = await session.scalar(
+            select(PaperDeploymentRecord.id).where(
+                PaperDeploymentRecord.is_primary.is_(True)
+            )
+        )
+    if deployment_id is None:
+        raise RuntimeError("paper deployment is required before creating a run")
     record = PaperTradingRunRecord(
         id=uuid4(),
+        deployment_id=deployment_id,
         status=PaperRunStatus.ACTIVE.value,
         account_currency=configuration.account_currency,
         initial_cash=initial_cash,

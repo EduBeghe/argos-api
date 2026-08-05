@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -19,6 +20,12 @@ from app.paper.config import (
     SimulationConfiguration,
     quantize_financial,
 )
+from app.paper.decision_evidence import (
+    MLDecisionSnapshot,
+    MLDecisionSnapshotRecord,
+    PaperDecisionIdentityRecord,
+    persist_baseline_decision_identity,
+)
 from app.paper.models import (
     ExecutionCalculation,
     NoTrade,
@@ -28,6 +35,7 @@ from app.paper.models import (
 from app.paper.persistence import (
     PaperPositionRecord,
     PaperTradeRecord,
+    PaperTradingRunRecord,
     get_active_run,
     get_open_position,
 )
@@ -43,7 +51,12 @@ class PaperValuationError(PaperExecutionError):
 
 
 async def execute_decision(
-    *, session: AsyncSession, decision: DecisionSnapshot, executed_at: datetime
+    *,
+    session: AsyncSession,
+    decision: DecisionSnapshot | MLDecisionSnapshot,
+    executed_at: datetime,
+    run_id: UUID | None = None,
+    decision_identity_id: UUID | None = None,
 ) -> PaperTradeRecord | NoTrade:
     if decision.action not in {
         StrategyAction.OPEN_POSITION,
@@ -53,7 +66,15 @@ async def execute_decision(
         raise UnsupportedPaperActionError(
             f"unsupported paper action: {decision.action}"
         )
-    run = await get_active_run(session, currency=DEFAULT_ACCOUNT_CURRENCY, lock=True)
+    run = (
+        await session.scalar(
+            select(PaperTradingRunRecord)
+            .where(PaperTradingRunRecord.id == run_id)
+            .with_for_update()
+        )
+        if run_id is not None
+        else await get_active_run(session, currency=DEFAULT_ACCOUNT_CURRENCY, lock=True)
+    )
     if run is None:
         raise PaperExecutionError("active Paper Trading run not found")
     if decision.decision_timestamp < run.started_at:
@@ -64,9 +85,7 @@ async def execute_decision(
         raise PaperExecutionError("execution timestamp predates the active run")
     if executed_at < decision.decision_timestamp:
         raise PaperExecutionError("execution timestamp predates the Decision Snapshot")
-    persisted_decision = await session.scalar(
-        select(DecisionSnapshotRecord).where(DecisionSnapshotRecord.id == decision.id)
-    )
+    persisted_decision = await _persisted_decision(session, decision)
     if persisted_decision is None:
         raise PaperExecutionError(
             "Decision Snapshot must be persisted before execution"
@@ -82,9 +101,30 @@ async def execute_decision(
         raise PaperExecutionError("Decision Snapshot does not match persisted intent")
     if decision.action is StrategyAction.NO_ACTION:
         return calculate_no_action()
+    if decision_identity_id is None:
+        if isinstance(decision, MLDecisionSnapshot):
+            raise PaperExecutionError(
+                "ML decision identity must be persisted before execution"
+            )
+        decision_identity_id = (
+            await persist_baseline_decision_identity(session, decision.id)
+        ).id
+    identity = await session.get(PaperDecisionIdentityRecord, decision_identity_id)
+    if (
+        identity is None
+        or (
+            isinstance(decision, MLDecisionSnapshot)
+            and identity.ml_snapshot_id != decision.id
+        )
+        or (
+            isinstance(decision, DecisionSnapshot)
+            and identity.baseline_snapshot_id != decision.id
+        )
+    ):
+        raise PaperExecutionError("decision identity does not match persisted intent")
     existing_trade = await session.scalar(
         select(PaperTradeRecord).where(
-            PaperTradeRecord.decision_snapshot_id == decision.id
+            PaperTradeRecord.decision_identity_id == decision_identity_id
         )
     )
     if existing_trade is not None:
@@ -160,6 +200,7 @@ async def execute_decision(
         calculation,
         executed_at,
         config,
+        decision_identity_id=decision_identity_id,
         equity_before=(
             total_equity if decision.action is StrategyAction.OPEN_POSITION else None
         ),
@@ -174,7 +215,7 @@ async def _total_equity(
     session: AsyncSession,
     run_id: UUID,
     cash: Decimal,
-    decision: DecisionSnapshot,
+    decision: DecisionSnapshot | MLDecisionSnapshot,
 ) -> Decimal:
     positions = (
         await session.scalars(
@@ -214,17 +255,21 @@ def _domain(record: PaperPositionRecord) -> PaperPosition:
 
 def _trade(
     run_id: UUID,
-    decision: DecisionSnapshot,
+    decision: DecisionSnapshot | MLDecisionSnapshot,
     position_id: UUID,
     result: ExecutionCalculation,
     executed_at: datetime,
     config: SimulationConfiguration,
+    decision_identity_id: UUID,
     equity_before: Decimal | None,
 ) -> PaperTradeRecord:
     return PaperTradeRecord(
         id=uuid4(),
         run_id=run_id,
-        decision_snapshot_id=decision.id,
+        decision_snapshot_id=(
+            decision.id if isinstance(decision, DecisionSnapshot) else None
+        ),
+        decision_identity_id=decision_identity_id,
         position_id=position_id,
         side=result.side.value,
         asset=decision.asset.value,
@@ -242,4 +287,18 @@ def _trade(
         executed_at=executed_at,
         configuration_version=config.version,
         equity_before=equity_before,
+    )
+
+
+async def _persisted_decision(
+    session: AsyncSession, decision: DecisionSnapshot | MLDecisionSnapshot
+) -> DecisionSnapshotRecord | MLDecisionSnapshotRecord | None:
+    record_type = (
+        MLDecisionSnapshotRecord
+        if isinstance(decision, MLDecisionSnapshot)
+        else DecisionSnapshotRecord
+    )
+    return cast(
+        DecisionSnapshotRecord | MLDecisionSnapshotRecord | None,
+        await session.scalar(select(record_type).where(record_type.id == decision.id)),
     )

@@ -33,9 +33,20 @@ def result(
         datetime(2026, 7, 17, 12, 30, tzinfo=UTC),
         uuid4(),
         uuid4(),
+        uuid4(),
+        "baseline",
         None,
         "no_action",
         skipped,
+    )
+
+
+def baseline_deployment(run_id: UUID) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        strategy_kind="baseline",
+        strategy_specification_id=None,
+        current_run_id=run_id,
     )
 
 
@@ -70,6 +81,11 @@ async def test_job_commits_each_instrument_logs_and_cleans_up() -> None:
         ) as projected,
         patch.object(job, "create_database_engine", return_value=engine),
         patch.object(job, "create_session_factory", return_value=factory),
+        patch.object(
+            job,
+            "_load_active_deployments",
+            AsyncMock(return_value=(baseline_deployment(shared_run_id),)),
+        ),
         patch.object(job, "run_instrument_cycle", run_cycle),
         patch.object(job, "get_run", AsyncMock(return_value=SimpleNamespace())),
         patch.object(
@@ -134,6 +150,11 @@ async def test_snapshot_failure_does_not_rollback_committed_cycles() -> None:
         ),
         patch.object(
             job,
+            "_load_active_deployments",
+            AsyncMock(return_value=(baseline_deployment(shared_run_id),)),
+        ),
+        patch.object(
+            job,
             "run_instrument_cycle",
             AsyncMock(
                 side_effect=[
@@ -186,6 +207,7 @@ async def test_instrument_failure_rolls_back_without_undoing_success() -> None:
     btc_session = AsyncMock()
     eth_session = AsyncMock()
     failure = RuntimeError("BTC evidence unavailable")
+    shared_run_id = uuid4()
     persist_snapshot = AsyncMock()
     with (
         patch.object(job, "configure_logging"),
@@ -194,6 +216,11 @@ async def test_instrument_failure_rolls_back_without_undoing_success() -> None:
             job,
             "create_session_factory",
             return_value=Mock(side_effect=[context(btc_session), context(eth_session)]),
+        ),
+        patch.object(
+            job,
+            "_load_active_deployments",
+            AsyncMock(return_value=(baseline_deployment(shared_run_id),)),
         ),
         patch.object(
             job,

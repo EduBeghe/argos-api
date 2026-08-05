@@ -60,7 +60,8 @@ class PaperTradeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     run_id: UUID
-    decision_snapshot_id: UUID
+    decision_snapshot_id: UUID | None
+    decision_identity_id: UUID
     position_id: UUID
     side: str
     asset: Asset
@@ -119,6 +120,9 @@ class PaperDecisionCycleResponse(BaseModel):
     scheduled_boundary: datetime
     source_score_id: UUID | None
     decision_snapshot_id: UUID | None
+    ml_decision_snapshot_id: UUID | None = None
+    decision_identity_id: UUID | None = None
+    decision_kind: str | None = None
     paper_trade_id: UUID | None
     result: str | None
     started_at: datetime

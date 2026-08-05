@@ -16,6 +16,7 @@ from app.paper.persistence import (
     PaperTradingRunRecord,
     get_active_run,
     get_open_position,
+    get_run,
 )
 
 
@@ -185,8 +186,9 @@ async def value_paper_run(
 
 
 class PersistedPaperPortfolioStateSource:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, run_id: UUID | None = None) -> None:
         self._session = session
+        self._run_id = run_id
 
     async def get_portfolio_state(
         self,
@@ -196,7 +198,11 @@ class PersistedPaperPortfolioStateSource:
         market_type: MarketType,
         interval: Interval,
     ) -> PortfolioState:
-        run = await get_active_run(self._session, currency=DEFAULT_ACCOUNT_CURRENCY)
+        run = (
+            await get_run(self._session, run_id=self._run_id)
+            if self._run_id is not None
+            else await get_active_run(self._session, currency=DEFAULT_ACCOUNT_CURRENCY)
+        )
         if run is None:
             raise PaperPortfolioUnavailableError("active Paper Trading run not found")
         position = await get_open_position(

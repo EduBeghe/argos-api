@@ -193,6 +193,41 @@ class MLExperimentDataset:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class LiveMLFeatureVector:
+    values: NDArray[np.float32]
+    feature_names: tuple[str, ...]
+    source_index: int
+
+
+def build_live_ml_feature_vector(columns: MLCandleColumns) -> LiveMLFeatureVector:
+    """Build the registry vector for the latest closed consecutive candle only."""
+
+    maximum_steps = int(MAXIMUM_HISTORICAL_LOOKBACK.total_seconds() // 300)
+    if len(columns) < maximum_steps:
+        raise MLDatasetError("insufficient bounded history for live ML inference")
+    continuity = continuity_prefix(columns.open_time_ns)
+    source_index = len(columns) - 1
+    start = source_index - maximum_steps + 1
+    if continuity[source_index] != continuity[start]:
+        raise MLDatasetError("live ML inference history contains a candle gap")
+    cache = _SeriesCache(columns, continuity)
+    values = np.asarray(
+        [
+            _feature_series(definition, cache)[source_index]
+            for definition in VARIABLE_REGISTRY
+        ],
+        dtype=np.float32,
+    )
+    if not np.isfinite(values).all():
+        raise MLDatasetError("live ML inference produced non-finite features")
+    return LiveMLFeatureVector(
+        values,
+        tuple(definition.name for definition in VARIABLE_REGISTRY),
+        source_index,
+    )
+
+
 def _rolling_sum(values: NDArray[np.float64], window: int) -> NDArray[np.float64]:
     result = np.full(len(values), np.nan)
     if window <= len(values):
@@ -479,7 +514,7 @@ def _feature_series(
     )
 
 
-def _fingerprint(
+def fingerprint_ml_candle_columns(
     instrument: Instrument, columns: MLCandleColumns, requested_end: datetime
 ) -> str:
     digest = hashlib.sha256()
@@ -621,7 +656,7 @@ def build_ml_experiment_dataset(
         gaps,
         len(VARIABLE_REGISTRY),
         MAXIMUM_HISTORICAL_LOOKBACK,
-        _fingerprint(instrument, selected, requested_end),
+        fingerprint_ml_candle_columns(instrument, selected, requested_end),
     )
     targets = LazyTargetProvider(
         boundaries_ns=boundary_ns,
