@@ -313,6 +313,26 @@ rule, and explanation. `OPEN_POSITION` requests a 15% target allocation,
 leaves the portfolio unchanged. These are requested intents, not executed
 trades; `HOLD` is not an action.
 
+Validated ML Paper deployments use a separate immutable ML Decision Snapshot.
+They do not create synthetic Market Scores or weaken the baseline snapshot
+contract. Paper cycles and Trades reference a common typed decision identity
+that resolves to exactly one baseline or ML snapshot; database constraints
+reject absent, dual, and type-mismatched evidence.
+
+Protected ML final validation and ML Paper decisions share the same UTC-aligned
+30-minute cadence. A configured confidence bucket such as `0.05` is a development
+coverage fraction, not a literal prediction threshold: Argos freezes the
+corresponding absolute-score quantile from pre-2024 development predictions and
+persists that concrete cutoff separately as `signed_score_threshold`. A passed
+deployment serializes the exact pre-2024 fitted model and ordered feature set that
+scored the protected 2024-2026 evidence; protected rows are never used to refit it.
+
+The protected worker and retry endpoint also require an exact frozen validation
+contract: simulation version 2, policy version 1, and a 1,800-second cadence.
+Legacy or otherwise incompatible identities remain readable but fail closed before
+any protected evidence is loaded; operators must enqueue a new current-version
+identity rather than reinterpret or retry legacy evidence.
+
 Read the latest persisted snapshot without triggering generation:
 
 ```sh

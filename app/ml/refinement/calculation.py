@@ -2,6 +2,7 @@ import math
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 from time import perf_counter
+from typing import Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -43,6 +44,14 @@ class RefinementEvaluationResult:
     elapsed_seconds: float
 
 
+class FittedRefinementModel(Protocol):
+    def fit(self, features: object, labels: object) -> object: ...
+    def predict(self, features: object) -> object: ...
+    def predict_proba(self, features: object) -> object: ...
+
+    classes_: object
+
+
 def _selected_columns(
     candidate: PlannedEvaluation,
     training_features: NDArray[np.float32],
@@ -82,7 +91,6 @@ def _fit_predict(
     NDArray[np.float64],
     NDArray[np.int64] | None,
 ]:
-    parameters = dict(candidate.hyperparameters)
     objective = candidate.objective
     regression = objective is PredictionObjective.FUTURE_RETURN_REGRESSION
     labels: NDArray[np.float32] | NDArray[np.int64]
@@ -96,6 +104,38 @@ def _fit_predict(
         )
     else:
         labels = training_y
+    model = fit_refinement_model(
+        candidate=candidate, training_x=training_x, labels=labels, seed=seed
+    )
+    if regression:
+        return (
+            np.asarray(model.predict(training_x), dtype=np.float64),
+            np.asarray(model.predict(validation_x), dtype=np.float64),
+            None,
+        )
+    training_probability = np.asarray(model.predict_proba(training_x), dtype=np.float64)
+    validation_probability = np.asarray(
+        model.predict_proba(validation_x), dtype=np.float64
+    )
+    classes = np.asarray(model.classes_, dtype=np.int64)
+    return (
+        _signed_classification_scores(training_probability, classes, objective),
+        _signed_classification_scores(validation_probability, classes, objective),
+        _predicted_class_labels(validation_probability, classes),
+    )
+
+
+def fit_refinement_model(
+    *,
+    candidate: PlannedEvaluation,
+    training_x: NDArray[np.float32],
+    labels: NDArray[np.float32] | NDArray[np.int64],
+    seed: int,
+) -> FittedRefinementModel:
+    """Fit one frozen engine with the same deterministic production settings."""
+    parameters = dict(candidate.hyperparameters)
+    regression = candidate.objective is PredictionObjective.FUTURE_RETURN_REGRESSION
+    model: object
     if candidate.engine.value == "ridge":
         if regression:
             from sklearn.linear_model import Ridge
@@ -133,23 +173,9 @@ def _fit_predict(
             verbose=False,
             thread_count=1,
         )
-    model.fit(training_x, labels)
-    if regression:
-        return (
-            np.asarray(model.predict(training_x), dtype=np.float64),
-            np.asarray(model.predict(validation_x), dtype=np.float64),
-            None,
-        )
-    training_probability = np.asarray(model.predict_proba(training_x), dtype=np.float64)
-    validation_probability = np.asarray(
-        model.predict_proba(validation_x), dtype=np.float64
-    )
-    classes = np.asarray(model.classes_, dtype=np.int64)
-    return (
-        _signed_classification_scores(training_probability, classes, objective),
-        _signed_classification_scores(validation_probability, classes, objective),
-        _predicted_class_labels(validation_probability, classes),
-    )
+    fitted = cast(FittedRefinementModel, model)
+    fitted.fit(training_x, labels)
+    return fitted
 
 
 def _signed_classification_scores(

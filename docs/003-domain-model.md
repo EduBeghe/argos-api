@@ -107,6 +107,8 @@ A Decision Snapshot is an immutable historical record created every time Argos g
 
 Its purpose is traceability, reproducibility, debugging, audits, comparison between model versions, and later model and Strategy evaluation. A persisted snapshot retains the immutable source Score identity and value, source candle and price, supplied `position_is_open` state, requested sizing, rule, explanation, and applicable versions. It records intent, not execution; an earlier `OPEN_POSITION` Decision is not evidence that a Paper Position exists. A Decision Snapshot is a persisted historical record, not an analytical engine.
 
+This baseline snapshot is not reused for ML. A separate ML Decision Snapshot preserves real model/deployment evidence and ML-specific rules without fabricating a Market Score. Paper Trading associates either snapshot with a common typed decision identity whose two evidence references are mutually exclusive. Existing baseline responses keep their original Decision Snapshot identifiers; ML evidence is exposed through its separate identifier and the shared Paper identity.
+
 ### Paper Account
 
 A Paper Account is a virtual trading account using simulated money. It conceptually contains virtual cash, virtual holdings, open positions, closed positions, realized P&L, unrealized P&L, and Trade history.

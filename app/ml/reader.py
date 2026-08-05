@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.market.catalog import Instrument
 from app.market.persistence import MarketCandleRecord
+from app.ml.registry import MAXIMUM_HISTORICAL_LOOKBACK
 from app.optimization.historical_data import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 from .errors import MLDatasetError
@@ -34,6 +35,50 @@ class MLCandleColumns:
 class MLCandleReadResult:
     columns: MLCandleColumns
     gaps: GapSummary
+
+
+async def read_live_ml_candles(
+    *, session: AsyncSession, instrument: Instrument, boundary: datetime
+) -> MLCandleColumns:
+    """Read only the bounded consecutive context needed for one live prediction."""
+
+    maximum_steps = int(MAXIMUM_HISTORICAL_LOOKBACK.total_seconds() // 300)
+    rows = list(
+        (
+            await session.execute(
+                select(
+                    MarketCandleRecord.open_time,
+                    MarketCandleRecord.close_time,
+                    MarketCandleRecord.open_price,
+                    MarketCandleRecord.high_price,
+                    MarketCandleRecord.low_price,
+                    MarketCandleRecord.close_price,
+                    MarketCandleRecord.base_asset_volume,
+                )
+                .where(
+                    MarketCandleRecord.asset == instrument.asset.value,
+                    MarketCandleRecord.provider == instrument.provider.value,
+                    MarketCandleRecord.market_type == instrument.market_type.value,
+                    MarketCandleRecord.interval == instrument.interval.value,
+                    MarketCandleRecord.close_time <= boundary,
+                )
+                .order_by(MarketCandleRecord.open_time.desc())
+                .limit(maximum_steps)
+            )
+        )
+        .tuples()
+        .all()
+    )
+    rows.reverse()
+    return candle_columns(
+        open_times=[row[0] for row in rows],
+        close_times=[row[1] for row in rows],
+        open_prices=[float(row[2]) for row in rows],
+        high_prices=[float(row[3]) for row in rows],
+        low_prices=[float(row[4]) for row in rows],
+        close_prices=[float(row[5]) for row in rows],
+        volumes=[float(row[6]) for row in rows],
+    )
 
 
 def candle_columns(

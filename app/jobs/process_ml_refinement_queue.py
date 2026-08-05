@@ -14,6 +14,13 @@ from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
 from app.ml.campaign.coordinator import coordinate_next_campaign
 from app.ml.loading import load_ml_development_dataset
+from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
+from app.ml.protected.queue import claim_next as claim_protected_work
+from app.ml.protected.queue import fail_stale_protected_work
+from app.ml.protected.worker import (
+    process_final_validation,
+    process_manifest_reconstruction,
+)
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.identity import DatasetIdentityError, validate_dataset_identity
 from app.ml.refinement.persistence import fail_run, resolve_source
@@ -59,6 +66,70 @@ async def process_once(
     stale_after: timedelta,
 ) -> bool:
     async with factory() as session:
+        await fail_stale_protected_work(session, stale_after=stale_after)
+        manifest = await claim_protected_work(
+            session, MLTemporalManifestRecord, worker_id=worker_id
+        )
+        if manifest is not None:
+            try:
+                await process_manifest_reconstruction(
+                    session, record=manifest, worker_id=worker_id
+                )
+            except Exception as error:
+                await session.rollback()
+                owned = await session.get(MLTemporalManifestRecord, manifest.id)
+                if owned is not None and owned.worker_id == worker_id:
+                    owned.status = "failed"
+                    owned.failure_code = type(error).__name__[:64]
+                    owned.failure_message = (str(error) or "reconstruction failed")[
+                        :512
+                    ]
+                    owned.worker_id = None
+                    owned.claimed_at = None
+                    owned.heartbeat_at = None
+                    await session.commit()
+                logger.exception("Development manifest reconstruction failed")
+            return True
+        validation = await claim_protected_work(
+            session, MLFinalValidationRecord, worker_id=worker_id
+        )
+        if validation is not None:
+            try:
+                await process_final_validation(
+                    session, record=validation, worker_id=worker_id
+                )
+            except Exception as error:
+                await session.rollback()
+                owned_validation = await session.get(
+                    MLFinalValidationRecord, validation.id
+                )
+                if (
+                    owned_validation is not None
+                    and owned_validation.worker_id == worker_id
+                ):
+                    owned_validation.status = "failed"
+                    failure_code = getattr(error, "code", type(error).__name__)
+                    owned_validation.failure_code = str(failure_code)[:64]
+                    owned_validation.failure_message = (
+                        str(error) or "validation failed"
+                    )[:512]
+                    owned_validation.worker_id = None
+                    owned_validation.claimed_at = None
+                    owned_validation.heartbeat_at = None
+                    await session.commit()
+                elif (
+                    owned_validation is not None
+                    and owned_validation.status == "completed"
+                    and owned_validation.classification == "passed"
+                ):
+                    owned_validation.classification = "passed_evidence_artifact_failed"
+                    owned_validation.failure_code = "artifact_creation_failed"
+                    owned_validation.failure_message = (
+                        str(error) or "artifact creation failed"
+                    )[:512]
+                    await session.commit()
+                logger.exception("Protected final validation failed")
+            return True
         await coordinate_next_campaign(session)
         stale_count = await fail_stale_runs(session, stale_after=stale_after)
         if stale_count:

@@ -308,6 +308,8 @@ async def execute_refinement(
                     reused=None,
                     request=request,
                     now=datetime.now(UTC),
+                    development_dataset=development_dataset,
+                    canonical_dataset_fingerprint=identity_metadata.fingerprint,
                 )
                 computed += 1
             if worker_id is not None and not await heartbeat(

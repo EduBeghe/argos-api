@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.database.base import Base
 from app.market import persistence  # noqa: F401
 from app.ml.campaign import models as ml_campaign_models  # noqa: F401
+from app.ml.protected import models as ml_protected_models  # noqa: F401
 from app.ml.refinement import models as ml_refinement_models  # noqa: F401
 from app.ml.screening import models as ml_screening_models  # noqa: F401
 from app.optimization import (
@@ -18,7 +19,11 @@ from app.optimization import (
     targeted_refinement_memory,  # noqa: F401
     walk_forward_memory,  # noqa: F401
 )
-from app.paper import equity_snapshots  # noqa: F401
+from app.paper import (  # noqa: F401
+    decision_evidence,
+    deployment_models,
+    equity_snapshots,
+)
 
 config = context.config
 if config.config_file_name is not None:

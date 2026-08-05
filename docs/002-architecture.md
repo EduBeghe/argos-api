@@ -94,6 +94,8 @@ Decision generation is separate from the five-minute ingestion pipeline. A Railw
 
 A Decision Snapshot is an immutable historical record created whenever Argos generates a decision. The persisted baseline snapshot stores the supplied position state, source candle and market price, immutable source Score identity and value, Decision and requested sizing, applied rule and explanation, and model, Strategy, and configuration versions. An aggregated Argos Score is included only when available and used. A calibrated confidence value may be absent or null; `signal_strength` is score magnitude, not probability or confidence.
 
+Baseline and ML evidence remain separate immutable snapshot types. `DecisionSnapshot` continues to represent only `baseline_long_only` v1 and retains its Market Score foreign key and baseline rules. `MLDecisionSnapshot` records the deployment, Strategy specification, verified model artifact and hash, exact feature order and feature-vector fingerprint, signed prediction, frozen threshold, evaluated candle, fixed-horizon rule, action, and pause-related exit delay. A common Paper decision identity points to exactly one snapshot type. Paper Decision Cycles and Trades use that identity; database XOR and paired foreign-key constraints reject missing, mixed, or mismatched evidence.
+
 Snapshots allow the team to reconstruct why a decision was made and support debugging, model-version comparisons, audits, and later model evaluation. This module persists records; it is not an analytical engine.
 
 ### Paper Trading

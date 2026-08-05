@@ -62,7 +62,8 @@ class PaperPosition:
 class PaperTrade:
     id: UUID
     run_id: UUID
-    decision_snapshot_id: UUID
+    decision_snapshot_id: UUID | None
+    decision_identity_id: UUID
     position_id: UUID
     side: PaperTradeSide
     asset: Asset

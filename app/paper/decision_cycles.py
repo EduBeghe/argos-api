@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -23,6 +24,10 @@ from app.decisions.persistence import DecisionSnapshotRecord, ScoreEvidence
 from app.market.catalog import Instrument
 from app.market.enums import Asset
 from app.market.persistence import MarketCandleRecord
+from app.paper.decision_evidence import (
+    MLDecisionSnapshotRecord,
+    PaperDecisionIdentityRecord,
+)
 from app.paper.persistence import PaperTradeRecord, PaperTradingRunRecord
 from app.scores.persistence import MarketScoreRecord
 from app.strategies.baseline_long_only import (
@@ -79,9 +84,16 @@ class PaperDecisionCycleRecord(Base):
         CheckConstraint(
             "(status = 'processing' AND completed_at IS NULL AND result IS NULL AND "
             "source_score_id IS NULL AND decision_snapshot_id IS NULL AND "
-            "paper_trade_id IS NULL) OR (status = 'completed' AND "
+            "ml_decision_snapshot_id IS NULL AND decision_identity_id IS NULL AND "
+            "decision_kind IS NULL AND paper_trade_id IS NULL) OR "
+            "(status = 'completed' AND "
             "completed_at IS NOT NULL AND result IS NOT NULL AND "
-            "source_score_id IS NOT NULL AND decision_snapshot_id IS NOT NULL AND "
+            "decision_identity_id IS NOT NULL AND "
+            "((decision_kind = 'baseline' AND source_score_id IS NOT NULL AND "
+            "decision_snapshot_id IS NOT NULL AND ml_decision_snapshot_id IS NULL) OR "
+            "(decision_kind = 'ml' AND source_score_id IS NULL AND "
+            "decision_snapshot_id IS NULL AND "
+            "ml_decision_snapshot_id IS NOT NULL)) AND "
             "((result = 'no_action' AND paper_trade_id IS NULL) OR "
             "(result IN ('open_position', 'sell_all') AND "
             "paper_trade_id IS NOT NULL)))",
@@ -89,6 +101,28 @@ class PaperDecisionCycleRecord(Base):
         ),
         UniqueConstraint(
             "decision_snapshot_id", name="uq_paper_cycles_decision_snapshot"
+        ),
+        UniqueConstraint(
+            "ml_decision_snapshot_id", name="uq_paper_cycles_ml_decision_snapshot"
+        ),
+        UniqueConstraint(
+            "decision_identity_id", name="uq_paper_cycles_decision_identity"
+        ),
+        ForeignKeyConstraint(
+            ["decision_identity_id", "decision_snapshot_id"],
+            [
+                "paper_decision_identities.id",
+                "paper_decision_identities.baseline_snapshot_id",
+            ],
+            name="fk_paper_cycles_baseline_identity_pair",
+        ),
+        ForeignKeyConstraint(
+            ["decision_identity_id", "ml_decision_snapshot_id"],
+            [
+                "paper_decision_identities.id",
+                "paper_decision_identities.ml_snapshot_id",
+            ],
+            name="fk_paper_cycles_ml_identity_pair",
         ),
         UniqueConstraint("paper_trade_id", name="uq_paper_cycles_paper_trade"),
         UniqueConstraint(
@@ -129,6 +163,13 @@ class PaperDecisionCycleRecord(Base):
     decision_snapshot_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey(DecisionSnapshotRecord.id)
     )
+    ml_decision_snapshot_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey(MLDecisionSnapshotRecord.id)
+    )
+    decision_identity_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey(PaperDecisionIdentityRecord.id)
+    )
+    decision_kind: Mapped[str | None] = mapped_column(String(16))
     paper_trade_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey(PaperTradeRecord.id)
     )
@@ -189,6 +230,9 @@ async def claim_cycle(
             scheduled_boundary=boundary,
             source_score_id=None,
             decision_snapshot_id=None,
+            ml_decision_snapshot_id=None,
+            decision_identity_id=None,
+            decision_kind=None,
             paper_trade_id=None,
             result=None,
             started_at=started_at,

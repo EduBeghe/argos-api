@@ -12,6 +12,10 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ml.contract import MISSING_DATA_POLICY_VERSION, VARIABLE_REGISTRY_VERSION
+from app.ml.dataset import MLExperimentDataset
+from app.ml.protected.contracts import TEMPORAL_MANIFEST_VERSION
+from app.ml.protected.models import MLTemporalManifestRecord
+from app.ml.protected.temporal import reconstruct_temporal_manifest
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
     MLModelScreeningRunRecord,
@@ -307,6 +311,8 @@ async def persist_evaluation(
     reused: MLRefinementEvaluationRecord | None,
     request: MLRefinementRequest,
     now: datetime,
+    development_dataset: MLExperimentDataset | None = None,
+    canonical_dataset_fingerprint: str | None = None,
 ) -> None:
     if (result is None) == (reused is None):
         raise ValueError("exactly one evaluation source is required")
@@ -336,31 +342,57 @@ async def persist_evaluation(
         }
         for fold in result.folds
     ]
-    session.add(
-        MLRefinementEvaluationRecord(
-            id=uuid4(),
-            run_id=run_id,
-            reused_from_evaluation_id=None,
-            fingerprint=fingerprint,
-            engine=candidate.engine.value,
-            future_duration_seconds=candidate.future_duration_seconds,
-            objective=candidate.objective.value,
-            hyperparameters=dict(candidate.hyperparameters),
-            feature_policy={
-                "strategy": candidate.feature_strategy,
-                "variables": candidate.explicit_variables,
-                "top_k": candidate.top_k,
-            },
-            confidence_buckets=[str(item) for item in request.confidence_buckets],
-            fold_evidence=folds,
-            aggregate_metrics=_json_safe(result.aggregate_metrics),
-            classification=result.classification.value,
-            classification_version=ML_REFINEMENT_CLASSIFICATION_VERSION,
-            failed_rules=list(result.failed_rules),
-            elapsed_seconds=decimal_metric(result.elapsed_seconds),
-            created_at=now,
-        )
+    record = MLRefinementEvaluationRecord(
+        id=uuid4(),
+        run_id=run_id,
+        reused_from_evaluation_id=None,
+        fingerprint=fingerprint,
+        engine=candidate.engine.value,
+        future_duration_seconds=candidate.future_duration_seconds,
+        objective=candidate.objective.value,
+        hyperparameters=dict(candidate.hyperparameters),
+        feature_policy={
+            "strategy": candidate.feature_strategy,
+            "variables": candidate.explicit_variables,
+            "top_k": candidate.top_k,
+        },
+        confidence_buckets=[str(item) for item in request.confidence_buckets],
+        fold_evidence=folds,
+        aggregate_metrics=_json_safe(result.aggregate_metrics),
+        classification=result.classification.value,
+        classification_version=ML_REFINEMENT_CLASSIFICATION_VERSION,
+        failed_rules=list(result.failed_rules),
+        elapsed_seconds=decimal_metric(result.elapsed_seconds),
+        created_at=now,
     )
+    session.add(record)
+    if (
+        development_dataset is not None
+        and canonical_dataset_fingerprint is not None
+        and len(result.folds) == len(development_dataset.folds)
+    ):
+        manifest = reconstruct_temporal_manifest(
+            dataset=development_dataset,
+            evaluation=record,
+            canonical_dataset_fingerprint=canonical_dataset_fingerprint,
+        )
+        session.add(
+            MLTemporalManifestRecord(
+                id=uuid4(),
+                evaluation_id=record.id,
+                source="persisted_at_execution",
+                status="completed",
+                manifest_version=TEMPORAL_MANIFEST_VERSION,
+                split_policy_version=TEMPORAL_MANIFEST_VERSION,
+                dataset_fingerprint=canonical_dataset_fingerprint,
+                manifest_fingerprint=manifest.fingerprint,
+                manifest=manifest.payload,
+                fingerprint_verified=True,
+                counts_verified=True,
+                created_at=now,
+                completed_at=now,
+            )
+        )
     await session.commit()
 
 

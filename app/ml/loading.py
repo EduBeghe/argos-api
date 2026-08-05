@@ -6,9 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.market.catalog import Instrument
 
 from .contract import DEVELOPMENT_START, FINAL_TEST_END, FINAL_TEST_START
-from .dataset import MLDatasetMetadata, MLExperimentDataset, build_ml_experiment_dataset
-from .gaps import datetime_to_ns, ns_to_datetime
+from .dataset import (
+    MLDatasetMetadata,
+    MLExperimentDataset,
+    build_ml_experiment_dataset,
+    fingerprint_ml_candle_columns,
+)
+from .gaps import datetime_to_ns, ns_to_datetime, summarize_gaps
 from .reader import read_ml_experiment_candles
+from .registry import MAXIMUM_HISTORICAL_LOOKBACK, VARIABLE_REGISTRY
 
 ML_EXPERIMENT_HISTORY_START = DEVELOPMENT_START
 ML_EXPERIMENT_HISTORY_END = FINAL_TEST_END
@@ -53,12 +59,32 @@ async def load_canonical_ml_experiment_metadata(
 ) -> MLDatasetMetadata:
     """Rebuild canonical identity and release its full calculation arrays."""
 
-    canonical = await load_canonical_ml_experiment_dataset(
-        session=session, instrument=instrument
+    candles = await read_ml_experiment_candles(
+        session=session,
+        instrument=instrument,
+        start=ML_EXPERIMENT_HISTORY_START,
+        end=ML_EXPERIMENT_HISTORY_END,
     )
-    metadata = canonical.metadata
-    del canonical
-    return metadata
+    columns = candles.columns
+    gaps = summarize_gaps(columns.open_time_ns)
+    return MLDatasetMetadata(
+        instrument=instrument,
+        requested_start=ML_EXPERIMENT_HISTORY_START,
+        requested_end=ML_EXPERIMENT_HISTORY_END,
+        actual_start=ns_to_datetime(int(columns.open_time_ns[0]))
+        if len(columns.open_time_ns)
+        else None,
+        actual_end=ns_to_datetime(int(columns.open_time_ns[-1]))
+        if len(columns.open_time_ns)
+        else None,
+        candle_count=len(columns.open_time_ns),
+        gaps=gaps,
+        feature_count=len(VARIABLE_REGISTRY),
+        maximum_historical_lookback=MAXIMUM_HISTORICAL_LOOKBACK,
+        fingerprint=fingerprint_ml_candle_columns(
+            instrument, columns, ML_EXPERIMENT_HISTORY_END
+        ),
+    )
 
 
 async def load_ml_development_dataset(
