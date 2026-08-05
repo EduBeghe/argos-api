@@ -19,7 +19,10 @@ from app.ml.contract import DEVELOPMENT_START, FINAL_TEST_END, FINAL_TEST_START
 from app.ml.dataset import MLDatasetMetadata, build_ml_experiment_dataset
 from app.ml.reader import candle_columns
 from app.ml.refinement import service as refinement_service
-from app.ml.refinement.calculation import RefinementEvaluationResult
+from app.ml.refinement.calculation import (
+    RefinementEvaluationResult,
+    RefinementFoldResult,
+)
 from app.ml.refinement.contracts import MLRefinementRequest, RefinementClassification
 from app.ml.refinement.identity import DatasetFingerprintChanged
 from app.ml.refinement.models import (
@@ -281,6 +284,119 @@ async def test_persistence_reuse_and_read_only_api(
             select(func.count(MLRefinementEvaluationRecord.id))
         )
         assert evaluation_count == 1
+
+
+async def test_persistence_canonicalizes_new_bucket_identity_but_copies_legacy_reuse(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    payload = request(source_run_id, source_result_id).model_dump(mode="json")
+    payload["confidence_buckets"] = ["0.05", "0.10", "0.20"]
+    refinement_request = MLRefinementRequest.model_validate(payload)
+    plan = build_refinement_plan(refinement_request)
+    versions = library_versions()
+    async with factory() as session:
+        first_run = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key="c" * 64,
+            dataset_fingerprint="d" * 64,
+            versions=versions,
+            now=NOW,
+        )
+        result = RefinementEvaluationResult(
+            plan.evaluations[0],
+            (
+                RefinementFoldResult(
+                    "fold-1",
+                    100,
+                    50,
+                    (),
+                    {"unrelated_metric": 0.12345678901234567},
+                    (
+                        {
+                            "fraction": 0.05,
+                            "coverage": 0.12345678901234567,
+                        },
+                    ),
+                    0.003,
+                ),
+            ),
+            {
+                "confidence_bucket_aggregates": (
+                    {"fraction": 0.1, "median_net_return": 0.012345678901234567},
+                ),
+                "selected_confidence_bucket": {
+                    "fraction": 0.2,
+                    "median_net_return": 0.012345678901234567,
+                },
+                "unrelated_metric": 0.012345678901234567,
+            },
+            RefinementClassification.INCOMPLETE,
+            ("incomplete_fold_count",),
+            0.1,
+        )
+        await persist_evaluation(
+            session=session,
+            run_id=first_run.id,
+            fingerprint="p" * 64,
+            result=result,
+            reused=None,
+            request=refinement_request,
+            now=NOW,
+        )
+        persisted = await session.scalar(
+            select(MLRefinementEvaluationRecord).where(
+                MLRefinementEvaluationRecord.run_id == first_run.id
+            )
+        )
+        assert persisted is not None
+        assert persisted.fold_evidence[0]["confidence_metrics"] == [
+            {"fraction": "0.05", "coverage": "0.123456789012345660"}
+        ]
+        aggregates = persisted.aggregate_metrics["confidence_bucket_aggregates"]
+        assert isinstance(aggregates, list)
+        assert aggregates[0]["fraction"] == "0.10"
+        selected = persisted.aggregate_metrics["selected_confidence_bucket"]
+        assert isinstance(selected, dict)
+        assert selected["fraction"] == "0.20"
+        assert persisted.aggregate_metrics["unrelated_metric"] == (
+            "0.012345678901234567"
+        )
+
+        selected["fraction"] = "0.200000000000000000"
+        legacy_metrics = dict(persisted.aggregate_metrics)
+        legacy_metrics["selected_confidence_bucket"] = selected
+        persisted.aggregate_metrics = legacy_metrics
+        await session.commit()
+        second_run = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key="r" * 64,
+            dataset_fingerprint="d" * 64,
+            versions=versions,
+            now=NOW,
+        )
+        await persist_evaluation(
+            session=session,
+            run_id=second_run.id,
+            fingerprint="unused-for-reuse",
+            result=None,
+            reused=persisted,
+            request=refinement_request,
+            now=NOW,
+        )
+        copied = await session.scalar(
+            select(MLRefinementEvaluationRecord).where(
+                MLRefinementEvaluationRecord.run_id == second_run.id
+            )
+        )
+        assert copied is not None
+        copied_selected = copied.aggregate_metrics["selected_confidence_bucket"]
+        assert isinstance(copied_selected, dict)
+        assert copied_selected["fraction"] == "0.200000000000000000"
 
 
 async def test_failed_run_retains_complete_evaluations_for_retry(

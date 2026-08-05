@@ -13,6 +13,7 @@ from app.ml.campaign.models import (
 from app.ml.contract import temporal_fold_definitions
 from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementRunRecord
 
+from .contracts import ConfidenceBucketContractError, canonicalize_confidence_bucket
 from .models import MLTemporalManifestRecord
 from .schemas import CampaignFamilyAuditResponse, IntegritySection
 
@@ -111,12 +112,14 @@ async def assemble_family_audit(
         if evaluation
         else None
     )
-    if evaluation and (
-        not isinstance(selected, dict)
-        or selected.get("fraction") is None
-        or str(selected.get("fraction")) not in evaluation.confidence_buckets
-    ):
-        evidence_failures.append("selected_confidence_bucket_mismatch")
+    if evaluation:
+        try:
+            canonicalize_confidence_bucket(
+                selected.get("fraction") if isinstance(selected, dict) else None,
+                evaluation.confidence_buckets,
+            )
+        except ConfidenceBucketContractError:
+            evidence_failures.append("selected_confidence_bucket_mismatch")
     diagnostic = None
     if evaluation:
         nominal = sum(_integer(item.get("validation_row_count")) for item in folds)

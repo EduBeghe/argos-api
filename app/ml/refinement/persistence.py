@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ml.contract import MISSING_DATA_POLICY_VERSION, VARIABLE_REGISTRY_VERSION
 from app.ml.dataset import MLExperimentDataset
-from app.ml.protected.contracts import TEMPORAL_MANIFEST_VERSION
+from app.ml.protected.contracts import (
+    TEMPORAL_MANIFEST_VERSION,
+    canonicalize_confidence_bucket,
+)
 from app.ml.protected.models import MLTemporalManifestRecord
 from app.ml.protected.temporal import reconstruct_temporal_manifest
 from app.ml.screening.models import (
@@ -302,6 +305,47 @@ def _json_safe(value: object) -> object:
     return value
 
 
+def _canonical_fraction(value: object, configured: list[str]) -> str:
+    persisted = str(decimal_metric(value)) if isinstance(value, float) else value
+    return str(canonicalize_confidence_bucket(persisted, configured))
+
+
+def _canonical_confidence_metrics(metrics: object, configured: list[str]) -> object:
+    if not isinstance(metrics, (list, tuple)):
+        return _json_safe(metrics)
+    return [
+        {
+            **{
+                str(key): _json_safe(value)
+                for key, value in item.items()
+                if key != "fraction"
+            },
+            "fraction": _canonical_fraction(item.get("fraction"), configured),
+        }
+        if isinstance(item, dict)
+        else _json_safe(item)
+        for item in metrics
+    ]
+
+
+def _canonical_aggregate_metrics(
+    metrics: dict[str, object], configured: list[str]
+) -> dict[str, object]:
+    persisted = cast(dict[str, object], _json_safe(metrics))
+    aggregates = metrics.get("confidence_bucket_aggregates")
+    if aggregates is not None:
+        persisted["confidence_bucket_aggregates"] = _canonical_confidence_metrics(
+            aggregates, configured
+        )
+    selected = metrics.get("selected_confidence_bucket")
+    if isinstance(selected, dict):
+        persisted["selected_confidence_bucket"] = {
+            **cast(dict[str, object], _json_safe(selected)),
+            "fraction": _canonical_fraction(selected.get("fraction"), configured),
+        }
+    return persisted
+
+
 async def persist_evaluation(
     *,
     session: AsyncSession,
@@ -334,11 +378,14 @@ async def persist_evaluation(
         return
     assert result is not None
     candidate = result.candidate
+    configured_buckets = [str(item) for item in request.confidence_buckets]
     folds = [
         {
             **asdict(fold),
             "metrics": _json_safe(fold.metrics),
-            "confidence_metrics": _json_safe(fold.confidence_metrics),
+            "confidence_metrics": _canonical_confidence_metrics(
+                fold.confidence_metrics, configured_buckets
+            ),
         }
         for fold in result.folds
     ]
@@ -356,9 +403,11 @@ async def persist_evaluation(
             "variables": candidate.explicit_variables,
             "top_k": candidate.top_k,
         },
-        confidence_buckets=[str(item) for item in request.confidence_buckets],
+        confidence_buckets=configured_buckets,
         fold_evidence=folds,
-        aggregate_metrics=_json_safe(result.aggregate_metrics),
+        aggregate_metrics=_canonical_aggregate_metrics(
+            result.aggregate_metrics, configured_buckets
+        ),
         classification=result.classification.value,
         classification_version=ML_REFINEMENT_CLASSIFICATION_VERSION,
         failed_rules=list(result.failed_rules),

@@ -1,7 +1,7 @@
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, InvalidOperation
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -21,12 +21,15 @@ from .contracts import (
     DEVELOPMENT_MANIFEST_RECONSTRUCTION_VERSION,
     FINAL_VALIDATION_POLICY_VERSION,
     FINAL_VALIDATION_SIMULATION_VERSION,
-    SUPPORTED_CONFIDENCE_BUCKET_FRACTIONS,
     TEMPORAL_MANIFEST_VERSION,
+    ConfidenceBucketContractError,
     FinalValidationContractError,
+    canonicalize_confidence_bucket,
     validate_final_validation_contract,
 )
 from .models import MLFinalValidationRecord, MLTemporalManifestRecord
+
+logger = logging.getLogger(__name__)
 
 
 class ProtectedWorkError(RuntimeError):
@@ -169,14 +172,6 @@ async def enqueue_final_validation(
         raise ProtectedWorkError(
             "development_manifest_not_ready", "a valid development manifest is required"
         )
-    audit = await assemble_family_audit(
-        session, campaign_id=campaign_id, family_id=family_id
-    )
-    if audit is None or not audit.overall_valid:
-        raise ProtectedWorkError(
-            "development_manifest_not_ready",
-            "development evidence or temporal provenance is invalid",
-        )
     selected_confidence_bucket = evaluation.aggregate_metrics.get(
         "selected_confidence_bucket"
     )
@@ -185,17 +180,31 @@ async def enqueue_final_validation(
             "invalid_confidence_bucket", "selected confidence bucket is invalid"
         )
     try:
-        confidence_fraction = Decimal(str(selected_confidence_bucket["fraction"]))
-    except (KeyError, InvalidOperation, ValueError) as error:
+        confidence_fraction = canonicalize_confidence_bucket(
+            selected_confidence_bucket.get("fraction"), evaluation.confidence_buckets
+        )
+    except ConfidenceBucketContractError as error:
         raise ProtectedWorkError(
             "invalid_confidence_bucket", "selected confidence bucket is invalid"
         ) from error
-    if (
-        not confidence_fraction.is_finite()
-        or confidence_fraction not in SUPPORTED_CONFIDENCE_BUCKET_FRACTIONS
-    ):
+    if selected_confidence_bucket.get("fraction") != str(confidence_fraction):
+        logger.info(
+            "accepted legacy confidence-bucket representation",
+            extra={
+                "structured_fields": {
+                    "evaluation_id": str(evaluation.id),
+                    "canonical_fraction": str(confidence_fraction),
+                    "legacy_representation_accepted": True,
+                }
+            },
+        )
+    audit = await assemble_family_audit(
+        session, campaign_id=campaign_id, family_id=family_id
+    )
+    if audit is None or not audit.overall_valid:
         raise ProtectedWorkError(
-            "invalid_confidence_bucket", "selected confidence bucket is unsupported"
+            "development_manifest_not_ready",
+            "development evidence or temporal provenance is invalid",
         )
     frozen: dict[str, object] = {
         "campaign_id": str(campaign_id),
@@ -217,7 +226,10 @@ async def enqueue_final_validation(
         "feature_policy": evaluation.feature_policy,
         "objective": evaluation.objective,
         "future_duration_seconds": evaluation.future_duration_seconds,
-        "selected_confidence_bucket": selected_confidence_bucket,
+        "selected_confidence_bucket": {
+            **selected_confidence_bucket,
+            "fraction": str(confidence_fraction),
+        },
         "confidence_bucket_fraction": str(confidence_fraction),
         "decision_cadence_seconds": DECISION_CADENCE_SECONDS,
         "normalized_configuration": run.normalized_configuration,
