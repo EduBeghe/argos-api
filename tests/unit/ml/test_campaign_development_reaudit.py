@@ -422,4 +422,3 @@ def test_cli_rejects_invalid_candidate_caps(value: str) -> None:
 @pytest.mark.parametrize("value", ["1", "15", "25"])
 def test_cli_accepts_candidate_cap_boundaries(value: str) -> None:
     assert maximum_candidates(value) == int(value)
-

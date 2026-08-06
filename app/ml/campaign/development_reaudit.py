@@ -1091,4 +1091,3 @@ async def build_development_reaudit_report(
     }
     report["report_fingerprint"] = _fingerprint(report)
     return report, counts["invalid"] > 0
-

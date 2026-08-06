@@ -503,4 +503,3 @@ async def test_structural_identity_failure_precedes_market_loading(
     assert str(family_id) in str(raised.value)
     assert "engine" in str(raised.value)
     assert not market_loaded
-
