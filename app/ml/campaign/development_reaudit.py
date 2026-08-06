@@ -14,7 +14,7 @@ from typing import Final
 from uuid import UUID
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.market.catalog import Instrument, InstrumentCapability, resolve_instrument
@@ -56,11 +56,18 @@ from app.ml.protected.validation import (
 )
 from app.ml.reader import MLCandleColumns, read_ml_experiment_candles
 from app.ml.refinement.calculation import _selected_columns, fit_refinement_model
-from app.ml.refinement.contracts import PredictionObjective
+from app.ml.refinement.contracts import (
+    ML_REFINEMENT_CLASSIFICATION_VERSION,
+    ML_REFINEMENT_CONTRACT_VERSION,
+    MLRefinementRequest,
+    PredictionObjective,
+)
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
     MLRefinementRunRecord,
 )
+from app.ml.refinement.persistence import effective_evaluation_fingerprint
+from app.ml.refinement.planning import build_refinement_plan
 from app.ml.registry import VARIABLE_REGISTRY
 from app.ml.screening.config import ScreeningEngine
 from app.ml.screening.models import MLModelScreeningRunRecord
@@ -177,6 +184,15 @@ def normalized_selection_policy() -> dict[str, object]:
     }
 
 
+def validate_maximum_candidates(value: object) -> int:
+    if type(value) is not int or not 1 <= value <= MAXIMUM_CANDIDATES:
+        raise DevelopmentReauditError(
+            "invalid_maximum_candidates",
+            f"maximum candidates must be an integer between 1 and {MAXIMUM_CANDIDATES}",
+        )
+    return value
+
+
 def candidate_evidence(
     family: MLSearchCampaignFamilyRecord,
     evaluation: MLRefinementEvaluationRecord,
@@ -229,6 +245,133 @@ def is_eligible(item: CandidateEvidence) -> bool:
         and item.median_net_return > 0
         and item.worst_net_return >= Decimal("-0.02")
     )
+
+
+def _identity_failure(family_id: UUID, field: str) -> DevelopmentReauditError:
+    return DevelopmentReauditError(
+        "candidate_identity_mismatch",
+        f"family {family_id} has inconsistent persisted identity: {field}",
+    )
+
+
+def _canonical_feature_policy(variant: FeatureVariant) -> dict[str, object]:
+    return {
+        "strategy": "all" if variant is FeatureVariant.ALL else "top_k",
+        "variables": None,
+        "top_k": variant.top_k,
+    }
+
+
+def validate_candidate_scientific_identity(
+    *,
+    family: MLSearchCampaignFamilyRecord,
+    evaluation: MLRefinementEvaluationRecord,
+    run: MLRefinementRunRecord,
+) -> None:
+    """Require one scientific identity across family, evaluation, and run."""
+
+    checks = (
+        (family.best_evaluation_id == evaluation.id, "best_evaluation_id"),
+        (evaluation.run_id == run.id, "evaluation.run_id"),
+        (run.status == "completed" and run.completed_at is not None, "run.status"),
+        (
+            run.contract_version == ML_REFINEMENT_CONTRACT_VERSION,
+            "run.contract_version",
+        ),
+        (
+            run.classification_version == ML_REFINEMENT_CLASSIFICATION_VERSION,
+            "run.classification_version",
+        ),
+        (
+            evaluation.classification_version == ML_REFINEMENT_CLASSIFICATION_VERSION,
+            "evaluation.classification_version",
+        ),
+        (
+            run.source_screening_run_id == family.source_screening_run_id,
+            "source_screening_run_id",
+        ),
+        (run.dataset_fingerprint == family.dataset_fingerprint, "dataset_fingerprint"),
+        (evaluation.engine == family.engine, "engine"),
+        (evaluation.objective == family.objective, "objective"),
+        (
+            evaluation.future_duration_seconds == family.future_duration_seconds,
+            "future_duration_seconds",
+        ),
+    )
+    for valid, field in checks:
+        if not valid:
+            raise _identity_failure(family.id, field)
+
+    try:
+        variant = FeatureVariant(family.feature_variant)
+        request = MLRefinementRequest.model_validate(run.normalized_configuration)
+        plan = build_refinement_plan(request)
+    except (TypeError, ValueError) as error:
+        raise _identity_failure(family.id, "run.normalized_configuration") from error
+
+    request_checks = (
+        (
+            request.source_screening_run_id == family.source_screening_run_id,
+            "run.configuration.source_screening_run_id",
+        ),
+        (
+            tuple(item.value for item in request.engines) == (family.engine,),
+            "run.configuration.engines",
+        ),
+        (
+            request.future_durations_seconds == (family.future_duration_seconds,),
+            "run.configuration.future_durations_seconds",
+        ),
+        (
+            tuple(item.value for item in request.prediction_objectives)
+            == (family.objective,),
+            "run.configuration.prediction_objectives",
+        ),
+        (request.fee_rate == CAMPAIGN_FEE_RATE, "run.configuration.fee_rate"),
+        (
+            request.slippage_rate == CAMPAIGN_SLIPPAGE_RATE,
+            "run.configuration.slippage_rate",
+        ),
+        (
+            request.deterministic_seed == CAMPAIGN_SEED,
+            "run.configuration.deterministic_seed",
+        ),
+    )
+    for valid, field in request_checks:
+        if not valid:
+            raise _identity_failure(family.id, field)
+
+    expected_policy = _canonical_feature_policy(variant)
+    if evaluation.feature_policy != expected_policy:
+        raise _identity_failure(family.id, "feature_policy")
+    planned = next(
+        (
+            item
+            for item in plan.evaluations
+            if effective_evaluation_fingerprint(
+                dataset_fingerprint=run.dataset_fingerprint,
+                candidate_fingerprint=item.fingerprint,
+                engine=item.engine.value,
+                versions=run.library_versions,
+                deterministic_seed=request.deterministic_seed,
+            )
+            == evaluation.fingerprint
+        ),
+        None,
+    )
+    if planned is None:
+        raise _identity_failure(family.id, "evaluation.fingerprint")
+    planned_policy = {
+        "strategy": planned.feature_strategy,
+        "variables": list(planned.explicit_variables)
+        if planned.explicit_variables is not None
+        else None,
+        "top_k": planned.top_k,
+    }
+    if planned_policy != expected_policy:
+        raise _identity_failure(family.id, "planned.feature_policy")
+    if dict(planned.hyperparameters) != evaluation.hyperparameters:
+        raise _identity_failure(family.id, "hyperparameters")
 
 
 def candidate_rank(item: CandidateEvidence) -> tuple[object, ...]:
@@ -580,10 +723,7 @@ async def build_development_reaudit_report(
     campaign_id: UUID,
     maximum_candidates: int = DEFAULT_MAXIMUM_CANDIDATES,
 ) -> tuple[dict[str, object], bool]:
-    if isinstance(maximum_candidates, bool) or not 1 <= maximum_candidates <= 25:
-        raise DevelopmentReauditError(
-            "invalid_maximum_candidates", "maximum candidates must be between 1 and 25"
-        )
+    maximum_candidates = validate_maximum_candidates(maximum_candidates)
     campaign = await session.get(MLSearchCampaignRecord, campaign_id)
     if campaign is None:
         raise DevelopmentReauditError("campaign_not_found", "campaign does not exist")
@@ -712,8 +852,12 @@ async def build_development_reaudit_report(
         and family.current_stage == 4
         and family.objective
         == PredictionObjective.FUTURE_DIRECTION_CLASSIFICATION.value
-        and family.best_evaluation_id is not None
     )
+    missing_best = next(
+        (family for family in stage_four if family.best_evaluation_id is None), None
+    )
+    if missing_best is not None:
+        raise _identity_failure(missing_best.id, "best_evaluation_id")
     evaluation_ids = {family.best_evaluation_id for family in stage_four}
     evaluations = {
         row.id: row
@@ -734,9 +878,9 @@ async def build_development_reaudit_report(
             )
         ).all()
     )
-    child_runs: dict[UUID, set[UUID]] = defaultdict(set)
+    child_runs: dict[UUID, set[tuple[int, UUID]]] = defaultdict(set)
     for child in child_rows:
-        child_runs[child.family_id].add(child.refinement_run_id)
+        child_runs[child.family_id].add((child.stage, child.refinement_run_id))
     run_ids = {evaluation.run_id for evaluation in evaluations.values()}
     runs = {
         row.id: row
@@ -748,27 +892,45 @@ async def build_development_reaudit_report(
             )
         ).all()
     }
+    run_evaluation_counts = {
+        run_id: count
+        for run_id, count in (
+            await session.execute(
+                select(
+                    MLRefinementEvaluationRecord.run_id,
+                    func.count(MLRefinementEvaluationRecord.id),
+                )
+                .where(MLRefinementEvaluationRecord.run_id.in_(run_ids))
+                .group_by(MLRefinementEvaluationRecord.run_id)
+            )
+        ).all()
+    }
     eligible: list[CandidateEvidence] = []
-    malformed: dict[UUID, str] = {}
     for family in stage_four:
         assert family.best_evaluation_id is not None
         evaluation = evaluations.get(family.best_evaluation_id)
         if evaluation is None:
-            malformed[family.id] = "best_evaluation_missing"
-            continue
+            raise _identity_failure(family.id, "best_evaluation_id")
         run = runs.get(evaluation.run_id)
-        if (
-            run is None
-            or evaluation.run_id not in child_runs.get(family.id, set())
-            or run.source_screening_run_id != family.source_screening_run_id
+        if run is None:
+            raise _identity_failure(family.id, "evaluation.run_id")
+        if (family.current_stage, evaluation.run_id) not in child_runs.get(
+            family.id, set()
         ):
-            malformed[family.id] = "best_evaluation_ownership_invalid"
-            continue
+            raise _identity_failure(family.id, "campaign_child.refinement_run_id")
+        validate_candidate_scientific_identity(
+            family=family, evaluation=evaluation, run=run
+        )
+        if (
+            run_evaluation_counts.get(run.id, 0) != run.evaluations_selected
+            or run.evaluations_computed + run.evaluations_reused
+            != run.evaluations_selected
+        ):
+            raise _identity_failure(family.id, "run.completed_evaluations")
         try:
             evidence = candidate_evidence(family, evaluation)
         except ValueError as error:
-            malformed[family.id] = str(error)
-            continue
+            raise _identity_failure(family.id, "selection_evidence") from error
         if is_eligible(evidence):
             eligible.append(evidence)
     eligible.sort(key=candidate_rank)
@@ -888,7 +1050,7 @@ async def build_development_reaudit_report(
             and item.get("development_proxy_pass") is False
             for item in results
         ),
-        "malformed_unselected_stage_four": len(malformed),
+        "malformed_unselected_stage_four": 0,
     }
     report: dict[str, object] = {
         "report_contract_version": REPORT_CONTRACT_VERSION,

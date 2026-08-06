@@ -72,6 +72,14 @@ benchmark, positive median net return, worst net return of at least `-0.02`, and
 canonical persisted confidence bucket. The maximum candidate count is bounded from
 1 through 25.
 
+Before loading candles, the audit verifies that every selected family's immutable
+identity agrees with its best evaluation, stage child, completed refinement run, and
+screening source. This includes the instrument and dataset fingerprint, engine,
+objective, horizon, canonical feature policy, hyperparameters, effective evaluation
+fingerprint, contract versions, costs, and deterministic seed. Missing records,
+incomplete runs, or any disagreement abort the whole report as structural corruption;
+they are never skipped or treated as an economic failure.
+
 Each selected candidate is refit independently for the four accumulating-history
 validation blocks (`2022H1`, `2022H2`, `2023H1`, and `2023H2`). Every model, feature
 selection, and score cutoff uses only that block's training rows. Validation uses UTC

@@ -3,9 +3,11 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import cast
 from uuid import UUID
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.jobs.audit_ml_search_near_misses import maximum_candidates
 from app.ml.campaign.development_reaudit import (
@@ -13,15 +15,24 @@ from app.ml.campaign.development_reaudit import (
     CandidateEvidence,
     DevelopmentReauditError,
     aggregate_blocks,
+    build_development_reaudit_report,
     candidate_evidence,
     candidate_rank,
     funnel_diagnosis,
     is_eligible,
     report_json,
+    validate_candidate_scientific_identity,
+    validate_maximum_candidates,
 )
 from app.ml.campaign.models import MLSearchCampaignFamilyRecord
 from app.ml.protected.simulation import ProtectedSimulationResult
-from app.ml.refinement.models import MLRefinementEvaluationRecord
+from app.ml.refinement.contracts import MLRefinementRequest
+from app.ml.refinement.models import (
+    MLRefinementEvaluationRecord,
+    MLRefinementRunRecord,
+)
+from app.ml.refinement.persistence import effective_evaluation_fingerprint
+from app.ml.refinement.planning import build_refinement_plan
 
 NOW = datetime(2040, 1, 1, tzinfo=UTC)
 
@@ -93,6 +104,90 @@ def evaluation(identifier: int = 1) -> MLRefinementEvaluationRecord:
     )
 
 
+def scientific_graph() -> tuple[
+    MLSearchCampaignFamilyRecord,
+    MLRefinementEvaluationRecord,
+    MLRefinementRunRecord,
+]:
+    source_id = UUID(int=200)
+    result_id = UUID(int=300)
+    request = MLRefinementRequest.model_validate(
+        {
+            "source_screening_run_id": str(source_id),
+            "source_screening_result_id": str(result_id),
+            "engines": ["ridge"],
+            "future_durations_seconds": [1800],
+            "search_space": [
+                {
+                    "engine": "ridge",
+                    "alpha": {"values": [1]},
+                    "fit_intercept": {"values": [True]},
+                }
+            ],
+            "feature_selection": {"strategies": [{"strategy": "all"}]},
+            "prediction_objectives": ["future_direction_classification"],
+            "confidence_buckets": ["0.05", "0.10", "0.20"],
+            "fee_rate": "0.001",
+            "slippage_rate": "0.0005",
+            "maximum_trials": 64,
+            "maximum_runtime_seconds": 3600,
+            "deterministic_seed": 1729,
+        }
+    )
+    planned = build_refinement_plan(request).evaluations[0]
+    run_id = UUID(int=2001)
+    versions = {"scikit-learn": "1.0"}
+    fingerprint = effective_evaluation_fingerprint(
+        dataset_fingerprint="d" * 64,
+        candidate_fingerprint=planned.fingerprint,
+        engine=planned.engine.value,
+        versions=versions,
+        deterministic_seed=request.deterministic_seed,
+    )
+    family_record = family()
+    evaluation_record = evaluation()
+    evaluation_record.run_id = run_id
+    evaluation_record.fingerprint = fingerprint
+    evaluation_record.classification_version = 2
+    evaluation_record.hyperparameters = dict(planned.hyperparameters)
+    run_record = MLRefinementRunRecord(
+        id=run_id,
+        experiment_key="e" * 64,
+        source_screening_run_id=source_id,
+        source_screening_result_id=result_id,
+        status="completed",
+        contract_version=2,
+        classification_version=2,
+        dataset_fingerprint="d" * 64,
+        variable_registry_version=1,
+        missing_data_policy_version=1,
+        library_versions=versions,
+        normalized_configuration=request.normalized_payload(),
+        notes=None,
+        maximum_trials=64,
+        maximum_runtime_seconds=3600,
+        combinations_planned=1,
+        evaluations_computed=1,
+        evaluations_reused=0,
+        evaluations_omitted=0,
+        evaluations_selected=1,
+        budget_exhausted=False,
+        termination_reason="completed",
+        started_at=NOW,
+        completed_at=NOW,
+        failed_at=None,
+        failure_type=None,
+        failure_message=None,
+        worker_id=None,
+        claimed_at=None,
+        heartbeat_at=None,
+        cancellation_requested_at=None,
+        elapsed_seconds=Decimal(1),
+        created_at=NOW,
+    )
+    return family_record, evaluation_record, run_record
+
+
 @pytest.mark.parametrize(
     ("field", "failing", "passing"),
     [
@@ -139,6 +234,67 @@ def test_candidate_ranking_uses_ordinal_then_uuid_for_exact_ties() -> None:
         UUID(int=2),
         UUID(int=3),
     ]
+
+
+def test_scientific_identity_accepts_the_canonical_family_evaluation_and_run() -> None:
+    family_record, evaluation_record, run_record = scientific_graph()
+    validate_candidate_scientific_identity(
+        family=family_record, evaluation=evaluation_record, run=run_record
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("engine", "engine"),
+        ("objective", "objective"),
+        ("horizon", "future_duration_seconds"),
+        ("feature_variant", "feature_policy"),
+        ("dataset", "dataset_fingerprint"),
+        ("ownership", "evaluation.run_id"),
+        ("run_status", "run.status"),
+    ],
+)
+def test_scientific_identity_mismatches_fail_with_stable_field(
+    field: str, expected: str
+) -> None:
+    family_record, evaluation_record, run_record = scientific_graph()
+    if field == "engine":
+        evaluation_record.engine = "lightgbm"
+    elif field == "objective":
+        evaluation_record.objective = "future_return_regression"
+    elif field == "horizon":
+        evaluation_record.future_duration_seconds = 3600
+    elif field == "feature_variant":
+        family_record.feature_variant = "top_k_16"
+    elif field == "dataset":
+        run_record.dataset_fingerprint = "x" * 64
+    elif field == "ownership":
+        evaluation_record.run_id = UUID(int=999)
+    else:
+        run_record.status = "failed"
+        run_record.completed_at = None
+        run_record.failed_at = NOW
+    with pytest.raises(DevelopmentReauditError) as raised:
+        validate_candidate_scientific_identity(
+            family=family_record, evaluation=evaluation_record, run=run_record
+        )
+    assert raised.value.code == "candidate_identity_mismatch"
+    assert str(family_record.id) in str(raised.value)
+    assert expected in str(raised.value)
+
+
+def test_scientific_identity_rejects_noncanonical_evaluation_policy() -> None:
+    family_record, evaluation_record, run_record = scientific_graph()
+    evaluation_record.feature_policy = {
+        "strategy": "top_k",
+        "variables": None,
+        "top_k": 16,
+    }
+    with pytest.raises(DevelopmentReauditError, match="feature_policy"):
+        validate_candidate_scientific_identity(
+            family=family_record, evaluation=evaluation_record, run=run_record
+        )
 
 
 def test_funnel_reconciles_all_dimensions_and_near_miss_stages() -> None:
@@ -228,6 +384,33 @@ def test_exactly_four_accumulating_folds_are_frozen_chronologically() -> None:
         "202301_accumulating",
         "202307_accumulating",
     )
+
+
+@pytest.mark.parametrize("value", [1, 15, 25])
+def test_domain_candidate_cap_accepts_only_inclusive_integer_boundaries(
+    value: int,
+) -> None:
+    assert validate_maximum_candidates(value) == value
+
+
+@pytest.mark.parametrize("value", [True, False, 1.5, Decimal("1"), "1", 0, -1, 26])
+def test_domain_candidate_cap_rejects_non_integer_and_out_of_range_values(
+    value: object,
+) -> None:
+    with pytest.raises(DevelopmentReauditError) as raised:
+        validate_maximum_candidates(value)
+    assert raised.value.code == "invalid_maximum_candidates"
+
+
+@pytest.mark.asyncio
+async def test_domain_candidate_cap_fails_before_repository_access() -> None:
+    with pytest.raises(DevelopmentReauditError) as raised:
+        await build_development_reaudit_report(
+            session=cast(AsyncSession, object()),
+            campaign_id=UUID(int=1),
+            maximum_candidates=cast(int, 1.5),
+        )
+    assert raised.value.code == "invalid_maximum_candidates"
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "26", "1.5", "true", "01"])
