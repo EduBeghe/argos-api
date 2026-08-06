@@ -52,6 +52,48 @@ atomically resets that same refinement run to a clean queued lease while preserv
 its immutable experiment identity and any already persisted reusable evaluation rows.
 Concurrent retry requests are serialized; only one may requeue the campaign.
 
+## Development economic re-audit
+
+A completed `exhaustive_ohlcv_v1` campaign can be diagnosed without starting a new
+search or reading protected evidence:
+
+```sh
+python -m app.jobs.audit_ml_search_near_misses \
+  --campaign-id cf1fee07-143a-4759-bcc4-f662f03a7aa9 \
+  --maximum-candidates 15 \
+  --output development-reaudit.json
+```
+
+The command is read-only. It reconstructs the complete persisted family funnel, then
+selects a deterministic prefix of discarded stage-4 direction-classification
+families. Eligibility requires complete finite evidence, at least 500 observations,
+five positive-net and five favorable-direction folds, four folds beating the
+benchmark, positive median net return, worst net return of at least `-0.02`, and a
+canonical persisted confidence bucket. The maximum candidate count is bounded from
+1 through 25.
+
+Each selected candidate is refit independently for the four accumulating-history
+validation blocks (`2022H1`, `2022H2`, `2023H1`, and `2023H2`). Every model, feature
+selection, and score cutoff uses only that block's training rows. Validation uses UTC
+30-minute decisions and the preceding closed five-minute candle. Each half-year is
+simulated independently from initial cash at 1x, 1.5x, and 2x configured costs and is
+force-liquidated at its block end. Returns are compounded with `Decimal`; drawdown is
+the maximum individual block drawdown. The benchmark is informational only.
+
+The loader uses the half-open development range `[2020-01-01, 2024-01-01)` and never
+reads the 2024-2026 protected period. Output is canonical JSON with no timestamps or
+random identifiers added at runtime, so unchanged persisted evidence produces
+byte-identical reports. Without `--output`, stdout contains only the JSON document;
+logs use stderr. With `--output`, the UTF-8 report is written to that path.
+
+This can be CPU-intensive because each selected immutable configuration is fitted
+four times and simulated at three cost levels. Run it as a one-shot Railway research
+command with sufficient memory. A `development_proxy_pass` only means that this
+development diagnostic met the current final-policy arithmetic gates. It is not
+protected validation, a recommendation, a deployment authorization, or evidence of
+future profitability.
+
 For rollback, stop the research worker and API version using the new endpoints, then
 downgrade one Alembic revision. The downgrade removes only campaign tables and does
 not delete historical screening or refinement evidence.
+
