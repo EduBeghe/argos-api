@@ -930,3 +930,9 @@ discard reasons. It never consumes the protected 2024-2026 final-test period.
 
 See [Exhaustive OHLCV ML Search Campaign](docs/ml-search-campaign.md) for API, CLI,
 Railway deployment, monitoring, cancellation, outcomes, and rollback.
+
+The independently versioned `economic_policy_search_v2` preset adds a bounded
+economic strategy-policy search and immutable calendar-2024 qualification while
+structurally reserving all 2025 evidence. The same documentation describes its
+request, temporal protocol, qualification endpoints, and one-shot enqueue command.
+

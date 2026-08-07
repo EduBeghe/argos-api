@@ -8,6 +8,7 @@ MISSING_DATA_POLICY_VERSION = 1
 DEVELOPMENT_START = datetime(2020, 1, 1, tzinfo=UTC)
 DEVELOPMENT_END = datetime(2024, 1, 1, tzinfo=UTC)
 FINAL_TEST_START = DEVELOPMENT_END
+QUALIFICATION_END = datetime(2025, 1, 1, tzinfo=UTC)
 FINAL_TEST_END = datetime(2026, 1, 1, tzinfo=UTC)
 DECISION_INTERVAL = timedelta(minutes=30)
 CANDLE_INTERVAL = timedelta(minutes=5)
@@ -99,3 +100,4 @@ def temporal_fold_definitions() -> tuple[TemporalFoldDefinition, ...]:
                 )
             )
     return tuple(folds)
+

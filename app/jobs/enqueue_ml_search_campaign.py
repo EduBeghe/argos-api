@@ -11,20 +11,27 @@ from app.ml.campaign.contracts import (
     CAMPAIGN_PRESET,
     DEFAULT_MAXIMUM_EVALUATIONS,
     DEFAULT_MAXIMUM_RUNTIME_SECONDS,
+    ECONOMIC_POLICY_SEARCH_V2_PRESET,
     CampaignContract,
     CampaignRequest,
+    EconomicPolicySearchV2Contract,
 )
 from app.ml.campaign.service import enqueue_campaign, preview_campaign
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Enqueue a durable exhaustive OHLCV ML search campaign"
+        description="Enqueue a durable versioned ML search campaign"
     )
     parser.add_argument(
         "--source-screening-run-id", action="append", type=UUID, required=True
     )
-    parser.add_argument("--preset", choices=(CAMPAIGN_PRESET,), default=CAMPAIGN_PRESET)
+    parser.add_argument(
+        "--preset",
+        choices=(CAMPAIGN_PRESET, ECONOMIC_POLICY_SEARCH_V2_PRESET),
+        default=CAMPAIGN_PRESET,
+    )
+    parser.add_argument("--seed-family-id", action="append", type=UUID, default=[])
     parser.add_argument(
         "--maximum-evaluations", type=int, default=DEFAULT_MAXIMUM_EVALUATIONS
     )
@@ -41,6 +48,7 @@ async def run(args: argparse.Namespace) -> None:
     request = CampaignRequest(
         source_screening_run_ids=tuple(args.source_screening_run_id),
         preset=args.preset,
+        seed_family_ids=tuple(args.seed_family_id),
         maximum_evaluations=args.maximum_evaluations,
         maximum_runtime_seconds=args.maximum_runtime_seconds,
     )
@@ -65,7 +73,11 @@ async def run(args: argparse.Namespace) -> None:
                 ],
                 "family_count": family_count,
                 "minimum_stage_1_evaluations": family_count,
-                "contract": CampaignContract().model_dump(mode="json"),
+                "contract": (
+                    EconomicPolicySearchV2Contract()
+                    if args.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
+                    else CampaignContract()
+                ).model_dump(mode="json"),
                 "limits": {
                     "maximum_evaluations": request.maximum_evaluations,
                     "maximum_runtime_seconds": request.maximum_runtime_seconds,
@@ -94,3 +106,4 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+

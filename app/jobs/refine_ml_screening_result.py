@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,7 @@ from app.ml.dataset import MLDatasetMetadata
 from app.ml.loading import (
     RefinementDatasetInputs,
     load_canonical_ml_experiment_metadata,
+    load_ml_development_dataset,
     load_refinement_dataset_inputs,
 )
 from app.ml.refinement.contracts import MLRefinementRequest
@@ -62,6 +64,15 @@ async def load_refinement_identity_metadata(
     session: AsyncSession, request: MLRefinementRequest
 ) -> MLDatasetMetadata:
     instrument = await resolve_refinement_instrument(session, request)
+    if request.economic_policy_search is not None:
+        source, _ = await resolve_source(session, request)
+        development = await load_ml_development_dataset(
+            session=session, instrument=instrument
+        )
+        return replace(
+            development.metadata,
+            fingerprint=source.dataset_fingerprint,
+        )
     return await load_canonical_ml_experiment_metadata(
         session=session, instrument=instrument
     )
@@ -71,6 +82,18 @@ async def load_refinement_inputs(
     session: AsyncSession, request: MLRefinementRequest
 ) -> RefinementDatasetInputs:
     instrument = await resolve_refinement_instrument(session, request)
+    if request.economic_policy_search is not None:
+        source, _ = await resolve_source(session, request)
+        development = await load_ml_development_dataset(
+            session=session, instrument=instrument
+        )
+        return RefinementDatasetInputs(
+            replace(
+                development.metadata,
+                fingerprint=source.dataset_fingerprint,
+            ),
+            development,
+        )
     return await load_refinement_dataset_inputs(session=session, instrument=instrument)
 
 
@@ -153,3 +176,4 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+

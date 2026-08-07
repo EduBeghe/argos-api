@@ -13,7 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import get_settings
 from app.ml.campaign import planning as campaign_planning
 from app.ml.campaign import service as campaign_service
-from app.ml.campaign.contracts import FAMILIES_PER_INSTRUMENT, CampaignRequest
+from app.ml.campaign.contracts import (
+    ECONOMIC_POLICY_SEARCH_V2_PRESET,
+    ECONOMIC_V2_DIVERSIFIED_FAMILIES,
+    FAMILIES_PER_INSTRUMENT,
+    CampaignRequest,
+)
 from app.ml.campaign.coordinator import coordinate_next_campaign
 from app.ml.campaign.models import (
     MLSearchCampaignChildRecord,
@@ -24,6 +29,7 @@ from app.ml.campaign.models import (
 from app.ml.campaign.planning import CampaignFamily, SourceInstrument
 from app.ml.campaign.service import (
     CampaignConflictError,
+    CampaignSourceError,
     cancel_campaign,
     enqueue_campaign,
     preview_campaign,
@@ -493,6 +499,63 @@ async def test_enqueue_flushes_parent_before_3600_children_and_is_idempotent(
                 .where(MLSearchCampaignFamilyRecord.campaign_id == first.campaign.id)
             )
             == FAMILIES_PER_INSTRUMENT
+        )
+
+
+async def test_v2_enqueue_is_bounded_persisted_and_idempotent(
+    enqueue_factory: tuple[async_sessionmaker[AsyncSession], UUID],
+) -> None:
+    sessions, source_id = enqueue_factory
+    request = CampaignRequest(
+        source_screening_run_ids=(source_id,),
+        preset=ECONOMIC_POLICY_SEARCH_V2_PRESET,
+        maximum_evaluations=ECONOMIC_V2_DIVERSIFIED_FAMILIES,
+    )
+    async with sessions() as session:
+        first = await enqueue_campaign(session, request, now=NOW)
+        second = await enqueue_campaign(session, request, now=NOW)
+        families = tuple(
+            (
+                await session.scalars(
+                    select(MLSearchCampaignFamilyRecord)
+                    .where(
+                        MLSearchCampaignFamilyRecord.campaign_id == first.campaign.id
+                    )
+                    .order_by(MLSearchCampaignFamilyRecord.deterministic_ordinal)
+                )
+            ).all()
+        )
+    assert first.created is True
+    assert second.created is False
+    assert second.campaign.id == first.campaign.id
+    assert len(families) == ECONOMIC_V2_DIVERSIFIED_FAMILIES
+    assert {item.preset for item in families} == {ECONOMIC_POLICY_SEARCH_V2_PRESET}
+    assert {item.search_track for item in families} == {"diversified"}
+    assert len({item.fingerprint for item in families}) == len(families)
+
+
+async def test_v2_invalid_seed_rejects_the_whole_enqueue_without_writes(
+    enqueue_factory: tuple[async_sessionmaker[AsyncSession], UUID],
+) -> None:
+    sessions, source_id = enqueue_factory
+    request = CampaignRequest(
+        source_screening_run_ids=(source_id,),
+        preset=ECONOMIC_POLICY_SEARCH_V2_PRESET,
+        seed_family_ids=(uuid4(),),
+        maximum_evaluations=432,
+    )
+    async with sessions() as session:
+        with pytest.raises(CampaignSourceError, match="seed families do not exist"):
+            await enqueue_campaign(session, request, now=NOW)
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignSourceRecord)
+                .where(
+                    MLSearchCampaignSourceRecord.source_screening_run_id == source_id
+                )
+            )
+            == 0
         )
 
 
@@ -1018,3 +1081,4 @@ async def test_other_evidence_failure_still_blocks_manifest_enqueue(
             )
             == 0
         )
+

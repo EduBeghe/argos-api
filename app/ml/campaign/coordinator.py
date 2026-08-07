@@ -15,6 +15,7 @@ from app.ml.refinement.contracts import (
     ML_REFINEMENT_CLASSIFICATION_VERSION,
     ML_REFINEMENT_CONTRACT_VERSION,
     AllFeatures,
+    EconomicPolicySearchConfiguration,
     FeatureSelectionSearch,
     MLRefinementRequest,
     TopKFeatures,
@@ -34,11 +35,28 @@ from .contracts import (
     CAMPAIGN_FEE_RATE,
     CAMPAIGN_SEED,
     CAMPAIGN_SLIPPAGE_RATE,
+    ECONOMIC_POLICY_SEARCH_V2_PRESET,
+    ECONOMIC_V2_CONFIDENCE_FRACTIONS,
+    ECONOMIC_V2_HOLDING_MULTIPLIERS,
+    ECONOMIC_V2_QUALIFICATION_END,
+    ECONOMIC_V2_QUALIFICATION_VERSION,
+    ECONOMIC_V2_REGIME_POLICIES,
+    ECONOMIC_V2_SEED,
+    ECONOMIC_V2_STRATEGY_POLICY_VERSION,
     STAGE_TRIALS,
     FeatureVariant,
     campaign_search_spaces,
 )
+from .economic_v2_promotion import (
+    EconomicV2Evidence,
+    capped_economic_v2_promotions,
+    economic_v2_rank,
+    is_economic_v2_development_candidate,
+)
+from .economic_v2_queue import qualification_identity
 from .models import (
+    MLEconomicQualificationCampaignRecord,
+    MLEconomicQualificationRecord,
     MLSearchCampaignChildRecord,
     MLSearchCampaignFamilyRecord,
     MLSearchCampaignRecord,
@@ -68,6 +86,13 @@ def _integer(value: object) -> int:
 class SelectedEconomicEvidence:
     evaluation: MLRefinementEvaluationRecord
     evidence: EconomicEvidence
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedEconomicV2Evidence:
+    evaluation: MLRefinementEvaluationRecord
+    evidence: EconomicV2Evidence
+    policy: dict[str, object]
 
 
 def _missing_last_descending(value: Decimal | None) -> Decimal:
@@ -112,6 +137,38 @@ def select_economic_evidence(
             _integer(best.aggregate_metrics.get("complete_fold_count", 0)) == 7,
         ),
     )
+
+
+def select_economic_v2_evidence(
+    family: MLSearchCampaignFamilyRecord,
+    rows: tuple[MLRefinementEvaluationRecord, ...],
+) -> SelectedEconomicV2Evidence:
+    candidates: list[SelectedEconomicV2Evidence] = []
+    for row in rows:
+        policy = _mapping(row.aggregate_metrics.get("selected_economic_policy_v2"))
+        if not policy:
+            continue
+        evidence = EconomicV2Evidence(
+            family.fingerprint,
+            str(policy["policy_fingerprint"]),
+            str(family.source_screening_run_id),
+            family.engine,
+            family.objective,
+            _integer(policy["eligible_observations"]),
+            _integer(policy["round_trips"]),
+            _integer(policy["positive_net_folds"]),
+            _integer(policy["folds_beating_buy_and_hold"]),
+            Decimal(str(policy["median_net_return"])),
+            Decimal(str(policy["worst_net_return"])),
+            Decimal(str(policy["maximum_drawdown"])),
+            _integer(policy["inactive_folds"]),
+            Decimal(str(policy["compounded_return_1_5x"])),
+            Decimal(str(policy["compounded_return_2x"])),
+        )
+        candidates.append(SelectedEconomicV2Evidence(row, evidence, policy))
+    if not candidates:
+        raise ValueError("campaign v2 child has no strategy-policy evidence")
+    return min(candidates, key=lambda item: economic_v2_rank(item.evidence))
 
 
 async def _active_shared_dependents(
@@ -230,7 +287,11 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
             message=f"child refinement run {run.id} has incomplete evidence",
         )
         return True
-    selected_evidence = select_economic_evidence(family, evaluations)
+    selected_evidence = (
+        select_economic_v2_evidence(family, evaluations)
+        if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
+        else select_economic_evidence(family, evaluations)
+    )
     evidence = selected_evidence.evidence
     family.current_stage = child.stage
     family.evaluations_completed = len(evaluations)
@@ -238,20 +299,43 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
         len(evaluations) if child.reuses_existing_run else run.evaluations_reused
     )
     family.best_evaluation_id = selected_evidence.evaluation.id
-    family.best_metrics = {
-        "observations": evidence.observations,
-        "favorable_direction_folds": evidence.favorable_direction_folds,
-        "positive_net_folds": evidence.positive_net_folds,
-        "folds_beating_benchmark": evidence.folds_beating_benchmark,
-        "median_net_return": str(evidence.median_net_return)
-        if evidence.median_net_return is not None
-        else None,
-        "worst_net_return": str(evidence.worst_net_return)
-        if evidence.worst_net_return is not None
-        else None,
-        "promising_configurations": evidence.promising_configurations,
-        "complete_and_finite": evidence.complete_and_finite,
-    }
+    if isinstance(evidence, EconomicV2Evidence):
+        family.best_metrics = {
+            "policy_fingerprint": evidence.policy_fingerprint,
+            "observations": evidence.observations,
+            "round_trips": evidence.round_trips,
+            "positive_net_folds": evidence.positive_net_folds,
+            "folds_beating_benchmark": evidence.folds_beating_benchmark,
+            "median_net_return": str(evidence.median_net_return),
+            "worst_net_return": str(evidence.worst_net_return),
+            "maximum_drawdown": str(evidence.maximum_drawdown),
+            "inactive_folds": evidence.inactive_folds,
+            "compounded_return_1_5x": str(evidence.compounded_return_1_5x),
+            "compounded_return_2x": str(evidence.compounded_return_2x),
+            "complete_and_finite": evidence.complete_and_finite,
+        }
+        assert isinstance(selected_evidence, SelectedEconomicV2Evidence)
+        family.selected_policy = selected_evidence.policy
+        family.selected_policy_fingerprint = evidence.policy_fingerprint
+    else:
+        family.best_metrics = {
+            "observations": evidence.observations,
+            "favorable_direction_folds": evidence.favorable_direction_folds,
+            "positive_net_folds": evidence.positive_net_folds,
+            "folds_beating_benchmark": evidence.folds_beating_benchmark,
+            "median_net_return": (
+                str(evidence.median_net_return)
+                if evidence.median_net_return is not None
+                else None
+            ),
+            "worst_net_return": (
+                str(evidence.worst_net_return)
+                if evidence.worst_net_return is not None
+                else None
+            ),
+            "promising_configurations": evidence.promising_configurations,
+            "complete_and_finite": evidence.complete_and_finite,
+        }
     family.state = "survived"
     campaign.evaluations_computed += (
         0 if child.reuses_existing_run else run.evaluations_computed
@@ -264,6 +348,58 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
         campaign.families_uncovered -= 1
     await session.commit()
     return False
+
+
+async def _reconcile_v2_qualifications(
+    session: AsyncSession, campaign: MLSearchCampaignRecord
+) -> bool:
+    if (
+        campaign.preset != ECONOMIC_POLICY_SEARCH_V2_PRESET
+        or campaign.current_stage != 5
+    ):
+        return False
+    rows = tuple(
+        (
+            await session.scalars(
+                select(MLEconomicQualificationRecord).where(
+                    MLEconomicQualificationRecord.id.in_(
+                        select(
+                            MLEconomicQualificationCampaignRecord.qualification_id
+                        ).where(
+                            MLEconomicQualificationCampaignRecord.campaign_id
+                            == campaign.id
+                        )
+                    )
+                )
+            )
+        ).all()
+    )
+    if campaign.cancellation_requested_at is not None:
+        for row in rows:
+            if row.status == "queued":
+                row.status = "cancelled"
+                row.completed_at = datetime.now(UTC)
+            elif row.status == "running" and row.cancellation_requested_at is None:
+                row.cancellation_requested_at = datetime.now(UTC)
+        if any(row.status == "running" for row in rows):
+            await session.commit()
+            return True
+        campaign.status = "cancelled"
+        campaign.completed_at = datetime.now(UTC)
+        await session.commit()
+        return True
+    if any(row.status in {"queued", "running"} for row in rows):
+        return True
+    campaign.status = "completed"
+    campaign.completed_at = datetime.now(UTC)
+    if not rows or any(row.status != "completed" for row in rows):
+        campaign.outcome = "coverage_incomplete"
+    elif any(row.classification == "qualified" for row in rows):
+        campaign.outcome = "qualified_candidates_found"
+    else:
+        campaign.outcome = "no_qualified_candidate"
+    await session.commit()
+    return True
 
 
 def _restore_evidence(family: MLSearchCampaignFamilyRecord) -> EconomicEvidence:
@@ -279,6 +415,28 @@ def _restore_evidence(family: MLSearchCampaignFamilyRecord) -> EconomicEvidence:
         _number(metrics.get("median_net_return")),
         _number(metrics.get("worst_net_return")),
         _integer(metrics.get("promising_configurations", 0)),
+        bool(metrics.get("complete_and_finite", False)),
+    )
+
+
+def _restore_v2_evidence(family: MLSearchCampaignFamilyRecord) -> EconomicV2Evidence:
+    metrics = family.best_metrics or {}
+    return EconomicV2Evidence(
+        family.fingerprint,
+        str(metrics["policy_fingerprint"]),
+        str(family.source_screening_run_id),
+        family.engine,
+        family.objective,
+        _integer(metrics["observations"]),
+        _integer(metrics["round_trips"]),
+        _integer(metrics["positive_net_folds"]),
+        _integer(metrics["folds_beating_benchmark"]),
+        Decimal(str(metrics["median_net_return"])),
+        Decimal(str(metrics["worst_net_return"])),
+        Decimal(str(metrics["maximum_drawdown"])),
+        _integer(metrics["inactive_folds"]),
+        Decimal(str(metrics["compounded_return_1_5x"])),
+        Decimal(str(metrics["compounded_return_2x"])),
         bool(metrics.get("complete_and_finite", False)),
     )
 
@@ -316,6 +474,161 @@ async def _advance_stage(
     )
     if outstanding:
         return False
+    if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET:
+        v2_evidence = tuple(_restore_v2_evidence(item) for item in families)
+        if stage < 4:
+            promoted = {
+                item.family_fingerprint
+                for item in capped_economic_v2_promotions(stage, v2_evidence)
+            }
+            for family in families:
+                if family.fingerprint not in promoted:
+                    family.state = "discarded"
+                    family.decision_reason = f"failed_stage_{stage}_economic_v2_gate"
+            campaign.current_stage += 1
+            await session.commit()
+            return True
+        strong = {
+            item.family_fingerprint
+            for item in v2_evidence
+            if is_economic_v2_development_candidate(item)
+        }
+        for family in families:
+            family.state = (
+                "strong_development_candidate"
+                if family.fingerprint in strong
+                else "discarded"
+            )
+            family.decision_reason = (
+                "economic_v2_development_gate_passed"
+                if family.fingerprint in strong
+                else "failed_economic_v2_development_gate"
+            )
+        if not strong:
+            campaign.status = "completed"
+            campaign.outcome = "no_qualified_candidate"
+            campaign.completed_at = datetime.now(UTC)
+        else:
+            for family in families:
+                if family.fingerprint not in strong:
+                    continue
+                if family.best_evaluation_id is None or family.selected_policy is None:
+                    raise CampaignCoordinationError(
+                        "development candidate lacks frozen qualification identity"
+                    )
+                evaluation = await session.get(
+                    MLRefinementEvaluationRecord, family.best_evaluation_id
+                )
+                if evaluation is None:
+                    raise CampaignCoordinationError(
+                        "development candidate evaluation disappeared"
+                    )
+                candidate_fingerprint = qualification_identity(
+                    evaluation_fingerprint=evaluation.fingerprint,
+                    policy_fingerprint=str(
+                        family.selected_policy["policy_fingerprint"]
+                    ),
+                )
+                existing = await session.scalar(
+                    select(MLEconomicQualificationRecord).where(
+                        MLEconomicQualificationRecord.candidate_fingerprint
+                        == candidate_fingerprint,
+                        MLEconomicQualificationRecord.qualification_version
+                        == ECONOMIC_V2_QUALIFICATION_VERSION,
+                    )
+                )
+                if existing is not None:
+                    if existing.status in {"failed", "cancelled"}:
+                        existing.status = "queued"
+                        existing.classification = None
+                        existing.scenario_metrics = None
+                        existing.quarter_returns = None
+                        existing.trades = None
+                        existing.failed_rules = None
+                        existing.completed_at = None
+                        existing.failed_at = None
+                        existing.failure_type = None
+                        existing.failure_message = None
+                        existing.worker_id = None
+                        existing.claimed_at = None
+                        existing.heartbeat_at = None
+                        existing.cancellation_requested_at = None
+                    linked = await session.get(
+                        MLEconomicQualificationCampaignRecord,
+                        (campaign.id, existing.id),
+                    )
+                    if linked is None:
+                        session.add(
+                            MLEconomicQualificationCampaignRecord(
+                                campaign_id=campaign.id,
+                                qualification_id=existing.id,
+                                family_id=family.id,
+                                created_at=datetime.now(UTC),
+                            )
+                        )
+                    continue
+                manifest = {
+                    "qualification_start": "2024-01-01T00:00:00+00:00",
+                    "qualification_end_exclusive": ECONOMIC_V2_QUALIFICATION_END,
+                    "status": "not_read",
+                }
+                qualification_id = uuid4()
+                session.add(
+                    MLEconomicQualificationRecord(
+                        id=qualification_id,
+                        campaign_id=campaign.id,
+                        family_id=family.id,
+                        candidate_fingerprint=candidate_fingerprint,
+                        policy_fingerprint=str(
+                            family.selected_policy["policy_fingerprint"]
+                        ),
+                        qualification_version=ECONOMIC_V2_QUALIFICATION_VERSION,
+                        status="queued",
+                        classification=None,
+                        engine=family.engine,
+                        objective=family.objective,
+                        search_track=family.search_track,
+                        seed_family_id=family.seed_family_id,
+                        frozen_inputs={
+                            "evaluation_id": str(evaluation.id),
+                            "evaluation_fingerprint": evaluation.fingerprint,
+                            "family_fingerprint": family.fingerprint,
+                            "deterministic_seed": ECONOMIC_V2_SEED,
+                        },
+                        temporal_manifest=manifest,
+                        temporal_manifest_fingerprint=qualification_identity(
+                            evaluation_fingerprint=evaluation.fingerprint,
+                            policy_fingerprint="not_read",
+                        ),
+                        policy_identity=family.selected_policy,
+                        scenario_metrics=None,
+                        quarter_returns=None,
+                        trades=None,
+                        failed_rules=None,
+                        evidence_end_exclusive=datetime(2025, 1, 1, tzinfo=UTC),
+                        worker_id=None,
+                        claimed_at=None,
+                        heartbeat_at=None,
+                        cancellation_requested_at=None,
+                        completed_at=None,
+                        failed_at=None,
+                        failure_type=None,
+                        failure_message=None,
+                        created_at=datetime.now(UTC),
+                    )
+                )
+                await session.flush()
+                session.add(
+                    MLEconomicQualificationCampaignRecord(
+                        campaign_id=campaign.id,
+                        qualification_id=qualification_id,
+                        family_id=family.id,
+                        created_at=datetime.now(UTC),
+                    )
+                )
+            campaign.current_stage = 5
+        await session.commit()
+        return True
     evidence = tuple(_restore_evidence(item) for item in families)
     if stage < 4:
         promoted = {
@@ -380,12 +693,30 @@ async def _request_for_family(
         search_space=(search_space,),
         feature_selection=FeatureSelectionSearch(strategies=(feature,)),
         prediction_objectives=(family.objective,),
-        confidence_buckets=CAMPAIGN_CONFIDENCE_BUCKETS,
+        confidence_buckets=(
+            ECONOMIC_V2_CONFIDENCE_FRACTIONS
+            if family.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
+            else CAMPAIGN_CONFIDENCE_BUCKETS
+        ),
         fee_rate=CAMPAIGN_FEE_RATE,
         slippage_rate=CAMPAIGN_SLIPPAGE_RATE,
         maximum_trials=STAGE_TRIALS[stage - 1],
         maximum_runtime_seconds=runtime,
-        deterministic_seed=CAMPAIGN_SEED,
+        deterministic_seed=(
+            ECONOMIC_V2_SEED
+            if family.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
+            else CAMPAIGN_SEED
+        ),
+        economic_policy_search=(
+            EconomicPolicySearchConfiguration(
+                confidence_fractions=ECONOMIC_V2_CONFIDENCE_FRACTIONS,
+                holding_multipliers=ECONOMIC_V2_HOLDING_MULTIPLIERS,
+                regime_policies=ECONOMIC_V2_REGIME_POLICIES,
+                version=ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+            )
+            if family.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
+            else None
+        ),
         notes=f"ML search campaign family {family.fingerprint} stage {stage}",
     )
 
@@ -497,6 +828,8 @@ async def coordinate_next_campaign(
         return True
     active = await _reconcile(session, campaign)
     if active or campaign.status not in {"queued", "running"}:
+        return True
+    if await _reconcile_v2_qualifications(session, campaign):
         return True
     if campaign.cancellation_requested_at is not None:
         campaign.status = "cancelled"
@@ -611,3 +944,4 @@ async def coordinate_next_campaign(
     family.evaluations_planned = cumulative
     await session.commit()
     return True
+

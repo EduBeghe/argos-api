@@ -18,6 +18,7 @@ from .contract import (
     FUTURE_DURATIONS,
     MISSING_DATA_POLICY_VERSION,
     ML_EXPERIMENT_CONTRACT_VERSION,
+    QUALIFICATION_END,
     VARIABLE_REGISTRY_VERSION,
     TemporalFoldDefinition,
     temporal_fold_definitions,
@@ -163,6 +164,15 @@ class LazyTargetProvider:
 
 
 @dataclass(frozen=True, slots=True)
+class MLMarketContext:
+    """Causal preceding-candle context aligned to each decision boundary."""
+
+    close: NDArray[np.float64]
+    ema_200: NDArray[np.float64]
+    realized_volatility_12h: NDArray[np.float64]
+
+
+@dataclass(frozen=True, slots=True)
 class MLExperimentDataset:
     metadata: MLDatasetMetadata
     boundary_time_ns: NDArray[np.int64]
@@ -172,6 +182,7 @@ class MLExperimentDataset:
     folds: tuple[TemporalFoldManifest, ...]
     final_test_indices: NDArray[np.int64]
     targets: LazyTargetProvider
+    market_context: MLMarketContext
 
     @property
     def boundaries(self) -> tuple[datetime, ...]:
@@ -565,7 +576,7 @@ def build_ml_experiment_dataset(
     columns: MLCandleColumns,
     requested_end: datetime = FINAL_TEST_END,
 ) -> MLExperimentDataset:
-    if requested_end not in {FINAL_TEST_START, FINAL_TEST_END}:
+    if requested_end not in {FINAL_TEST_START, QUALIFICATION_END, FINAL_TEST_END}:
         raise MLDatasetError(
             "ML dataset end must be the development or protected final-test end"
         )
@@ -613,6 +624,23 @@ def build_ml_experiment_dataset(
         features[rows, column] = series[reference_indices[rows]].astype(np.float32)
         del series
     feature_eligible = np.isfinite(features).all(axis=1)
+    context_close = np.full(len(boundary_ns), np.nan)
+    context_ema = np.full(len(boundary_ns), np.nan)
+    context_volatility = np.full(len(boundary_ns), np.nan)
+    context_rows = np.flatnonzero(exact & closed)
+    ema_200 = _ema_series(selected.close_price, 200, continuity)
+    causal_returns = cache.returns.copy()
+    if len(causal_returns):
+        discontinuities = np.flatnonzero(
+            np.concatenate((np.asarray([True]), continuity[1:] != continuity[:-1]))
+        )
+        causal_returns[discontinuities] = 0.0
+    volatility_12h = _invalidate_window(
+        _rolling_std(np.nan_to_num(causal_returns), 144), continuity, 144
+    )
+    context_close[context_rows] = selected.close_price[reference_indices[context_rows]]
+    context_ema[context_rows] = ema_200[reference_indices[context_rows]]
+    context_volatility[context_rows] = volatility_12h[reference_indices[context_rows]]
     reason_by_row = np.full(len(boundary_ns), "", dtype="U32")
     reason_by_row[~exact] = "missing_reference_candle"
     reason_by_row[exact & ~closed] = "reference_candle_not_closed"
@@ -675,4 +703,6 @@ def build_ml_experiment_dataset(
         folds,
         final_indices,
         targets,
+        MLMarketContext(context_close, context_ema, context_volatility),
     )
+

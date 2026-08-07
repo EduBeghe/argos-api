@@ -45,12 +45,17 @@ class MLSearchCampaignRecord(Base):
         CheckConstraint(
             "outcome IS NULL OR outcome IN ('coverage_incomplete',"
             "'no_strong_candidate','search_budget_exhausted',"
-            "'strong_candidates_found')",
+            "'strong_candidates_found','qualified_candidates_found',"
+            "'no_qualified_candidate')",
             name="ck_ml_search_campaign_outcome",
         ),
+        Index("ix_ml_search_campaign_preset", "preset", "created_at"),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
     experiment_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    preset: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="exhaustive_ohlcv_v1"
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     outcome: Mapped[str | None] = mapped_column(String(64))
     contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -107,6 +112,14 @@ class MLSearchCampaignFamilyRecord(Base):
             "'strong_development_candidate')",
             name="ck_ml_search_family_state",
         ),
+        Index(
+            "ix_ml_search_family_v2_identity",
+            "campaign_id",
+            "preset",
+            "search_track",
+            "seed_family_id",
+            "selected_policy_fingerprint",
+        ),
     )
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
     campaign_id: Mapped[UUID] = mapped_column(
@@ -120,6 +133,19 @@ class MLSearchCampaignFamilyRecord(Base):
         nullable=False,
     )
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    preset: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="exhaustive_ohlcv_v1"
+    )
+    search_track: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="exhaustive"
+    )
+    seed_family_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("ml_search_campaign_families.id", ondelete="RESTRICT"),
+    )
+    seed_provenance: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     dataset_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     asset: Mapped[str] = mapped_column(String(32), nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -139,6 +165,8 @@ class MLSearchCampaignFamilyRecord(Base):
         ForeignKey("ml_refinement_evaluations.id", ondelete="SET NULL"),
     )
     best_metrics: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    selected_policy: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    selected_policy_fingerprint: Mapped[str | None] = mapped_column(String(64))
     decision_reason: Mapped[str | None] = mapped_column(String(128))
     deterministic_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -183,3 +211,133 @@ class MLSearchCampaignChildRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class MLEconomicQualificationRecord(Base):
+    __tablename__ = "ml_economic_qualifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "candidate_fingerprint",
+            "qualification_version",
+            name="uq_ml_economic_qualification_candidate",
+        ),
+        CheckConstraint(
+            "status IN ('queued','running','completed','failed','cancelled')",
+            name="ck_ml_economic_qualification_status",
+        ),
+        CheckConstraint(
+            "classification IS NULL OR classification IN ('qualified','rejected')",
+            name="ck_ml_economic_qualification_classification",
+        ),
+        CheckConstraint(
+            "(status = 'queued' AND classification IS NULL AND worker_id IS NULL "
+            "AND completed_at IS NULL AND failed_at IS NULL) OR "
+            "(status = 'running' AND classification IS NULL AND worker_id IS NOT NULL "
+            "AND claimed_at IS NOT NULL AND heartbeat_at IS NOT NULL "
+            "AND completed_at IS NULL AND failed_at IS NULL) OR "
+            "(status = 'completed' AND classification IS NOT NULL "
+            "AND scenario_metrics IS NOT NULL AND quarter_returns IS NOT NULL "
+            "AND failed_rules IS NOT NULL AND completed_at IS NOT NULL "
+            "AND worker_id IS NULL AND failed_at IS NULL) OR "
+            "(status = 'failed' AND classification IS NULL AND failed_at IS NOT NULL "
+            "AND failure_type IS NOT NULL AND failure_message IS NOT NULL "
+            "AND worker_id IS NULL) OR "
+            "(status = 'cancelled' AND classification IS NULL "
+            "AND completed_at IS NOT NULL AND worker_id IS NULL)",
+            name="ck_ml_economic_qualification_lifecycle",
+        ),
+        CheckConstraint(
+            "evidence_end_exclusive = TIMESTAMPTZ '2025-01-01 00:00:00+00'",
+            name="ck_ml_economic_qualification_boundary",
+        ),
+        Index(
+            "ix_ml_economic_qualification_list",
+            "campaign_id",
+            "classification",
+            "engine",
+            "objective",
+            "search_track",
+        ),
+        Index(
+            "ix_ml_economic_qualification_claim",
+            "status",
+            "claimed_at",
+            "created_at",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    campaign_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("ml_search_campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    family_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("ml_search_campaign_families.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    candidate_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    qualification_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    classification: Mapped[str | None] = mapped_column(String(16))
+    engine: Mapped[str] = mapped_column(String(16), nullable=False)
+    objective: Mapped[str] = mapped_column(String(64), nullable=False)
+    search_track: Mapped[str] = mapped_column(String(32), nullable=False)
+    seed_family_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    frozen_inputs: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    temporal_manifest: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    temporal_manifest_fingerprint: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    policy_identity: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    scenario_metrics: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    quarter_returns: Mapped[list[str] | None] = mapped_column(JSONB)
+    trades: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB)
+    failed_rules: Mapped[list[str] | None] = mapped_column(JSONB)
+    evidence_end_exclusive: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(128))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_type: Mapped[str | None] = mapped_column(String(128))
+    failure_message: Mapped[str | None] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class MLEconomicQualificationCampaignRecord(Base):
+    __tablename__ = "ml_economic_qualification_campaigns"
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_id",
+            "family_id",
+            name="uq_ml_economic_qualification_campaign_family",
+        ),
+    )
+    campaign_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("ml_search_campaigns.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    qualification_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("ml_economic_qualifications.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    family_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("ml_search_campaign_families.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+

@@ -1,12 +1,17 @@
 import math
 from dataclasses import asdict, dataclass
 from datetime import timedelta
+from decimal import Decimal
 from time import perf_counter
 from typing import Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
+from app.ml.campaign.economic_v2_calculation import (
+    aggregate_policy_folds,
+    evaluate_policy_grid_fold,
+)
 from app.ml.contract import FINAL_TEST_START
 from app.ml.dataset import MLExperimentDataset
 from app.ml.gaps import datetime_to_ns
@@ -429,6 +434,7 @@ def evaluate_refinement_candidate(
     target = dataset.targets.for_duration(duration)
     round_trip_cost = float(2 * (request.fee_rate + request.slippage_rate))
     folds: list[RefinementFoldResult] = []
+    policy_folds: list[tuple[dict[str, object], ...]] = []
     for fold in dataset.folds:
         eligible = dataset.feature_eligible & target.eligible
         training = fold.training_indices[eligible[fold.training_indices]]
@@ -501,6 +507,19 @@ def evaluate_refinement_candidate(
             )
             for fraction in sorted(request.confidence_buckets)
         )
+        if request.economic_policy_search is not None:
+            policy_folds.append(
+                evaluate_policy_grid_fold(
+                    dataset=dataset,
+                    training=training,
+                    validation=validation,
+                    training_scores=training_predictions,
+                    validation_scores=validation_predictions,
+                    horizon_seconds=candidate.future_duration_seconds,
+                    fee_rate=request.fee_rate,
+                    slippage_rate=request.slippage_rate,
+                )
+            )
         folds.append(
             RefinementFoldResult(
                 fold.definition.name,
@@ -570,6 +589,24 @@ def evaluate_refinement_candidate(
         "confidence_bucket_aggregates": confidence_aggregates,
         "selected_confidence_bucket": selected,
     }
+    if request.economic_policy_search is not None:
+        policy_aggregates = aggregate_policy_folds(tuple(policy_folds))
+        selected_policy = min(
+            policy_aggregates,
+            key=lambda item: (
+                -int(str(item["positive_net_folds"])),
+                int(str(item["inactive_folds"])),
+                -Decimal(str(item["compounded_return_2x"])),
+                -Decimal(str(item["worst_net_return"])),
+                -Decimal(str(item["median_net_return"])),
+                -int(str(item["round_trips"])),
+                Decimal(str(item["maximum_drawdown"])),
+                str(item["policy_fingerprint"]),
+            ),
+            default=None,
+        )
+        aggregate["economic_policy_v2_aggregates"] = policy_aggregates
+        aggregate["selected_economic_policy_v2"] = selected_policy
     return RefinementEvaluationResult(
         candidate,
         tuple(folds),
@@ -578,3 +615,4 @@ def evaluate_refinement_candidate(
         failed,
         perf_counter() - started,
     )
+
