@@ -178,10 +178,11 @@ async def process_once(
         run = await claim_next_run(session, worker_id=worker_id)
         if run is None:
             return False
+        run_id = run.id
         logger.info(
             "Claimed ML refinement run",
             extra={
-                "structured_fields": {"run_id": str(run.id), "worker_id": worker_id}
+                "structured_fields": {"run_id": str(run_id), "worker_id": worker_id}
             },
         )
         try:
@@ -216,10 +217,10 @@ async def process_once(
             )
         except Exception as error:
             await fail_run(
-                session, run.id, error, datetime.now(UTC), worker_id=worker_id
+                session, run_id, error, datetime.now(UTC), worker_id=worker_id
             )
             failure_fields: dict[str, object] = {
-                "run_id": str(run.id),
+                "run_id": str(run_id),
                 "worker_id": worker_id,
                 "failure_type": type(error).__name__,
             }

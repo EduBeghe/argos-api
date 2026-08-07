@@ -49,8 +49,11 @@ child is running. Only operationally failed campaigns may be retried; scientific
 outcomes are terminal. Retry preserves campaign progress and identifiers. When the
 responsible child refinement is failed, cancelled, or structurally incomplete, retry
 atomically resets that same refinement run to a clean queued lease while preserving
-its immutable experiment identity and any already persisted reusable evaluation rows.
-Concurrent retry requests are serialized; only one may requeue the campaign.
+its scientific plan and any already persisted reusable evaluation rows. For an
+economic-v2 child persisted with the former mixed confidence contract, reset
+canonicalizes only the legacy bucket identity and recomputes the experiment key while
+preserving the run, campaign, family, and child identifiers. Concurrent retry requests
+are serialized; only one may requeue the campaign.
 
 ## Economic policy search v2
 
@@ -68,6 +71,10 @@ Each fitted model evaluates 45 policies without refitting: five training-derived
 entry-confidence fractions, three exact five-minute holding multipliers, and three
 training-fitted regime policies. Economic promotion uses seven development folds and
 retains objective diversity without promoting a family that failed its stage gate.
+The five economic confidence fractions (`0.05`, `0.10`, `0.20`, `0.30`, and `0.40`)
+belong only to that policy grid. Child refinement requests retain the narrower legacy
+confidence-bucket identity (`0.05`, `0.10`, and `0.20`) used by refinement evidence
+and protected validation.
 
 The temporal protocol is immutable and half-open:
 

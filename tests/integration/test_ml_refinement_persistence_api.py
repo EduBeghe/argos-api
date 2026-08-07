@@ -1,20 +1,35 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.core.config import get_settings
+from app.jobs import process_ml_refinement_queue
 from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.campaign.contracts import (
+    CAMPAIGN_CONFIDENCE_BUCKETS,
+    ECONOMIC_V2_CONFIDENCE_FRACTIONS,
+    ECONOMIC_V2_HOLDING_MULTIPLIERS,
+    ECONOMIC_V2_REGIME_POLICIES,
+    ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+)
 from app.ml.contract import DEVELOPMENT_START, FINAL_TEST_END, FINAL_TEST_START
 from app.ml.dataset import MLDatasetMetadata, build_ml_experiment_dataset
 from app.ml.reader import candle_columns
@@ -23,7 +38,11 @@ from app.ml.refinement.calculation import (
     RefinementEvaluationResult,
     RefinementFoldResult,
 )
-from app.ml.refinement.contracts import MLRefinementRequest, RefinementClassification
+from app.ml.refinement.contracts import (
+    EconomicPolicySearchConfiguration,
+    MLRefinementRequest,
+    RefinementClassification,
+)
 from app.ml.refinement.identity import DatasetFingerprintChanged
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
@@ -397,6 +416,206 @@ async def test_persistence_canonicalizes_new_bucket_identity_but_copies_legacy_r
         copied_selected = copied.aggregate_metrics["selected_confidence_bucket"]
         assert isinstance(copied_selected, dict)
         assert copied_selected["fraction"] == "0.200000000000000000"
+
+
+async def test_v2_first_evaluation_persists_with_separate_confidence_contracts(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    base = request(source_run_id, source_result_id)
+    refinement_request = base.model_copy(
+        update={
+            "confidence_buckets": CAMPAIGN_CONFIDENCE_BUCKETS,
+            "economic_policy_search": EconomicPolicySearchConfiguration(
+                confidence_fractions=ECONOMIC_V2_CONFIDENCE_FRACTIONS,
+                holding_multipliers=ECONOMIC_V2_HOLDING_MULTIPLIERS,
+                regime_policies=ECONOMIC_V2_REGIME_POLICIES,
+                version=ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+            ),
+        }
+    )
+    plan = build_refinement_plan(refinement_request)
+    result = RefinementEvaluationResult(
+        plan.evaluations[0],
+        (
+            RefinementFoldResult(
+                "fold-1",
+                100,
+                50,
+                (),
+                {},
+                tuple(
+                    {"fraction": float(fraction), "coverage": 0.5}
+                    for fraction in CAMPAIGN_CONFIDENCE_BUCKETS
+                ),
+                0.01,
+            ),
+        ),
+        {
+            "selected_confidence_bucket": {
+                "fraction": 0.2,
+                "median_net_return": 0.01,
+            }
+        },
+        RefinementClassification.INCOMPLETE,
+        ("incomplete_fold_count",),
+        0.1,
+    )
+    async with factory() as session:
+        run = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key="v" * 64,
+            dataset_fingerprint="d" * 64,
+            versions=library_versions(),
+            now=NOW,
+        )
+        await persist_evaluation(
+            session=session,
+            run_id=run.id,
+            fingerprint="w" * 64,
+            result=result,
+            reused=None,
+            request=refinement_request,
+            now=NOW,
+        )
+        persisted = await session.scalar(
+            select(MLRefinementEvaluationRecord).where(
+                MLRefinementEvaluationRecord.run_id == run.id
+            )
+        )
+        assert persisted is not None
+        confidence_metrics = persisted.fold_evidence[0]["confidence_metrics"]
+        assert isinstance(confidence_metrics, list)
+        assert [
+            item["fraction"] for item in confidence_metrics if isinstance(item, dict)
+        ] == ["0.05", "0.10", "0.20"]
+        assert refinement_request.economic_policy_search is not None
+        assert refinement_request.economic_policy_search.confidence_fractions == (
+            Decimal("0.05"),
+            Decimal("0.10"),
+            Decimal("0.20"),
+            Decimal("0.30"),
+            Decimal("0.40"),
+        )
+
+
+class SentinelRefinementError(RuntimeError):
+    pass
+
+
+async def test_worker_failure_uses_captured_run_id_across_expiring_commit(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    refinement_request = request(source_run_id, source_result_id)
+    engine = cast(AsyncEngine, factory.kw["bind"])
+    expiring_factory = async_sessionmaker(engine, expire_on_commit=True)
+    async with expiring_factory() as session:
+        await enqueue_refinement(session, refinement_request, now=NOW)
+        run_id = await session.scalar(
+            select(MLRefinementRunRecord.id).where(
+                MLRefinementRunRecord.source_screening_result_id == source_result_id
+            )
+        )
+        assert run_id is not None
+
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "fail_stale_protected_work",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "claim_protected_work",
+        AsyncMock(side_effect=[None, None, None, None]),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "fail_stale_qualifications",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "claim_next_qualification",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "coordinate_next_campaign",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "fail_stale_runs",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue, "validate_engine_dependencies", lambda: None
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "load_refinement_identity_metadata",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                instrument=Instrument(
+                    Asset.BTC_USDT,
+                    Provider.BINANCE,
+                    MarketType.SPOT,
+                    Interval.FIVE_MINUTES,
+                )
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "validate_dataset_identity",
+        lambda **_kwargs: SimpleNamespace(structured_fields=lambda: {}),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "load_ml_development_dataset",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
+        process_ml_refinement_queue,
+        "execute_refinement",
+        AsyncMock(side_effect=SentinelRefinementError("sentinel primary failure")),
+    )
+    caplog.set_level(logging.ERROR)
+
+    assert await process_ml_refinement_queue.process_once(
+        expiring_factory,
+        worker_id="expire-worker",
+        stale_after=timedelta(hours=2),
+    )
+    async with expiring_factory() as verification:
+        persisted = await verification.get(MLRefinementRunRecord, run_id)
+        assert persisted is not None
+        assert persisted.status == "failed"
+        assert persisted.failure_type == "SentinelRefinementError"
+        assert persisted.failure_message == "sentinel primary failure"
+        assert persisted.worker_id is None
+        assert persisted.claimed_at is None
+        assert persisted.heartbeat_at is None
+    failure_record = next(
+        item
+        for item in caplog.records
+        if item.message == "ML refinement queue item failed"
+    )
+    assert failure_record.structured_fields == {  # type: ignore[attr-defined]
+        "run_id": str(run_id),
+        "worker_id": "expire-worker",
+        "failure_type": "SentinelRefinementError",
+    }
+    assert not await process_ml_refinement_queue.process_once(
+        expiring_factory,
+        worker_id="expire-worker",
+        stale_after=timedelta(hours=2),
+    )
 
 
 async def test_failed_run_retains_complete_evaluations_for_retry(
