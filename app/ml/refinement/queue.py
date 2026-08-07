@@ -298,4 +298,3 @@ async def heartbeat(session: AsyncSession, run_id: UUID, worker_id: str) -> bool
     )
     await session.commit()
     return bool(result.rowcount)  # type: ignore[attr-defined]
-

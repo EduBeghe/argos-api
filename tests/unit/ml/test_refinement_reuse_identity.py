@@ -229,4 +229,3 @@ async def test_existing_and_cross_run_reuse_apply_the_same_semantic_guard() -> N
     session.scalar.return_value = row
     assert await existing_run_evaluation(session, row.run_id, "f" * 64, request) is row
     assert await reusable_evaluation(session, "f" * 64, request) is row
-

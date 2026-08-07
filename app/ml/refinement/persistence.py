@@ -643,4 +643,3 @@ async def cancel_claimed_run(
         await session.rollback()
         raise MLRefinementError("worker lost the refinement lease")
     await session.commit()
-

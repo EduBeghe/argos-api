@@ -85,4 +85,3 @@ def economic_policy_evidence_compatibility(
             False, "invalid_selected_economic_policy", expected, found
         )
     return EconomicPolicyCompatibility(True, "compatible", expected, found)
-

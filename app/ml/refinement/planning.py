@@ -288,4 +288,3 @@ def build_refinement_plan(request: MLRefinementRequest) -> RefinementPlan:
         tuple(sorted(set(request.future_durations_seconds) - selected_durations)),
         tuple(sorted(requested_features - selected_features)),
     )
-

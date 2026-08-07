@@ -387,4 +387,3 @@ async def execute_refinement(
         omitted > 0,
         reason,
     )
-
