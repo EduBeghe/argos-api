@@ -737,10 +737,10 @@ async def test_selected_candidate_runs_real_development_calculation_and_is_read_
         session=session, campaign_id=campaign_id
     )
 
-    assert "invalid_message" not in first["results"][0], first["results"][0].get(  # type: ignore[index,union-attr]
+    assert "invalid_message" not in first["results"][0], first["results"][0].get(  # type: ignore[index]
         "invalid_message"
     )
-    assert "invalid_message" not in second["results"][0], second["results"][0].get(  # type: ignore[index,union-attr]
+    assert "invalid_message" not in second["results"][0], second["results"][0].get(  # type: ignore[index]
         "invalid_message"
     )
     assert not first_invalid and not second_invalid

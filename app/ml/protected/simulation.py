@@ -80,7 +80,11 @@ def simulate_fixed_horizon_long_only(
     maximum_drawdown = Decimal(0)
     exposed = 0
     for index, point in enumerate(predictions):
-        if position is None and point.signed_score >= threshold:
+        if (
+            position is None
+            and index < len(predictions) - 1
+            and point.signed_score >= threshold
+        ):
             opened = calculate_open_position(
                 cash=cash,
                 total_equity=cash,
