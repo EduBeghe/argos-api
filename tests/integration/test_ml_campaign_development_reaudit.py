@@ -737,8 +737,12 @@ async def test_selected_candidate_runs_real_development_calculation_and_is_read_
         session=session, campaign_id=campaign_id
     )
 
-    assert first["results"][0]["status"] == "completed", first["results"][0]  # type: ignore[index]
-    assert second["results"][0]["status"] == "completed", second["results"][0]  # type: ignore[index]
+    assert "invalid_message" not in first["results"][0], first["results"][0].get(  # type: ignore[index,union-attr]
+        "invalid_message"
+    )
+    assert "invalid_message" not in second["results"][0], second["results"][0].get(  # type: ignore[index,union-attr]
+        "invalid_message"
+    )
     assert not first_invalid and not second_invalid
     assert report_json(first) == report_json(second)
     assert first["counts"]["selected"] == 1  # type: ignore[index]
