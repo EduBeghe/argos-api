@@ -515,8 +515,13 @@ async def test_worker_failure_uses_captured_run_id_across_expiring_commit(
     engine = cast(AsyncEngine, factory.kw["bind"])
     expiring_factory = async_sessionmaker(engine, expire_on_commit=True)
     async with expiring_factory() as session:
-        queued = await enqueue_refinement(session, refinement_request, now=NOW)
-        run_id = queued.run.id
+        await enqueue_refinement(session, refinement_request, now=NOW)
+        run_id = await session.scalar(
+            select(MLRefinementRunRecord.id).where(
+                MLRefinementRunRecord.source_screening_result_id == source_result_id
+            )
+        )
+        assert run_id is not None
 
     monkeypatch.setattr(
         process_ml_refinement_queue,
@@ -890,3 +895,4 @@ async def test_concurrent_enqueue_skip_locked_and_stale_recovery(
             )
             == evaluation_count
         )
+

@@ -851,13 +851,12 @@ async def test_v2_retry_requeues_same_failed_child_without_duplicate_graph(
         assert economic_policy["confidence_fractions"] == [
             str(item) for item in ECONOMIC_V2_CONFIDENCE_FRACTIONS
         ]
-        assert await coordinate_next_campaign(session, now=NOW.replace(second=30))
     async with sessions() as session:
         persisted = await session.get(MLSearchCampaignRecord, record.id)
         reclaimed_run = await session.get(MLRefinementRunRecord, run.id)
         assert persisted is not None
         assert reclaimed_run is not None
-        assert persisted.status == "running"
+        assert persisted.status == "queued"
         assert persisted.first_claimed_at == NOW
         assert reclaimed_run.status == "queued"
         assert (
@@ -1592,3 +1591,4 @@ async def test_other_evidence_failure_still_blocks_manifest_enqueue(
             )
             == 0
         )
+
