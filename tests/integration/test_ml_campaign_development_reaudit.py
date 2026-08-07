@@ -1,16 +1,19 @@
+import base64
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import cast
 from uuid import UUID, uuid4
 
 import numpy as np
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, func, select
+from sqlalchemy import Table, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.core.database.base import Base
 from app.ml.campaign import development_reaudit
 from app.ml.campaign.contracts import CampaignRequest
 from app.ml.campaign.development_reaudit import (
@@ -24,7 +27,13 @@ from app.ml.campaign.models import (
     MLSearchCampaignRecord,
     MLSearchCampaignSourceRecord,
 )
-from app.ml.protected.models import MLFinalValidationRecord
+from app.ml.protected.models import (
+    MLFinalValidationRecord,
+    MLFinalValidationTradeRecord,
+    MLModelArtifactRecord,
+    MLStrategySpecificationRecord,
+    MLTemporalManifestRecord,
+)
 from app.ml.reader import MLCandleColumns
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.models import (
@@ -34,15 +43,57 @@ from app.ml.refinement.models import (
 from app.ml.refinement.persistence import effective_evaluation_fingerprint
 from app.ml.refinement.planning import build_refinement_plan
 from app.ml.screening.models import (
+    MLModelScreeningEvaluationRecord,
     MLModelScreeningResultRecord,
     MLModelScreeningRunRecord,
 )
+from app.paper.decision_cycles import PaperDecisionCycleRecord
+from app.paper.decision_evidence import (
+    MLDecisionSnapshotRecord,
+    PaperDecisionIdentityRecord,
+)
 from app.paper.deployment_models import PaperDeploymentRecord
-from app.paper.persistence import PaperTradingRunRecord
+from app.paper.equity_snapshots import (
+    PaperPortfolioSnapshotRecord,
+    PaperPositionSnapshotRecord,
+)
+from app.paper.persistence import (
+    PaperPositionRecord,
+    PaperTradeRecord,
+    PaperTradingRunRecord,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 NOW = datetime(2040, 1, 1, tzinfo=UTC)
 PREFIX = "development-reaudit-test-"
+DEVELOPMENT_START = datetime(2020, 1, 1, tzinfo=UTC)
+DEVELOPMENT_END = datetime(2024, 1, 1, tzinfo=UTC)
+
+SNAPSHOT_MODELS: tuple[type[Base], ...] = (
+    MLSearchCampaignRecord,
+    MLSearchCampaignSourceRecord,
+    MLSearchCampaignFamilyRecord,
+    MLSearchCampaignChildRecord,
+    MLModelScreeningRunRecord,
+    MLModelScreeningEvaluationRecord,
+    MLModelScreeningResultRecord,
+    MLRefinementRunRecord,
+    MLRefinementEvaluationRecord,
+    MLTemporalManifestRecord,
+    MLFinalValidationRecord,
+    MLFinalValidationTradeRecord,
+    MLStrategySpecificationRecord,
+    MLModelArtifactRecord,
+    PaperDeploymentRecord,
+    PaperTradingRunRecord,
+    PaperPositionRecord,
+    PaperTradeRecord,
+    MLDecisionSnapshotRecord,
+    PaperDecisionIdentityRecord,
+    PaperDecisionCycleRecord,
+    PaperPortfolioSnapshotRecord,
+    PaperPositionSnapshotRecord,
+)
 
 
 async def cleanup(session: AsyncSession) -> None:
@@ -51,6 +102,44 @@ async def cleanup(session: AsyncSession) -> None:
     )
     campaign_ids = select(MLSearchCampaignRecord.id).where(
         MLSearchCampaignRecord.experiment_key.like(f"{PREFIX}%")
+    )
+    validation_ids = select(MLFinalValidationRecord.id).where(
+        MLFinalValidationRecord.campaign_id.in_(campaign_ids)
+    )
+    await session.execute(
+        delete(PaperDeploymentRecord).where(
+            PaperDeploymentRecord.display_name.like(f"{PREFIX}%")
+        )
+    )
+    await session.execute(
+        delete(PaperTradingRunRecord).where(
+            PaperTradingRunRecord.stop_reason.like(f"{PREFIX}%")
+        )
+    )
+    await session.execute(
+        delete(MLStrategySpecificationRecord).where(
+            MLStrategySpecificationRecord.final_validation_id.in_(validation_ids)
+        )
+    )
+    await session.execute(
+        delete(MLFinalValidationRecord).where(
+            MLFinalValidationRecord.id.in_(validation_ids)
+        )
+    )
+    await session.execute(
+        delete(MLTemporalManifestRecord).where(
+            MLTemporalManifestRecord.evaluation_id.in_(
+                select(MLRefinementEvaluationRecord.id).where(
+                    MLRefinementEvaluationRecord.run_id.in_(
+                        select(MLRefinementRunRecord.id).where(
+                            MLRefinementRunRecord.source_screening_run_id.in_(
+                                source_ids
+                            )
+                        )
+                    )
+                )
+            )
+        )
     )
     await session.execute(
         delete(MLSearchCampaignRecord).where(
@@ -359,26 +448,178 @@ async def seed_campaign(
             created_at=NOW,
         )
     )
+    await session.flush()
+    manifest_id, validation_id, specification_id = uuid4(), uuid4(), uuid4()
+    paper_run_id = uuid4()
+    session.add(
+        MLTemporalManifestRecord(
+            id=manifest_id,
+            evaluation_id=evaluation_id,
+            source="persisted_at_execution",
+            status="completed",
+            manifest_version=1,
+            split_policy_version=1,
+            dataset_fingerprint="d" * 64,
+            manifest_fingerprint="m" * 64,
+            manifest={"sentinel": True},
+            fingerprint_verified=True,
+            counts_verified=True,
+            worker_id=None,
+            claimed_at=None,
+            heartbeat_at=None,
+            cancellation_requested_at=None,
+            failure_code=None,
+            failure_message=None,
+            created_at=NOW,
+            completed_at=NOW,
+        )
+    )
+    await session.flush()
+    session.add(
+        MLFinalValidationRecord(
+            id=validation_id,
+            experiment_key=f"{PREFIX}validation-{validation_id}"[:64],
+            campaign_id=campaign_id,
+            family_id=family_id,
+            evaluation_id=evaluation_id,
+            temporal_manifest_id=manifest_id,
+            status="completed",
+            classification="rejected",
+            frozen_inputs={"sentinel": True},
+            execution_manifest={"sentinel": True},
+            scenario_metrics={"sentinel": "1.000"},
+            failed_rules=["sentinel"],
+            protected_data_read_at=NOW,
+            worker_id=None,
+            claimed_at=None,
+            heartbeat_at=None,
+            cancellation_requested_at=None,
+            failure_code=None,
+            failure_message=None,
+            created_at=NOW,
+            completed_at=NOW,
+        )
+    )
+    await session.flush()
+    session.add(
+        MLStrategySpecificationRecord(
+            id=specification_id,
+            final_validation_id=validation_id,
+            strategy_name="sentinel_strategy",
+            strategy_version=1,
+            specification={"sentinel": True},
+            fingerprint=f"{specification_id.hex:0<64}"[:64],
+            created_at=NOW,
+        )
+    )
+    session.add(
+        PaperTradingRunRecord(
+            id=paper_run_id,
+            deployment_id=None,
+            status="stopped",
+            account_currency="USDT",
+            initial_cash=Decimal("10000"),
+            current_cash=Decimal("9999"),
+            configuration_version=1,
+            fee_rate=Decimal("0.001"),
+            slippage_rate=Decimal("0.0005"),
+            started_at=NOW,
+            stopped_at=NOW,
+            stop_reason=f"{PREFIX}sentinel",
+            predecessor_run_id=None,
+        )
+    )
+    await session.flush()
+    session.add(
+        PaperDeploymentRecord(
+            id=uuid4(),
+            display_name=f"{PREFIX}sentinel",
+            lifecycle="archived",
+            strategy_kind="ml_fixed_horizon_long_only",
+            strategy_specification_id=specification_id,
+            current_run_id=paper_run_id,
+            is_primary=False,
+            created_at=NOW,
+            paused_at=NOW,
+            archived_at=NOW,
+        )
+    )
     await session.commit()
     return campaign_id, family_id
 
 
-async def table_counts(session: AsyncSession) -> tuple[int, ...]:
-    models = (
-        MLSearchCampaignRecord,
-        MLSearchCampaignFamilyRecord,
-        MLSearchCampaignChildRecord,
-        MLRefinementRunRecord,
-        MLRefinementEvaluationRecord,
-        MLFinalValidationRecord,
-        PaperDeploymentRecord,
-        PaperTradingRunRecord,
+def canonical_value(value: object) -> object:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.astimezone(UTC).isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
+    if isinstance(value, dict):
+        return {
+            str(key): canonical_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return tuple(canonical_value(item) for item in value)
+    return value
+
+
+async def full_row_snapshot(
+    session: AsyncSession,
+) -> dict[
+    str,
+    dict[tuple[object, ...], tuple[tuple[str, object], ...]],
+]:
+    """Capture every mapped column, ordered by each table's primary key."""
+
+    session.expire_all()
+    snapshot: dict[
+        str,
+        dict[tuple[object, ...], tuple[tuple[str, object], ...]],
+    ] = {}
+    for model in SNAPSHOT_MODELS:
+        table = cast(Table, model.__table__)
+        columns = tuple(table.columns)
+        primary_key = tuple(table.primary_key.columns)
+        rows = (await session.execute(select(*columns).order_by(*primary_key))).all()
+        primary_key_indexes = tuple(columns.index(column) for column in primary_key)
+        snapshot[table.name] = {
+            tuple(canonical_value(row[index]) for index in primary_key_indexes): tuple(
+                (column.name, canonical_value(value))
+                for column, value in zip(columns, row, strict=True)
+            )
+            for row in rows
+        }
+    return snapshot
+
+
+def synthetic_development_candles() -> MLCandleColumns:
+    """Build continuous deterministic five-minute evidence strictly before 2024."""
+
+    interval_ns = 300 * 1_000_000_000
+    start_ns = int(DEVELOPMENT_START.timestamp() * 1_000_000_000)
+    end_ns = int(DEVELOPMENT_END.timestamp() * 1_000_000_000)
+    open_time_ns = np.arange(start_ns, end_ns, interval_ns, dtype=np.int64)
+    ordinal = np.arange(len(open_time_ns), dtype=np.float64)
+    close_price = (
+        100.0
+        + ordinal * 0.00002
+        + 2.0 * np.sin(ordinal * (2.0 * np.pi / 72.0))
+        + 0.4 * np.sin(ordinal * (2.0 * np.pi / 17.0))
     )
-    counts: list[int] = []
-    for model in models:
-        count = await session.scalar(select(func.count()).select_from(model))
-        counts.append(int(count or 0))
-    return tuple(counts)
+    open_price = np.concatenate((close_price[:1], close_price[:-1]))
+    return MLCandleColumns(
+        open_time_ns,
+        open_time_ns + interval_ns - 1_000_000,
+        open_price,
+        np.maximum(open_price, close_price) + 0.1,
+        np.minimum(open_price, close_price) - 0.1,
+        close_price,
+        100.0 + 10.0 * (1.0 + np.sin(ordinal * (2.0 * np.pi / 31.0))),
+    )
 
 
 async def test_empty_cohort_is_deterministic_and_read_only(
@@ -386,7 +627,7 @@ async def test_empty_cohort_is_deterministic_and_read_only(
 ) -> None:
     campaign_id, _ = await seed_campaign(session, selected=False)
     monkeypatch.setattr(development_reaudit, "FAMILIES_PER_INSTRUMENT", 1)
-    before = await table_counts(session)
+    before = await full_row_snapshot(session)
     first, first_invalid = await build_development_reaudit_report(
         session=session, campaign_id=campaign_id
     )
@@ -396,10 +637,10 @@ async def test_empty_cohort_is_deterministic_and_read_only(
     assert not first_invalid and not second_invalid
     assert first["counts"]["selected"] == 0  # type: ignore[index]
     assert report_json(first) == report_json(second)
-    assert before == await table_counts(session)
+    assert before == await full_row_snapshot(session)
 
 
-async def test_selected_candidate_uses_valid_postgresql_graph_and_is_read_only(
+async def test_selected_candidate_fast_orchestration_is_deterministic_and_read_only(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     campaign_id, family_id = await seed_campaign(session, selected=True)
@@ -444,7 +685,7 @@ async def test_selected_candidate_uses_valid_postgresql_graph_and_is_read_only(
     family_before = await session.get(MLSearchCampaignFamilyRecord, family_id)
     assert family_before is not None
     persisted_metrics = dict(family_before.best_metrics or {})
-    before = await table_counts(session)
+    before = await full_row_snapshot(session)
     first, has_invalid = await build_development_reaudit_report(
         session=session, campaign_id=campaign_id
     )
@@ -467,10 +708,96 @@ async def test_selected_candidate_uses_valid_postgresql_graph_and_is_read_only(
         ),
     ]
     assert all(end <= datetime(2024, 1, 1, tzinfo=UTC) for _, end in requested_ranges)
-    assert before == await table_counts(session)
+    assert before == await full_row_snapshot(session)
     family_after = await session.get(MLSearchCampaignFamilyRecord, family_id)
     assert family_after is not None
     assert family_after.best_metrics == persisted_metrics
+
+
+async def test_selected_candidate_runs_real_development_calculation_and_is_read_only(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    campaign_id, _ = await seed_campaign(session, selected=True)
+    monkeypatch.setattr(development_reaudit, "FAMILIES_PER_INSTRUMENT", 1)
+    columns = synthetic_development_candles()
+    requested_ranges: list[tuple[datetime, datetime]] = []
+
+    async def read_candles(**kwargs: object) -> SimpleNamespace:
+        start, end = kwargs["start"], kwargs["end"]
+        assert isinstance(start, datetime) and isinstance(end, datetime)
+        requested_ranges.append((start, end))
+        return SimpleNamespace(columns=columns)
+
+    monkeypatch.setattr(development_reaudit, "read_ml_experiment_candles", read_candles)
+    before = await full_row_snapshot(session)
+    first, first_invalid = await build_development_reaudit_report(
+        session=session, campaign_id=campaign_id
+    )
+    second, second_invalid = await build_development_reaudit_report(
+        session=session, campaign_id=campaign_id
+    )
+
+    assert not first_invalid and not second_invalid
+    assert report_json(first) == report_json(second)
+    assert first["counts"]["selected"] == 1  # type: ignore[index]
+    result = first["results"][0]  # type: ignore[index]
+    assert result["status"] == "completed"
+    assert result["diagnostic_only"] is True
+    assert result["protected_evidence_read"] is False
+    assert isinstance(result["development_proxy_pass"], bool)
+    assert isinstance(result["failed_rules"], tuple)
+    blocks = result["blocks"]
+    assert [block["fold_name"] for block in blocks] == [
+        "202201_accumulating",
+        "202207_accumulating",
+        "202301_accumulating",
+        "202307_accumulating",
+    ]
+    assert [block["validation_start"] for block in blocks] == [
+        datetime(2022, 1, 1, tzinfo=UTC),
+        datetime(2022, 7, 1, tzinfo=UTC),
+        datetime(2023, 1, 1, tzinfo=UTC),
+        datetime(2023, 7, 1, tzinfo=UTC),
+    ]
+    assert [block["validation_end_exclusive"] for block in blocks] == [
+        datetime(2022, 7, 1, tzinfo=UTC),
+        datetime(2023, 1, 1, tzinfo=UTC),
+        datetime(2023, 7, 1, tzinfo=UTC),
+        DEVELOPMENT_END,
+    ]
+    assert all(
+        {"base", "stress_1_5x", "stress_2x", "buy_and_hold"} <= block.keys()
+        for block in blocks
+    )
+    assert result["aggregate"]
+    assert requested_ranges == [
+        (DEVELOPMENT_START, DEVELOPMENT_END),
+        (DEVELOPMENT_START, DEVELOPMENT_END),
+    ]
+    assert int(columns.open_time_ns[-1]) < int(DEVELOPMENT_END.timestamp() * 1e9)
+    assert before == await full_row_snapshot(session)
+
+
+async def test_full_row_snapshot_detects_update_with_table_and_primary_key(
+    session: AsyncSession,
+) -> None:
+    _, family_id = await seed_campaign(session, selected=True)
+    assert family_id is not None
+    before = await full_row_snapshot(session)
+    transaction = await session.begin_nested()
+    family = await session.get(MLSearchCampaignFamilyRecord, family_id)
+    assert family is not None
+    family.decision_reason = "deliberate_snapshot_mutation"
+    await session.flush()
+    after = await full_row_snapshot(session)
+
+    assert before.keys() == after.keys()
+    assert all(before[table].keys() == after[table].keys() for table in before)
+    changed_tables = {table for table in before if before[table] != after[table]}
+    assert changed_tables == {MLSearchCampaignFamilyRecord.__tablename__}
+    assert (str(family_id),) in after[MLSearchCampaignFamilyRecord.__tablename__]
+    await transaction.rollback()
+    assert before == await full_row_snapshot(session)
 
 
 async def test_structural_identity_failure_precedes_market_loading(
