@@ -20,7 +20,10 @@ from app.ml.campaign.contracts import (
     CampaignRequest,
 )
 from app.ml.campaign.coordinator import coordinate_next_campaign
+from app.ml.campaign.economic_v2_policy import strategy_policy_grid
 from app.ml.campaign.models import (
+    MLEconomicQualificationCampaignRecord,
+    MLEconomicQualificationRecord,
     MLSearchCampaignChildRecord,
     MLSearchCampaignFamilyRecord,
     MLSearchCampaignRecord,
@@ -881,6 +884,143 @@ async def test_completed_child_reconciliation_is_idempotent_across_sessions(
                 )
             ),
         ) == snapshot
+
+
+def _v2_metrics(*, passing: bool) -> dict[str, object]:
+    return {
+        "policy_fingerprint": "p" * 64,
+        "observations": 200,
+        "round_trips": 25,
+        "positive_net_folds": 6 if passing else 0,
+        "folds_beating_benchmark": 5 if passing else 0,
+        "median_net_return": "0.01" if passing else "-0.2",
+        "worst_net_return": "-0.01" if passing else "-0.2",
+        "maximum_drawdown": "0.10",
+        "inactive_folds": 0,
+        "compounded_return_1_5x": "0.05",
+        "compounded_return_2x": "0.03",
+        "complete_and_finite": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("classification", "expected"),
+    (
+        ("qualified", "qualified_candidates_found"),
+        ("rejected", "no_qualified_candidate"),
+    ),
+)
+async def test_v2_stage_five_waits_for_qualification_and_completes_idempotently(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    classification: str,
+    expected: str,
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(covered=True)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.contract_version = 2
+    record.policy_version = 2
+    record.classification_version = 2
+    record.current_stage = 4
+    family_record = family(record.id, source_id, state="survived")
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    family_record.current_stage = 4
+    family_record.future_duration_seconds = 3600
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 1
+    run.evaluations_selected = 1
+    evidence = evaluation(run.id)
+    evidence.future_duration_seconds = 3600
+    evidence.hyperparameters = {"alpha": 1.0, "fit_intercept": True}
+    evidence.feature_policy = {"strategy": "all"}
+    family_record.best_evaluation_id = evidence.id
+    family_record.best_metrics = _v2_metrics(passing=True)
+    policy = strategy_policy_grid(3600)[0]
+    family_record.selected_policy = {
+        "policy_fingerprint": policy.fingerprint,
+        "strategy_policy_version": policy.version,
+        "confidence_fraction": str(policy.confidence_fraction),
+        "holding_multiplier": str(policy.holding_multiplier),
+        "regime_policy": policy.regime_policy,
+        "holding_candles": policy.holding_candles,
+    }
+    family_record.selected_policy_fingerprint = policy.fingerprint
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(run)
+        await session.flush()
+        session.add(evidence)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+        assert await coordinate_next_campaign(session, now=NOW)
+        await session.refresh(record)
+        assert record.status == "running"
+        assert record.current_stage == 5
+        assert record.outcome is None
+        qualifications = tuple(
+            (await session.scalars(select(MLEconomicQualificationRecord))).all()
+        )
+        assert len(qualifications) == 1
+        qualification = qualifications[0]
+        assert await coordinate_next_campaign(session, now=NOW)
+        assert (
+            int(
+                await session.scalar(
+                    select(func.count()).select_from(
+                        MLEconomicQualificationCampaignRecord
+                    )
+                )
+                or 0
+            )
+            == 1
+        )
+        qualification.status = "completed"
+        qualification.classification = classification
+        qualification.scenario_metrics = {"base": {"total_net_return": "0.06"}}
+        qualification.quarter_returns = ["0.01"] * 4
+        qualification.trades = []
+        qualification.failed_rules = [] if classification == "qualified" else ["return"]
+        qualification.completed_at = NOW
+        await session.commit()
+        assert await coordinate_next_campaign(session, now=NOW)
+        await session.refresh(record)
+        assert record.status == "completed"
+        assert record.outcome == expected
+
+
+async def test_v2_stage_four_without_strong_candidate_creates_no_qualification(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, _ = factory
+    record = campaign(covered=True)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.current_stage = 4
+    family_record = family(record.id, source_id, state="survived")
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    family_record.current_stage = 4
+    family_record.best_metrics = _v2_metrics(passing=False)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+        assert await coordinate_next_campaign(session, now=NOW)
+        await session.refresh(record)
+        assert record.status == "completed"
+        assert record.outcome == "no_strong_candidate"
+        assert (
+            int(
+                await session.scalar(
+                    select(func.count()).select_from(MLEconomicQualificationRecord)
+                )
+                or 0
+            )
+            == 0
+        )
 
 
 async def test_legacy_confidence_bucket_audits_and_enqueues_idempotently(

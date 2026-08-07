@@ -27,6 +27,7 @@ from app.ml.refinement.persistence import (
     resolve_source,
 )
 from app.ml.refinement.planning import build_refinement_plan
+from app.ml.screening.config import ScreeningEngine
 from app.ml.screening.engines import library_versions
 from app.ml.screening.models import MLModelScreeningResultRecord
 
@@ -46,6 +47,11 @@ from .contracts import (
     STAGE_TRIALS,
     FeatureVariant,
     campaign_search_spaces,
+    seeded_local_search_space,
+)
+from .economic_v2_identity import (
+    qualification_identity,
+    qualification_identity_payload,
 )
 from .economic_v2_promotion import (
     EconomicV2Evidence,
@@ -53,7 +59,6 @@ from .economic_v2_promotion import (
     economic_v2_rank,
     is_economic_v2_development_candidate,
 )
-from .economic_v2_queue import qualification_identity
 from .models import (
     MLEconomicQualificationCampaignRecord,
     MLEconomicQualificationRecord,
@@ -506,7 +511,7 @@ async def _advance_stage(
             )
         if not strong:
             campaign.status = "completed"
-            campaign.outcome = "no_qualified_candidate"
+            campaign.outcome = "no_strong_candidate"
             campaign.completed_at = datetime.now(UTC)
         else:
             for family in families:
@@ -523,12 +528,27 @@ async def _advance_stage(
                     raise CampaignCoordinationError(
                         "development candidate evaluation disappeared"
                     )
-                candidate_fingerprint = qualification_identity(
-                    evaluation_fingerprint=evaluation.fingerprint,
-                    policy_fingerprint=str(
-                        family.selected_policy["policy_fingerprint"]
-                    ),
+                run = await session.get(MLRefinementRunRecord, evaluation.run_id)
+                if (
+                    run is None
+                    or run.status != "completed"
+                    or run.source_screening_run_id != family.source_screening_run_id
+                    or run.dataset_fingerprint != family.dataset_fingerprint
+                    or evaluation.engine != family.engine
+                    or evaluation.objective != family.objective
+                    or evaluation.future_duration_seconds
+                    != family.future_duration_seconds
+                ):
+                    raise CampaignCoordinationError(
+                        "development candidate refinement identity is incompatible"
+                    )
+                frozen_identity = qualification_identity_payload(
+                    family=family,
+                    evaluation=evaluation,
+                    run=run,
+                    policy=family.selected_policy,
                 )
+                candidate_fingerprint = qualification_identity(frozen_identity)
                 existing = await session.scalar(
                     select(MLEconomicQualificationRecord).where(
                         MLEconomicQualificationRecord.candidate_fingerprint
@@ -538,6 +558,10 @@ async def _advance_stage(
                     )
                 )
                 if existing is not None:
+                    if existing.frozen_inputs != frozen_identity:
+                        raise CampaignCoordinationError(
+                            "qualification scientific identity mismatch"
+                        )
                     if existing.status in {"failed", "cancelled"}:
                         existing.status = "queued"
                         existing.classification = None
@@ -589,17 +613,9 @@ async def _advance_stage(
                         objective=family.objective,
                         search_track=family.search_track,
                         seed_family_id=family.seed_family_id,
-                        frozen_inputs={
-                            "evaluation_id": str(evaluation.id),
-                            "evaluation_fingerprint": evaluation.fingerprint,
-                            "family_fingerprint": family.fingerprint,
-                            "deterministic_seed": ECONOMIC_V2_SEED,
-                        },
+                        frozen_inputs=frozen_identity,
                         temporal_manifest=manifest,
-                        temporal_manifest_fingerprint=qualification_identity(
-                            evaluation_fingerprint=evaluation.fingerprint,
-                            policy_fingerprint="not_read",
-                        ),
+                        temporal_manifest_fingerprint=qualification_identity(manifest),
                         policy_identity=family.selected_policy,
                         scenario_metrics=None,
                         quarter_returns=None,
@@ -682,9 +698,39 @@ async def _request_for_family(
         if variant is FeatureVariant.ALL
         else TopKFeatures(strategy="top_k", values=(variant.top_k,))
     )
-    search_space = next(
-        item for item in campaign_search_spaces() if item.engine.value == family.engine
-    )
+    if family.search_track == "seeded_local":
+        if family.seed_family_id is None:
+            raise CampaignCoordinationError("seeded-local family lacks seed identity")
+        seed = await session.get(MLSearchCampaignFamilyRecord, family.seed_family_id)
+        seed_evaluation = (
+            await session.get(MLRefinementEvaluationRecord, seed.best_evaluation_id)
+            if seed is not None and seed.best_evaluation_id is not None
+            else None
+        )
+        if (
+            seed is None
+            or seed_evaluation is None
+            or seed.engine != family.engine
+            or seed.objective != family.objective
+            or seed.feature_variant != family.feature_variant
+            or seed.source_screening_run_id != family.source_screening_run_id
+        ):
+            raise CampaignCoordinationError(
+                "seeded-local family has incompatible frozen seed evidence"
+            )
+        try:
+            search_space = seeded_local_search_space(
+                engine=ScreeningEngine(family.engine),
+                hyperparameters=seed_evaluation.hyperparameters,
+            )
+        except ValueError as error:
+            raise CampaignCoordinationError(str(error)) from error
+    else:
+        search_space = next(
+            item
+            for item in campaign_search_spaces()
+            if item.engine.value == family.engine
+        )
     return MLRefinementRequest(
         source_screening_run_id=family.source_screening_run_id,
         source_screening_result_id=source_result.id,
@@ -852,6 +898,13 @@ async def coordinate_next_campaign(
         return True
     await _advance_stage(session, campaign)
     if campaign.status == "completed":
+        return True
+    if (
+        campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
+        and campaign.current_stage == 5
+    ):
+        # Qualification is its own lifecycle phase. Never fall through into the
+        # ordinary family scheduler after stage 4 queued immutable evidence.
         return True
     stage = campaign.current_stage
     required_previous = stage - 1

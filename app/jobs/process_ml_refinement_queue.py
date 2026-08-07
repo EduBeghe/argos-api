@@ -140,7 +140,12 @@ async def process_once(
         if qualification is not None:
             try:
                 await process_qualification(
-                    session, record=qualification, worker_id=worker_id
+                    session,
+                    record=qualification,
+                    worker_id=worker_id,
+                    heartbeat_interval_seconds=heartbeat_interval_seconds(
+                        int(stale_after.total_seconds())
+                    ),
                 )
             except Exception as error:
                 await session.rollback()

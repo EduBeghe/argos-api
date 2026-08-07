@@ -40,6 +40,7 @@ from .contracts import (
     CampaignRequest,
     CampaignStatus,
     FeatureVariant,
+    seeded_local_search_space,
 )
 from .economic_v2_planning import (
     EconomicV2Family,
@@ -219,11 +220,35 @@ async def _validated_seeds(
             or not run_complete
             or run.source_screening_run_id != family.source_screening_run_id
             or evaluation.run_id != run.id
+            or evaluation.engine != family.engine
+            or evaluation.objective != family.objective
+            or evaluation.future_duration_seconds != family.future_duration_seconds
+            or evaluation.feature_policy.get("variant") != family.feature_variant
             or protected is not None
         ):
             raise CampaignSourceError(
                 f"seed family {family.id} lacks compatible owned development evidence"
             )
+        hyperparameters = tuple(
+            sorted(
+                (str(name), value)
+                for name, value in evaluation.hyperparameters.items()
+                if isinstance(value, (bool, int, float))
+            )
+        )
+        if len(hyperparameters) != len(evaluation.hyperparameters):
+            raise CampaignSourceError(
+                f"seed family {family.id} has non-canonical hyperparameters"
+            )
+        try:
+            seeded_local_search_space(
+                engine=ScreeningEngine(family.engine),
+                hyperparameters=dict(hyperparameters),
+            )
+        except ValueError as error:
+            raise CampaignSourceError(
+                f"seed family {family.id} has non-canonical hyperparameters"
+            ) from error
         seeds.append(
             SeedFamily(
                 family.id,
@@ -233,6 +258,7 @@ async def _validated_seeds(
                 PredictionObjective(family.objective),
                 FeatureVariant(family.feature_variant),
                 evaluation.fingerprint,
+                hyperparameters,
             )
         )
     return tuple(sorted(seeds, key=lambda item: item.id))

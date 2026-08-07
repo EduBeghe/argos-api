@@ -14,6 +14,8 @@ from app.ml.campaign.contracts import (
     ECONOMIC_POLICY_SEARCH_V2_PRESET,
     ECONOMIC_V2_DIVERSIFIED_FAMILIES,
     CampaignRequest,
+    campaign_search_spaces,
+    seeded_local_search_space,
 )
 from app.ml.campaign.economic_v2_calculation import evaluate_strategy_policy
 from app.ml.campaign.economic_v2_planning import (
@@ -32,8 +34,12 @@ from app.ml.campaign.economic_v2_promotion import (
     is_economic_v2_development_candidate,
     passes_economic_v2_stage,
 )
+from app.ml.campaign.economic_v2_qualification import (
+    qualification_temporal_indices,
+)
 from app.ml.campaign.planning import SourceInstrument, build_family_universe
 from app.ml.dataset import MLExperimentDataset
+from app.ml.gaps import datetime_to_ns
 from app.ml.refinement.contracts import PredictionObjective
 from app.ml.screening.config import ScreeningEngine
 
@@ -118,6 +124,7 @@ def test_seed_offsets_are_bounded_deduplicated_and_record_provenance() -> None:
             for item in build_economic_v2_universe((_source(),), ())
         ),
         "e" * 64,
+        (("alpha", 1.0), ("fit_intercept", True)),
     )
     universe = build_economic_v2_universe((_source(),), (seed,))
     assert len(universe) <= 600
@@ -125,6 +132,90 @@ def test_seed_offsets_are_bounded_deduplicated_and_record_provenance() -> None:
     assert any(seed.id in item.also_seeded_by for item in universe)
     assert all(
         3600 <= item.future_duration_seconds <= 7 * 24 * 3600 for item in universe
+    )
+
+
+@pytest.mark.parametrize("engine", tuple(ScreeningEngine))
+def test_seeded_local_space_uses_exact_seed_and_canonical_neighbours(
+    engine: ScreeningEngine,
+) -> None:
+    canonical = next(item for item in campaign_search_spaces() if item.engine is engine)
+    seed = {
+        name: getattr(canonical, name).expand()[
+            len(getattr(canonical, name).expand()) // 2
+        ]
+        for name in type(canonical).model_fields
+        if name != "engine"
+    }
+    local = seeded_local_search_space(engine=engine, hyperparameters=seed)
+    assert local.engine is engine
+    full_size = 1
+    local_size = 1
+    for name, seed_value in seed.items():
+        full = getattr(canonical, name).expand()
+        values = getattr(local, name).expand()
+        assert seed_value in values
+        assert set(values).issubset(full)
+        assert len(values) <= 3
+        full_size *= len(full)
+        local_size *= len(values)
+    assert local_size < full_size
+    assert local.model_dump(mode="json") == seeded_local_search_space(
+        engine=engine, hyperparameters=seed
+    ).model_dump(mode="json")
+
+
+@pytest.mark.parametrize("engine", tuple(ScreeningEngine))
+def test_seeded_local_space_clamps_at_canonical_edges(engine: ScreeningEngine) -> None:
+    canonical = next(item for item in campaign_search_spaces() if item.engine is engine)
+    seed = {
+        name: getattr(canonical, name).expand()[0]
+        for name in type(canonical).model_fields
+        if name != "engine"
+    }
+    local = seeded_local_search_space(engine=engine, hyperparameters=seed)
+    assert all(
+        len(getattr(local, name).expand()) <= 2
+        for name in type(local).model_fields
+        if name != "engine"
+    )
+
+
+@pytest.mark.parametrize("horizon_seconds", (3600, 72 * 3600))
+def test_qualification_temporal_selection_purges_cross_boundary_targets(
+    horizon_seconds: int,
+) -> None:
+    boundaries = tuple(
+        datetime_to_ns(value)
+        for value in (
+            datetime(2023, 12, 20, tzinfo=UTC),
+            datetime(2023, 12, 24, 23, tzinfo=UTC),
+            datetime(2024, 1, 1, tzinfo=UTC),
+            datetime(2024, 12, 31, 23, tzinfo=UTC),
+        )
+    )
+    dataset = cast(
+        MLExperimentDataset,
+        SimpleNamespace(
+            boundary_time_ns=np.asarray(boundaries, dtype=np.int64),
+            feature_eligible=np.ones(len(boundaries), dtype=np.bool_),
+        ),
+    )
+    pre_purge, development, qualification, targets = qualification_temporal_indices(
+        dataset=dataset,
+        target_eligible=np.ones(len(boundaries), dtype=np.bool_),
+        horizon_seconds=horizon_seconds,
+    )
+    assert tuple(map(int, pre_purge)) == (0, 1)
+    assert tuple(map(int, development)) == (0,)
+    assert tuple(map(int, qualification)) == (2,)
+    assert all(
+        int(targets[index]) < datetime_to_ns(datetime(2024, 1, 1, tzinfo=UTC))
+        for index in development
+    )
+    assert all(
+        int(targets[index]) < datetime_to_ns(datetime(2025, 1, 1, tzinfo=UTC))
+        for index in qualification
     )
 
 

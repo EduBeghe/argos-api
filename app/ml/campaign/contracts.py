@@ -97,6 +97,33 @@ def campaign_search_spaces() -> tuple[
     )
 
 
+def seeded_local_search_space(
+    *, engine: ScreeningEngine, hyperparameters: dict[str, object]
+) -> RidgeSearchSpace | LightGBMSearchSpace | CatBoostSearchSpace:
+    """Return the seed value and its immediate canonical neighbours per parameter."""
+
+    canonical = next(item for item in campaign_search_spaces() if item.engine is engine)
+    fields: dict[str, object] = {"engine": engine}
+    expected = set(type(canonical).model_fields) - {"engine"}
+    if set(hyperparameters) != expected:
+        raise ValueError(
+            "seed hyperparameters do not match the canonical engine domain"
+        )
+    for name in sorted(expected):
+        domain = getattr(canonical, name).expand()
+        seed_value = hyperparameters[name]
+        try:
+            index = domain.index(seed_value)
+        except ValueError as error:
+            raise ValueError(
+                f"seed hyperparameter {name} is outside the canonical domain"
+            ) from error
+        lower = max(0, index - 1)
+        upper = min(len(domain), index + 2)
+        fields[name] = ParameterGrid(values=domain[lower:upper])
+    return type(canonical).model_validate(fields)
+
+
 class CampaignStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"

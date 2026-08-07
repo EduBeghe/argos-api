@@ -30,6 +30,7 @@ class SeedFamily:
     objective: PredictionObjective
     feature_variant: FeatureVariant
     evaluation_fingerprint: str
+    hyperparameters: tuple[tuple[str, bool | int | float], ...]
 
 
 @dataclass(frozen=True, slots=True)

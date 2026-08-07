@@ -1,15 +1,20 @@
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.ml.campaign.economic_v2_queue import (
+    claim_next_qualification,
+    fail_stale_qualifications,
+    heartbeat_qualification,
+)
 from app.ml.campaign.models import (
     MLEconomicQualificationCampaignRecord,
     MLEconomicQualificationRecord,
@@ -178,7 +183,11 @@ async def economic_v2_records() -> AsyncIterator[dict[str, object]]:
                 )
             )
         await session.commit()
-    yield {"campaign_id": campaign_id, "qualification_ids": qualification_ids}
+    yield {
+        "campaign_id": campaign_id,
+        "qualification_ids": qualification_ids,
+        "sessions": factory,
+    }
     async with factory() as session:
         await session.execute(
             delete(MLSearchCampaignRecord).where(
@@ -245,3 +254,56 @@ async def test_campaign_detail_exposes_track_counts(
             "qualified": 0,
         },
     }
+
+
+async def test_qualification_heartbeat_prevents_reclaim_and_lost_owner_cannot_renew(
+    economic_v2_records: dict[str, object],
+) -> None:
+    sessions = economic_v2_records["sessions"]
+    assert isinstance(sessions, async_sessionmaker)
+    qualification_id = economic_v2_records["qualification_ids"][0]  # type: ignore[index]
+    async with sessions() as session:
+        await session.execute(
+            update(MLEconomicQualificationRecord)
+            .where(MLEconomicQualificationRecord.id == qualification_id)
+            .values(
+                status="queued",
+                classification=None,
+                scenario_metrics=None,
+                quarter_returns=None,
+                trades=None,
+                failed_rules=None,
+                completed_at=None,
+                worker_id=None,
+                claimed_at=None,
+                heartbeat_at=None,
+            )
+        )
+        await session.commit()
+        claimed = await claim_next_qualification(session, worker_id="worker-a")
+        assert claimed is not None and claimed.id == qualification_id
+        assert await heartbeat_qualification(
+            session, qualification_id=qualification_id, worker_id="worker-a"
+        )
+        assert (
+            await fail_stale_qualifications(session, stale_after=timedelta(seconds=1))
+            == 0
+        )
+        await session.execute(
+            update(MLEconomicQualificationRecord)
+            .where(MLEconomicQualificationRecord.id == qualification_id)
+            .values(heartbeat_at=datetime(2000, 1, 1, tzinfo=UTC))
+        )
+        await session.commit()
+        assert (
+            await fail_stale_qualifications(session, stale_after=timedelta(seconds=1))
+            == 1
+        )
+        assert not await heartbeat_qualification(
+            session, qualification_id=qualification_id, worker_id="worker-a"
+        )
+        replacement = await claim_next_qualification(session, worker_id="worker-b")
+        assert replacement is not None and replacement.id == qualification_id
+        assert await heartbeat_qualification(
+            session, qualification_id=qualification_id, worker_id="worker-b"
+        )

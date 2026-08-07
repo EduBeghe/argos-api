@@ -8,9 +8,9 @@ from decimal import Decimal
 
 import numpy as np
 
-from app.ml.contract import DEVELOPMENT_END, QUALIFICATION_END
+from app.ml.contract import DEVELOPMENT_END, QUALIFICATION_END, SPLIT_GAP
 from app.ml.dataset import MLExperimentDataset
-from app.ml.gaps import datetime_to_ns
+from app.ml.gaps import datetime_to_ns, ns_to_datetime
 from app.ml.protected.validation import _candidate
 from app.ml.refinement.calculation import _fit_predict, _selected_columns
 from app.ml.refinement.models import MLRefinementEvaluationRecord
@@ -34,11 +34,38 @@ class QualificationResult:
     failed_rules: tuple[str, ...]
 
 
-def _compound(values: tuple[Decimal, ...]) -> Decimal:
-    result = Decimal(1)
-    for value in values:
-        result *= Decimal(1) + value
-    return result - Decimal(1)
+def qualification_temporal_indices(
+    *,
+    dataset: MLExperimentDataset,
+    target_eligible: np.ndarray[tuple[int], np.dtype[np.bool_]],
+    horizon_seconds: int,
+) -> tuple[
+    np.ndarray[tuple[int], np.dtype[np.int64]],
+    np.ndarray[tuple[int], np.dtype[np.int64]],
+    np.ndarray[tuple[int], np.dtype[np.int64]],
+    np.ndarray[tuple[int], np.dtype[np.int64]],
+]:
+    """Apply the frozen purge and half-open 2024 qualification boundaries."""
+
+    eligible = dataset.feature_eligible & target_eligible
+    horizon_ns = horizon_seconds * 1_000_000_000
+    target_time_ns = dataset.boundary_time_ns + horizon_ns
+    development_pre_purge = np.flatnonzero(
+        eligible & (dataset.boundary_time_ns < datetime_to_ns(DEVELOPMENT_END))
+    ).astype(np.int64)
+    effective_development_end = DEVELOPMENT_END - SPLIT_GAP
+    development = np.flatnonzero(
+        eligible
+        & (dataset.boundary_time_ns < datetime_to_ns(effective_development_end))
+        & (target_time_ns < datetime_to_ns(effective_development_end))
+    ).astype(np.int64)
+    qualification = np.flatnonzero(
+        eligible
+        & (dataset.boundary_time_ns >= datetime_to_ns(DEVELOPMENT_END))
+        & (dataset.boundary_time_ns < datetime_to_ns(QUALIFICATION_END))
+        & (target_time_ns < datetime_to_ns(QUALIFICATION_END))
+    ).astype(np.int64)
+    return development_pre_purge, development, qualification, target_time_ns
 
 
 def _period_return(
@@ -72,17 +99,22 @@ def calculate_qualification(
     target = dataset.targets.for_duration(
         timedelta(seconds=candidate.future_duration_seconds)
     )
-    eligible = dataset.feature_eligible & target.eligible
-    development = np.flatnonzero(
-        eligible & (dataset.boundary_time_ns < datetime_to_ns(DEVELOPMENT_END))
-    ).astype(np.int64)
-    qualification = np.flatnonzero(
-        eligible
-        & (dataset.boundary_time_ns >= datetime_to_ns(DEVELOPMENT_END))
-        & (dataset.boundary_time_ns < datetime_to_ns(QUALIFICATION_END))
-    ).astype(np.int64)
+    development_pre_purge, development, qualification, target_time_ns = (
+        qualification_temporal_indices(
+            dataset=dataset,
+            target_eligible=target.eligible,
+            horizon_seconds=candidate.future_duration_seconds,
+        )
+    )
+    effective_development_end = DEVELOPMENT_END - SPLIT_GAP
     if not len(development) or not len(qualification):
-        raise ValueError("qualification has incomplete temporal evidence")
+        raise ValueError("qualification_temporal_separation_insufficient_evidence")
+    if int(target_time_ns[development[-1]]) >= datetime_to_ns(
+        effective_development_end
+    ) or int(dataset.boundary_time_ns[qualification[0]]) < datetime_to_ns(
+        DEVELOPMENT_END
+    ):
+        raise ValueError("qualification_temporal_separation_unproven")
     columns = _selected_columns(
         candidate, dataset.features[development], target.values[development]
     )
@@ -146,12 +178,29 @@ def calculate_qualification(
         quarter_returns=quarters,
     )
     manifest: dict[str, object] = {
+        "requested_start": dataset.metadata.requested_start.isoformat(),
+        "requested_end_exclusive": dataset.metadata.requested_end.isoformat(),
         "development_start": dataset.metadata.requested_start.isoformat(),
-        "development_end_exclusive": DEVELOPMENT_END.isoformat(),
-        "qualification_start": DEVELOPMENT_END.isoformat(),
+        "development_boundary_exclusive": DEVELOPMENT_END.isoformat(),
+        "effective_development_end_exclusive": effective_development_end.isoformat(),
+        "qualification_start_inclusive": DEVELOPMENT_END.isoformat(),
         "qualification_end_exclusive": QUALIFICATION_END.isoformat(),
-        "development_rows": len(development),
+        "horizon_seconds": candidate.future_duration_seconds,
+        "purge_gap_seconds": int(SPLIT_GAP.total_seconds()),
+        "embargo_seconds": 0,
+        "development_rows_pre_purge": len(development_pre_purge),
+        "development_rows_post_purge": len(development),
+        "development_rows_purged": len(development_pre_purge) - len(development),
         "qualification_rows": len(qualification),
+        "last_development_feature_timestamp": ns_to_datetime(
+            int(dataset.boundary_time_ns[development[-1]])
+        ).isoformat(),
+        "last_development_target_timestamp": ns_to_datetime(
+            int(target_time_ns[development[-1]])
+        ).isoformat(),
+        "first_qualification_timestamp": ns_to_datetime(
+            int(dataset.boundary_time_ns[qualification[0]])
+        ).isoformat(),
         "selected_columns": [int(item) for item in columns],
         "dataset_fingerprint": dataset.metadata.fingerprint,
     }
