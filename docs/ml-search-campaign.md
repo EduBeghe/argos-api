@@ -57,8 +57,12 @@ Concurrent retry requests are serialized; only one may requeue the campaign.
 `economic_policy_search_v2` is independently versioned and leaves every v1 request,
 fingerprint, row, and lifecycle rule unchanged. Its diversified track contains 432
 families per source: three engines, twelve horizons, three objectives, and four
-feature policies. Optional seed families add deterministic local horizon variants;
-the complete source universe remains capped at 600 families.
+feature policies. Optional seed families add deterministic local horizon variants.
+Each seeded-local child starts from the seed evaluation's exact canonical
+hyperparameters and searches only that point plus its immediate lower and upper
+canonical neighbors. Invalid or incompatible seed evidence is rejected before
+campaign rows are created. The complete source universe remains capped at 600
+families.
 
 Each fitted model evaluates 45 policies without refitting: five training-derived
 entry-confidence fractions, three exact five-minute holding multipliers, and three
@@ -71,10 +75,32 @@ The temporal protocol is immutable and half-open:
 - qualification: `[2024-01-01T00:00:00Z, 2025-01-01T00:00:00Z)`;
 - reserved final evidence: `[2025-01-01T00:00:00Z, 2026-01-01T00:00:00Z)`.
 
-Only frozen development candidates are qualified on calendar 2024. Qualification is
-stored in `ml_economic_qualifications`; it never writes protected-final, deployment,
-Decision, or Paper state. The shared boundary guard rejects every v2 read extending
-past `2025-01-01T00:00:00Z`.
+Only frozen development candidates are qualified on calendar 2024. Development rows
+are purged by the authoritative seven-day split gap, and both the feature boundary
+and its horizon endpoint must precede the effective development cutoff.
+Qualification uses only boundaries whose complete target endpoint is before 2025.
+The persisted temporal manifest records requested and effective boundaries, purge
+counts, horizon, columns, and the exact consumed-data fingerprint.
+
+Qualification is stored in `ml_economic_qualifications`; it never writes
+protected-final, deployment, Decision, or Paper state. Before any market read, the
+worker revalidates the complete frozen scientific identity against the source,
+family, evaluation, completed refinement run, policy, costs, contract versions, and
+temporal boundaries. Exact identities may be reused across campaigns; any mismatch
+fails closed.
+
+Stage 5 is a dedicated qualification lifecycle. After qualification rows are queued,
+the generic refinement scheduler is no longer entered. Repeated coordination is
+idempotent while work is queued or running, and the campaign terminates only after
+all qualifications are terminal. `qualified_candidates_found`,
+`no_qualified_candidate`, and `no_strong_candidate` remain distinct conclusions.
+
+Qualification workers maintain an independent database heartbeat during both
+dataset loading and CPU evaluation. Publication and failure updates require the same
+worker lease. A stale worker that lost ownership cannot publish evidence or overwrite
+the new owner; cancellation is also checked at the ownership boundary. The shared
+boundary guard rejects every v2 read extending past
+`2025-01-01T00:00:00Z`.
 
 Discover both preset contracts at
 `GET /optimization/ml-search-campaign-contract/v2`. Qualification evidence is
