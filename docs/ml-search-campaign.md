@@ -1,4 +1,4 @@
-# Exhaustive OHLCV ML Search Campaign
+# Versioned ML Search Campaigns
 
 `exhaustive_ohlcv_v1` is a durable coordinator over the existing ML refinement
 queue. It does not train in HTTP requests and does not read protected final-test
@@ -27,7 +27,7 @@ it does not authorize Strategy simulation, Paper Trading, or production activati
 
 ## Railway operation
 
-Deploy migration `20260731_25`, redeploy the API, and keep one `argos-research`
+Deploy migrations through head, redeploy the API, and keep one `argos-research`
 replica running the existing worker:
 
 ```sh
@@ -51,6 +51,84 @@ responsible child refinement is failed, cancelled, or structurally incomplete, r
 atomically resets that same refinement run to a clean queued lease while preserving
 its immutable experiment identity and any already persisted reusable evaluation rows.
 Concurrent retry requests are serialized; only one may requeue the campaign.
+
+## Economic policy search v2
+
+`economic_policy_search_v2` is independently versioned and leaves every v1 request,
+fingerprint, row, and lifecycle rule unchanged. Its diversified track contains 432
+families per source: three engines, twelve horizons, three objectives, and four
+feature policies. Optional seed families add deterministic local horizon variants.
+Each seeded-local child starts from the seed evaluation's exact canonical
+hyperparameters and searches only that point plus its immediate lower and upper
+canonical neighbors. Invalid or incompatible seed evidence is rejected before
+campaign rows are created. The complete source universe remains capped at 600
+families.
+
+Each fitted model evaluates 45 policies without refitting: five training-derived
+entry-confidence fractions, three exact five-minute holding multipliers, and three
+training-fitted regime policies. Economic promotion uses seven development folds and
+retains objective diversity without promoting a family that failed its stage gate.
+
+The temporal protocol is immutable and half-open:
+
+- development/search: `[2020-01-01T00:00:00Z, 2024-01-01T00:00:00Z)`;
+- qualification: `[2024-01-01T00:00:00Z, 2025-01-01T00:00:00Z)`;
+- reserved final evidence: `[2025-01-01T00:00:00Z, 2026-01-01T00:00:00Z)`.
+
+Only frozen development candidates are qualified on calendar 2024. Development rows
+are purged by the authoritative seven-day split gap, and both the feature boundary
+and its horizon endpoint must precede the effective development cutoff.
+Qualification uses only boundaries whose complete target endpoint is before 2025.
+The persisted temporal manifest records requested and effective boundaries, purge
+counts, horizon, columns, and the exact consumed-data fingerprint.
+
+Qualification is stored in `ml_economic_qualifications`; it never writes
+protected-final, deployment, Decision, or Paper state. Before any market read, the
+worker revalidates the complete frozen scientific identity against the source,
+family, evaluation, completed refinement run, policy, costs, contract versions, and
+temporal boundaries. Exact identities may be reused across campaigns; any mismatch
+fails closed.
+
+Stage 5 is a dedicated qualification lifecycle. After qualification rows are queued,
+the generic refinement scheduler is no longer entered. Repeated coordination is
+idempotent while work is queued or running, and the campaign terminates only after
+all qualifications are terminal. `qualified_candidates_found`,
+`no_qualified_candidate`, and `no_strong_candidate` remain distinct conclusions.
+
+Qualification workers maintain an independent database heartbeat during both
+dataset loading and CPU evaluation. Publication and failure updates require the same
+worker lease. A stale worker that lost ownership cannot publish evidence or overwrite
+the new owner; cancellation is also checked at the ownership boundary. The shared
+boundary guard rejects every v2 read extending past
+`2025-01-01T00:00:00Z`.
+
+Before releasing the database read transaction, the worker materializes the selected
+evaluation as an immutable `PlannedEvaluation` containing only normalized scientific
+values. Background CPU calculation receives that snapshot, the fully materialized
+dataset, and the frozen policy; it never receives an ORM record, session, connection,
+or lazy query result. This keeps the long calculation outside a database transaction
+without allowing rollback-expired ORM state to cross the thread boundary.
+
+Discover both preset contracts at
+`GET /optimization/ml-search-campaign-contract/v2`. Qualification evidence is
+read-only and paginated at
+`GET /optimization/ml-search-campaigns/{campaign_id}/qualifications`, with detail at
+`GET /optimization/ml-search-campaigns/{campaign_id}/qualifications/{qualification_id}`.
+
+The first production enqueue can retain campaign
+`cf1fee07-143a-4759-bcc4-f662f03a7aa9` only as provenance and use its seed family,
+while the current completed source screening run IDs remain operator inputs:
+
+```sh
+python -m app.jobs.enqueue_ml_search_campaign \
+  --source-screening-run-id <current-btc-screening-run-id> \
+  --source-screening-run-id <current-eth-screening-run-id> \
+  --preset economic_policy_search_v2 \
+  --seed-family-id a43c2c2b-d04c-446e-8cef-0838707c2ed7 \
+  --enqueue
+```
+
+The seed is research provenance, not final-validation or deployment authorization.
 
 ## Development economic re-audit
 
@@ -104,4 +182,3 @@ future profitability.
 For rollback, stop the research worker and API version using the new endpoints, then
 downgrade one Alembic revision. The downgrade removes only campaign tables and does
 not delete historical screening or refinement evidence.
-

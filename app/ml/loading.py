@@ -5,7 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.market.catalog import Instrument
 
-from .contract import DEVELOPMENT_START, FINAL_TEST_END, FINAL_TEST_START
+from .contract import (
+    DEVELOPMENT_START,
+    FINAL_TEST_END,
+    FINAL_TEST_START,
+    QUALIFICATION_END,
+)
 from .dataset import (
     MLDatasetMetadata,
     MLExperimentDataset,
@@ -109,6 +114,27 @@ async def load_ml_development_dataset(
         raise DevelopmentDatasetProtectedEvidenceError(
             ns_to_datetime(first).isoformat()
         )
+    return dataset
+
+
+async def load_ml_qualification_dataset(
+    *, session: AsyncSession, instrument: Instrument
+) -> MLExperimentDataset:
+    """Load only development plus calendar-2024 qualification evidence."""
+
+    candles = await read_ml_experiment_candles(
+        session=session,
+        instrument=instrument,
+        start=DEVELOPMENT_START,
+        end=QUALIFICATION_END,
+    )
+    dataset = build_ml_experiment_dataset(
+        instrument=instrument,
+        columns=candles.columns,
+        requested_end=QUALIFICATION_END,
+    )
+    if np.any(dataset.boundary_time_ns >= datetime_to_ns(QUALIFICATION_END)):
+        raise DevelopmentDatasetProtectedEvidenceError(QUALIFICATION_END.isoformat())
     return dataset
 
 

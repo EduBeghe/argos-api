@@ -13,6 +13,11 @@ from app.core.database.engine import create_database_engine
 from app.core.database.session import create_session_factory
 from app.core.logging import configure_logging
 from app.ml.campaign.coordinator import coordinate_next_campaign
+from app.ml.campaign.economic_v2_queue import (
+    claim_next_qualification,
+    fail_stale_qualifications,
+    process_qualification,
+)
 from app.ml.loading import load_ml_development_dataset
 from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
 from app.ml.protected.queue import claim_next as claim_protected_work
@@ -129,6 +134,39 @@ async def process_once(
                     )[:512]
                     await session.commit()
                 logger.exception("Protected final validation failed")
+            return True
+        await fail_stale_qualifications(session, stale_after=stale_after)
+        qualification = await claim_next_qualification(session, worker_id=worker_id)
+        if qualification is not None:
+            try:
+                await process_qualification(
+                    session,
+                    record=qualification,
+                    worker_id=worker_id,
+                    heartbeat_interval_seconds=heartbeat_interval_seconds(
+                        int(stale_after.total_seconds())
+                    ),
+                )
+            except Exception as error:
+                await session.rollback()
+                owned_qualification = await session.get(
+                    type(qualification), qualification.id
+                )
+                if (
+                    owned_qualification is not None
+                    and owned_qualification.worker_id == worker_id
+                ):
+                    owned_qualification.status = "failed"
+                    owned_qualification.failed_at = datetime.now(UTC)
+                    owned_qualification.failure_type = type(error).__name__[:128]
+                    owned_qualification.failure_message = (
+                        "qualification execution failed"
+                    )
+                    owned_qualification.worker_id = None
+                    owned_qualification.claimed_at = None
+                    owned_qualification.heartbeat_at = None
+                    await session.commit()
+                logger.exception("Economic v2 qualification failed")
             return True
         await coordinate_next_campaign(session)
         stale_count = await fail_stale_runs(session, stale_after=stale_after)

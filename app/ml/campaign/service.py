@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -17,7 +18,9 @@ from app.ml.contract import (
     ML_EXPERIMENT_CONTRACT_VERSION,
     VARIABLE_REGISTRY_VERSION,
 )
-from app.ml.refinement.models import MLRefinementRunRecord
+from app.ml.protected.models import MLFinalValidationRecord
+from app.ml.refinement.contracts import PredictionObjective
+from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementRunRecord
 from app.ml.refinement.persistence import completed_run_is_complete
 from app.ml.screening.config import ML_MODEL_SCREENING_VERSION, ScreeningEngine
 from app.ml.screening.models import (
@@ -29,16 +32,30 @@ from .contracts import (
     CAMPAIGN_CLASSIFICATION_VERSION,
     CAMPAIGN_CONTRACT_VERSION,
     CAMPAIGN_POLICY_VERSION,
+    CAMPAIGN_PRESET,
+    ECONOMIC_POLICY_SEARCH_V2_PRESET,
+    ECONOMIC_V2_CLASSIFICATION_VERSION,
+    ECONOMIC_V2_CONTRACT_VERSION,
+    ECONOMIC_V2_POLICY_VERSION,
     CampaignRequest,
     CampaignStatus,
+    FeatureVariant,
+    seeded_local_search_space,
+)
+from .economic_v2_planning import (
+    EconomicV2Family,
+    SeedFamily,
+    build_economic_v2_universe,
 )
 from .models import (
+    MLEconomicQualificationCampaignRecord,
+    MLEconomicQualificationRecord,
     MLSearchCampaignChildRecord,
     MLSearchCampaignFamilyRecord,
     MLSearchCampaignRecord,
     MLSearchCampaignSourceRecord,
 )
-from .planning import SourceInstrument, build_family_universe
+from .planning import CampaignFamily, SourceInstrument, build_family_universe
 from .refinement_runs import reset_refinement_run
 
 logger = logging.getLogger(__name__)
@@ -141,13 +158,151 @@ async def _validated_sources(
     return tuple(sources)
 
 
+async def _validated_seeds(
+    session: AsyncSession,
+    request: CampaignRequest,
+    sources: tuple[SourceInstrument, ...],
+) -> tuple[SeedFamily, ...]:
+    if request.preset != ECONOMIC_POLICY_SEARCH_V2_PRESET:
+        return ()
+    if not request.seed_family_ids:
+        return ()
+    rows = tuple(
+        (
+            await session.scalars(
+                select(MLSearchCampaignFamilyRecord).where(
+                    MLSearchCampaignFamilyRecord.id.in_(request.seed_family_ids)
+                )
+            )
+        ).all()
+    )
+    if len(rows) != len(request.seed_family_ids):
+        raise CampaignSourceError("one or more seed families do not exist")
+    source_by_id = {item.source_run_id: item for item in sources}
+    seeds: list[SeedFamily] = []
+    for family in rows:
+        campaign = await session.get(MLSearchCampaignRecord, family.campaign_id)
+        evaluation = (
+            await session.get(MLRefinementEvaluationRecord, family.best_evaluation_id)
+            if family.best_evaluation_id is not None
+            else None
+        )
+        run = (
+            await session.get(MLRefinementRunRecord, evaluation.run_id)
+            if evaluation is not None
+            else None
+        )
+        source = source_by_id.get(str(family.source_screening_run_id))
+        protected = (
+            await session.scalar(
+                select(MLFinalValidationRecord.id)
+                .where(
+                    MLFinalValidationRecord.evaluation_id == family.best_evaluation_id
+                )
+                .limit(1)
+            )
+            if family.best_evaluation_id is not None
+            else None
+        )
+        run_complete = (
+            await completed_run_is_complete(session, run) if run is not None else False
+        )
+        if (
+            campaign is None
+            or campaign.status != "completed"
+            or campaign.families_uncovered != 0
+            or campaign.families_covered != campaign.families_total
+            or source is None
+            or source.dataset_fingerprint != family.dataset_fingerprint
+            or evaluation is None
+            or run is None
+            or run.status != "completed"
+            or not run_complete
+            or run.source_screening_run_id != family.source_screening_run_id
+            or evaluation.run_id != run.id
+            or evaluation.engine != family.engine
+            or evaluation.objective != family.objective
+            or evaluation.future_duration_seconds != family.future_duration_seconds
+            or evaluation.feature_policy.get("variant") != family.feature_variant
+            or protected is not None
+        ):
+            raise CampaignSourceError(
+                f"seed family {family.id} lacks compatible owned development evidence"
+            )
+        hyperparameters = tuple(
+            sorted(
+                (str(name), value)
+                for name, value in evaluation.hyperparameters.items()
+                if isinstance(value, (bool, int, float))
+            )
+        )
+        if len(hyperparameters) != len(evaluation.hyperparameters):
+            raise CampaignSourceError(
+                f"seed family {family.id} has non-canonical hyperparameters"
+            )
+        try:
+            seeded_local_search_space(
+                engine=ScreeningEngine(family.engine),
+                hyperparameters=dict(hyperparameters),
+            )
+        except ValueError as error:
+            raise CampaignSourceError(
+                f"seed family {family.id} has non-canonical hyperparameters"
+            ) from error
+        seeds.append(
+            SeedFamily(
+                family.id,
+                str(family.source_screening_run_id),
+                ScreeningEngine(family.engine),
+                family.future_duration_seconds,
+                PredictionObjective(family.objective),
+                FeatureVariant(family.feature_variant),
+                evaluation.fingerprint,
+                hyperparameters,
+            )
+        )
+    return tuple(sorted(seeds, key=lambda item: item.id))
+
+
+async def _campaign_universe(
+    session: AsyncSession,
+    request: CampaignRequest,
+    sources: tuple[SourceInstrument, ...],
+) -> tuple[CampaignFamily | EconomicV2Family, ...]:
+    if request.preset == CAMPAIGN_PRESET:
+        return build_family_universe(sources)
+    seeds = await _validated_seeds(session, request, sources)
+    universe = build_economic_v2_universe(sources, seeds)
+    if request.maximum_evaluations < len(universe):
+        raise CampaignSourceError(
+            "maximum_evaluations cannot cover stage 1; "
+            f"exact minimum is {len(universe)}"
+        )
+    tracks = Counter(item.search_track for item in universe)
+    objectives = Counter(item.objective.value for item in universe)
+    logger.info(
+        "Economic v2 campaign planned",
+        extra={
+            "structured_fields": {
+                "preset": request.preset,
+                "families": len(universe),
+                "by_track": dict(sorted(tracks.items())),
+                "by_objective": dict(sorted(objectives.items())),
+                "source_count": len(sources),
+            }
+        },
+    )
+    return universe
+
+
 async def preview_campaign(
     session: AsyncSession, request: CampaignRequest
 ) -> tuple[tuple[SourceInstrument, ...], int, str]:
     sources = await _validated_sources(session, request)
+    universe = await _campaign_universe(session, request, sources)
     return (
         sources,
-        len(build_family_universe(sources)),
+        len(universe),
         _experiment_key(request, sources),
     )
 
@@ -156,7 +311,7 @@ async def enqueue_campaign(
     session: AsyncSession, request: CampaignRequest, *, now: datetime | None = None
 ) -> CampaignEnqueueResult:
     sources = await _validated_sources(session, request)
-    universe = build_family_universe(sources)
+    universe = await _campaign_universe(session, request, sources)
     key = _experiment_key(request, sources)
     existing = await session.scalar(
         select(MLSearchCampaignRecord).where(
@@ -173,11 +328,24 @@ async def enqueue_campaign(
     campaign = MLSearchCampaignRecord(
         id=uuid4(),
         experiment_key=key,
+        preset=request.preset,
         status=CampaignStatus.QUEUED.value,
         outcome=None,
-        contract_version=CAMPAIGN_CONTRACT_VERSION,
-        policy_version=CAMPAIGN_POLICY_VERSION,
-        classification_version=CAMPAIGN_CLASSIFICATION_VERSION,
+        contract_version=(
+            CAMPAIGN_CONTRACT_VERSION
+            if request.preset == CAMPAIGN_PRESET
+            else ECONOMIC_V2_CONTRACT_VERSION
+        ),
+        policy_version=(
+            CAMPAIGN_POLICY_VERSION
+            if request.preset == CAMPAIGN_PRESET
+            else ECONOMIC_V2_POLICY_VERSION
+        ),
+        classification_version=(
+            CAMPAIGN_CLASSIFICATION_VERSION
+            if request.preset == CAMPAIGN_PRESET
+            else ECONOMIC_V2_CLASSIFICATION_VERSION
+        ),
         normalized_request=normalized_request,
         maximum_evaluations=request.maximum_evaluations,
         maximum_runtime_seconds=request.maximum_runtime_seconds,
@@ -213,6 +381,22 @@ async def enqueue_campaign(
                     campaign_id=campaign.id,
                     source_screening_run_id=UUID(item.source.source_run_id),
                     fingerprint=item.fingerprint,
+                    preset=request.preset,
+                    search_track=(
+                        item.search_track
+                        if isinstance(item, EconomicV2Family)
+                        else "exhaustive"
+                    ),
+                    seed_family_id=(
+                        item.seed_family_id
+                        if isinstance(item, EconomicV2Family)
+                        else None
+                    ),
+                    seed_provenance=(
+                        [str(seed_id) for seed_id in item.also_seeded_by]
+                        if isinstance(item, EconomicV2Family)
+                        else []
+                    ),
                     dataset_fingerprint=item.source.dataset_fingerprint,
                     asset=item.source.asset,
                     provider=item.source.provider,
@@ -229,6 +413,8 @@ async def enqueue_campaign(
                     evaluations_reused=0,
                     best_evaluation_id=None,
                     best_metrics=None,
+                    selected_policy=None,
+                    selected_policy_fingerprint=None,
                     decision_reason=None,
                     deterministic_ordinal=ordinal,
                     created_at=timestamp,
@@ -273,6 +459,61 @@ async def cancel_campaign(
         raise CampaignConflictError(f"{record.status} campaign cannot be cancelled")
     timestamp = now or datetime.now(UTC)
     record.cancellation_requested_at = timestamp
+    if record.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET and record.current_stage == 5:
+        qualifications = tuple(
+            (
+                await session.scalars(
+                    select(MLEconomicQualificationRecord)
+                    .where(
+                        MLEconomicQualificationRecord.id.in_(
+                            select(
+                                MLEconomicQualificationCampaignRecord.qualification_id
+                            ).where(
+                                MLEconomicQualificationCampaignRecord.campaign_id
+                                == campaign_id
+                            )
+                        ),
+                        MLEconomicQualificationRecord.status.in_(("queued", "running")),
+                    )
+                    .with_for_update()
+                )
+            ).all()
+        )
+        waiting = False
+        for qualification in qualifications:
+            shared = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(MLEconomicQualificationCampaignRecord)
+                    .join(
+                        MLSearchCampaignRecord,
+                        MLSearchCampaignRecord.id
+                        == MLEconomicQualificationCampaignRecord.campaign_id,
+                    )
+                    .where(
+                        MLEconomicQualificationCampaignRecord.qualification_id
+                        == qualification.id,
+                        MLEconomicQualificationCampaignRecord.campaign_id
+                        != campaign_id,
+                        MLSearchCampaignRecord.status.in_(("queued", "running")),
+                        MLSearchCampaignRecord.cancellation_requested_at.is_(None),
+                    )
+                )
+                or 0
+            )
+            if shared:
+                continue
+            if qualification.status == "queued":
+                qualification.status = "cancelled"
+                qualification.completed_at = timestamp
+            else:
+                qualification.cancellation_requested_at = timestamp
+                waiting = True
+        if not waiting:
+            record.status = "cancelled"
+            record.completed_at = timestamp
+        await session.commit()
+        return record
     child = await session.scalar(
         select(MLSearchCampaignChildRecord)
         .where(MLSearchCampaignChildRecord.campaign_id == campaign_id)

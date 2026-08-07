@@ -2,6 +2,7 @@ import hashlib
 import json
 import math
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from app.ml.screening.config import ScreeningEngine
@@ -40,6 +41,49 @@ class PlannedEvaluation:
             "explicit_variables": self.explicit_variables,
             "top_k": self.top_k,
         }
+
+
+def planned_evaluation_from_persisted_values(
+    *,
+    fingerprint: str,
+    engine: str,
+    future_duration_seconds: int,
+    objective: str,
+    hyperparameters: Mapping[str, object],
+    feature_policy: Mapping[str, object],
+) -> PlannedEvaluation:
+    """Materialize and validate a session-independent persisted evaluation."""
+
+    parameters: list[tuple[str, bool | int | float]] = []
+    for key, value in hyperparameters.items():
+        if not isinstance(value, (bool, int, float)):
+            raise ValueError(f"invalid frozen hyperparameter: {key}")
+        parameters.append((str(key), value))
+    variables = feature_policy.get("variables")
+    if variables is not None and not isinstance(variables, list):
+        raise ValueError("invalid frozen feature variables")
+    if isinstance(variables, list) and any(
+        not isinstance(item, str) for item in variables
+    ):
+        raise ValueError("invalid frozen feature variables")
+    strategy = feature_policy.get("strategy")
+    if not isinstance(strategy, str) or not strategy:
+        raise ValueError("invalid frozen feature strategy")
+    top_k = feature_policy.get("top_k")
+    if top_k is not None and (
+        not isinstance(top_k, int) or isinstance(top_k, bool) or top_k <= 0
+    ):
+        raise ValueError("invalid frozen feature top_k")
+    return PlannedEvaluation(
+        fingerprint,
+        ScreeningEngine(engine),
+        future_duration_seconds,
+        PredictionObjective(objective),
+        tuple(sorted(parameters)),
+        strategy,
+        tuple(variables) if isinstance(variables, list) else None,
+        top_k,
+    )
 
 
 @dataclass(frozen=True, slots=True)

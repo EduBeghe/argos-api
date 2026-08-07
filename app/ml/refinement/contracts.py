@@ -243,6 +243,16 @@ class FeatureSelectionSearch(BaseModel):
         return self
 
 
+class EconomicPolicySearchConfiguration(BaseModel):
+    """Versioned strategy-policy grid evaluated without refitting a model."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    confidence_fractions: tuple[Decimal, ...]
+    holding_multipliers: tuple[Decimal, ...]
+    regime_policies: tuple[str, ...]
+    version: int
+
+
 class MLRefinementRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     source_screening_run_id: UUID
@@ -258,6 +268,7 @@ class MLRefinementRequest(BaseModel):
     maximum_trials: int = Field(ge=1, le=MAXIMUM_TRIAL_BUDGET)
     maximum_runtime_seconds: int = Field(ge=1, le=MAXIMUM_RUNTIME_SECONDS)
     deterministic_seed: int
+    economic_policy_search: EconomicPolicySearchConfiguration | None = None
     notes: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
@@ -299,6 +310,8 @@ class MLRefinementRequest(BaseModel):
             payload["feature_selection"]["strategies"],
             key=lambda item: json.dumps(item, sort_keys=True),
         )
+        if self.economic_policy_search is None:
+            payload.pop("economic_policy_search", None)
         return payload
 
     def fingerprint(self) -> str:

@@ -4,17 +4,29 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.database.session import get_db_session
 from app.market.enums import Asset, Interval, MarketType, Provider
-from app.ml.campaign.contracts import CampaignContract, CampaignRequest
-from app.ml.campaign.models import MLSearchCampaignFamilyRecord, MLSearchCampaignRecord
+from app.ml.campaign.contracts import (
+    CampaignContract,
+    CampaignContractsResponse,
+    CampaignRequest,
+)
+from app.ml.campaign.models import (
+    MLEconomicQualificationCampaignRecord,
+    MLEconomicQualificationRecord,
+    MLSearchCampaignFamilyRecord,
+    MLSearchCampaignRecord,
+)
 from app.ml.campaign.schemas import (
     CampaignEnqueueResponse,
     CampaignPage,
     CampaignResponse,
     FamilyPage,
     FamilyResponse,
+    QualificationPage,
+    QualificationResponse,
 )
 from app.ml.campaign.service import (
     CampaignConflictError,
@@ -205,6 +217,11 @@ async def ml_search_campaign_contract() -> CampaignContract:
     return CampaignContract()
 
 
+@router.get("/ml-search-campaign-contract/v2", response_model=CampaignContractsResponse)
+async def ml_search_campaign_contract_v2() -> CampaignContractsResponse:
+    return CampaignContractsResponse()
+
+
 @router.post(
     "/ml-search-campaigns",
     response_model=CampaignEnqueueResponse,
@@ -235,6 +252,7 @@ async def list_ml_search_campaigns(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     campaign_status: str | None = Query(default=None, alias="status"),
     outcome: str | None = None,
+    preset: str | None = None,
     source_screening_run_id: UUID | None = None,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
@@ -246,6 +264,8 @@ async def list_ml_search_campaigns(
         predicates.append(MLSearchCampaignRecord.status == campaign_status)
     if outcome is not None:
         predicates.append(MLSearchCampaignRecord.outcome == outcome)
+    if preset is not None:
+        predicates.append(MLSearchCampaignRecord.preset == preset)
     if source_screening_run_id is not None:
         from app.ml.campaign.models import MLSearchCampaignSourceRecord
 
@@ -285,9 +305,70 @@ async def get_ml_search_campaign(
     campaign_id: UUID, session: Annotated[AsyncSession, Depends(get_db_session)]
 ) -> CampaignResponse:
     try:
-        return CampaignResponse.model_validate(await get_campaign(session, campaign_id))
+        campaign = await get_campaign(session, campaign_id)
     except CampaignNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    family_groups = tuple(
+        (
+            await session.execute(
+                select(
+                    MLSearchCampaignFamilyRecord.search_track,
+                    MLSearchCampaignFamilyRecord.state,
+                    MLSearchCampaignFamilyRecord.current_stage,
+                    func.count(),
+                )
+                .where(MLSearchCampaignFamilyRecord.campaign_id == campaign_id)
+                .group_by(
+                    MLSearchCampaignFamilyRecord.search_track,
+                    MLSearchCampaignFamilyRecord.state,
+                    MLSearchCampaignFamilyRecord.current_stage,
+                )
+            )
+        ).all()
+    )
+    qualification_groups = tuple(
+        (
+            await session.execute(
+                select(
+                    MLEconomicQualificationRecord.search_track,
+                    func.count(),
+                )
+                .where(
+                    MLEconomicQualificationRecord.id.in_(
+                        select(
+                            MLEconomicQualificationCampaignRecord.qualification_id
+                        ).where(
+                            MLEconomicQualificationCampaignRecord.campaign_id
+                            == campaign_id
+                        )
+                    ),
+                    MLEconomicQualificationRecord.classification == "qualified",
+                )
+                .group_by(MLEconomicQualificationRecord.search_track)
+            )
+        ).all()
+    )
+    counts: dict[str, dict[str, int]] = {}
+    for track, state, current_stage, count in family_groups:
+        values = counts.setdefault(
+            str(track),
+            {"planned": 0, "covered": 0, "survived": 0, "discarded": 0, "qualified": 0},
+        )
+        values["planned"] += int(count)
+        if int(current_stage) >= 1:
+            values["covered"] += int(count)
+        if state in {"survived", "strong_development_candidate"}:
+            values["survived"] += int(count)
+        if state == "discarded":
+            values["discarded"] += int(count)
+    for track, count in qualification_groups:
+        counts.setdefault(
+            str(track),
+            {"planned": 0, "covered": 0, "survived": 0, "discarded": 0, "qualified": 0},
+        )["qualified"] = int(count)
+    return CampaignResponse.model_validate(campaign).model_copy(
+        update={"track_counts": counts}
+    )
 
 
 @router.get("/ml-search-campaigns/{campaign_id}/families", response_model=FamilyPage)
@@ -301,6 +382,8 @@ async def list_ml_search_campaign_families(
     maximum_duration_seconds: int | None = Query(default=None, ge=1),
     stage: int | None = Query(default=None, ge=0, le=4),
     family_state: str | None = Query(default=None, alias="state"),
+    search_track: str | None = None,
+    seed_family_id: UUID | None = None,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> FamilyPage:
@@ -312,6 +395,8 @@ async def list_ml_search_campaign_families(
         (MLSearchCampaignFamilyRecord.feature_variant, feature_strategy),
         (MLSearchCampaignFamilyRecord.current_stage, stage),
         (MLSearchCampaignFamilyRecord.state, family_state),
+        (MLSearchCampaignFamilyRecord.search_track, search_track),
+        (MLSearchCampaignFamilyRecord.seed_family_id, seed_family_id),
     ):
         if value is not None:
             predicates.append(
@@ -378,6 +463,129 @@ async def get_ml_search_campaign_family(
             status_code=404, detail=f"ML search campaign family {family_id} not found"
         )
     return FamilyResponse.model_validate(record)
+
+
+@router.get(
+    "/ml-search-campaigns/{campaign_id}/qualifications",
+    response_model=QualificationPage,
+)
+async def list_ml_search_campaign_qualifications(
+    campaign_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    classification: str | None = None,
+    engine: ScreeningEngine | None = None,
+    objective: PredictionObjective | None = None,
+    search_track: str | None = None,
+    seed_family_id: UUID | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> QualificationPage:
+    await get_ml_search_campaign(campaign_id, session)
+    predicates: list[ColumnElement[bool]] = [
+        MLEconomicQualificationRecord.id.in_(
+            select(MLEconomicQualificationCampaignRecord.qualification_id).where(
+                MLEconomicQualificationCampaignRecord.campaign_id == campaign_id
+            )
+        )
+    ]
+    for column, value in (
+        (MLEconomicQualificationRecord.classification, classification),
+        (MLEconomicQualificationRecord.engine, engine),
+        (MLEconomicQualificationRecord.objective, objective),
+        (MLEconomicQualificationRecord.search_track, search_track),
+        (MLEconomicQualificationRecord.seed_family_id, seed_family_id),
+    ):
+        if value is not None:
+            predicates.append(
+                column == (value.value if hasattr(value, "value") else value)
+            )
+    total = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(MLEconomicQualificationRecord)
+            .where(*predicates)
+        )
+        or 0
+    )
+    rows = tuple(
+        (
+            await session.scalars(
+                select(MLEconomicQualificationRecord)
+                .where(*predicates)
+                .order_by(
+                    MLEconomicQualificationRecord.created_at,
+                    MLEconomicQualificationRecord.id,
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    family_by_qualification = {
+        qualification_id: family_id
+        for qualification_id, family_id in (
+            await session.execute(
+                select(
+                    MLEconomicQualificationCampaignRecord.qualification_id,
+                    MLEconomicQualificationCampaignRecord.family_id,
+                ).where(
+                    MLEconomicQualificationCampaignRecord.campaign_id == campaign_id,
+                    MLEconomicQualificationCampaignRecord.qualification_id.in_(
+                        item.id for item in rows
+                    ),
+                )
+            )
+        ).all()
+    }
+    return QualificationPage(
+        items=tuple(
+            QualificationResponse.model_validate(item).model_copy(
+                update={
+                    "campaign_id": campaign_id,
+                    "family_id": family_by_qualification[item.id],
+                }
+            )
+            for item in rows
+        ),
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=offset + len(rows) < total,
+    )
+
+
+@router.get(
+    "/ml-search-campaigns/{campaign_id}/qualifications/{qualification_id}",
+    response_model=QualificationResponse,
+)
+async def get_ml_search_campaign_qualification(
+    campaign_id: UUID,
+    qualification_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> QualificationResponse:
+    row = (
+        await session.execute(
+            select(
+                MLEconomicQualificationRecord,
+                MLEconomicQualificationCampaignRecord.family_id,
+            )
+            .join(
+                MLEconomicQualificationCampaignRecord,
+                MLEconomicQualificationCampaignRecord.qualification_id
+                == MLEconomicQualificationRecord.id,
+            )
+            .where(
+                MLEconomicQualificationRecord.id == qualification_id,
+                MLEconomicQualificationCampaignRecord.campaign_id == campaign_id,
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="ML qualification not found")
+    record, family_id = row
+    return QualificationResponse.model_validate(record).model_copy(
+        update={"campaign_id": campaign_id, "family_id": family_id}
+    )
 
 
 @router.post(

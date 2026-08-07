@@ -1,21 +1,39 @@
+import asyncio
+import threading
 from collections.abc import AsyncIterator
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
+import numpy as np
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, event, func, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.ml.campaign import economic_v2_qualification as qualification_calculation
+from app.ml.campaign import economic_v2_queue as qualification_queue
 from app.ml.campaign import planning as campaign_planning
 from app.ml.campaign import service as campaign_service
-from app.ml.campaign.contracts import FAMILIES_PER_INSTRUMENT, CampaignRequest
+from app.ml.campaign.contracts import (
+    ECONOMIC_POLICY_SEARCH_V2_PRESET,
+    ECONOMIC_V2_DIVERSIFIED_FAMILIES,
+    FAMILIES_PER_INSTRUMENT,
+    CampaignRequest,
+)
 from app.ml.campaign.coordinator import coordinate_next_campaign
+from app.ml.campaign.economic_v2_policy import strategy_policy_grid
+from app.ml.campaign.economic_v2_queue import (
+    claim_next_qualification,
+    process_qualification,
+)
 from app.ml.campaign.models import (
+    MLEconomicQualificationCampaignRecord,
+    MLEconomicQualificationRecord,
     MLSearchCampaignChildRecord,
     MLSearchCampaignFamilyRecord,
     MLSearchCampaignRecord,
@@ -24,12 +42,19 @@ from app.ml.campaign.models import (
 from app.ml.campaign.planning import CampaignFamily, SourceInstrument
 from app.ml.campaign.service import (
     CampaignConflictError,
+    CampaignSourceError,
     cancel_campaign,
     enqueue_campaign,
     preview_campaign,
     retry_campaign,
 )
-from app.ml.contract import FUTURE_DURATIONS, temporal_fold_definitions
+from app.ml.contract import (
+    DEVELOPMENT_START,
+    FUTURE_DURATIONS,
+    QUALIFICATION_END,
+    temporal_fold_definitions,
+)
+from app.ml.gaps import datetime_to_ns
 from app.ml.protected.audit import assemble_family_audit
 from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
 from app.ml.protected.queue import (
@@ -496,6 +521,63 @@ async def test_enqueue_flushes_parent_before_3600_children_and_is_idempotent(
         )
 
 
+async def test_v2_enqueue_is_bounded_persisted_and_idempotent(
+    enqueue_factory: tuple[async_sessionmaker[AsyncSession], UUID],
+) -> None:
+    sessions, source_id = enqueue_factory
+    request = CampaignRequest(
+        source_screening_run_ids=(source_id,),
+        preset=ECONOMIC_POLICY_SEARCH_V2_PRESET,
+        maximum_evaluations=ECONOMIC_V2_DIVERSIFIED_FAMILIES,
+    )
+    async with sessions() as session:
+        first = await enqueue_campaign(session, request, now=NOW)
+        second = await enqueue_campaign(session, request, now=NOW)
+        families = tuple(
+            (
+                await session.scalars(
+                    select(MLSearchCampaignFamilyRecord)
+                    .where(
+                        MLSearchCampaignFamilyRecord.campaign_id == first.campaign.id
+                    )
+                    .order_by(MLSearchCampaignFamilyRecord.deterministic_ordinal)
+                )
+            ).all()
+        )
+    assert first.created is True
+    assert second.created is False
+    assert second.campaign.id == first.campaign.id
+    assert len(families) == ECONOMIC_V2_DIVERSIFIED_FAMILIES
+    assert {item.preset for item in families} == {ECONOMIC_POLICY_SEARCH_V2_PRESET}
+    assert {item.search_track for item in families} == {"diversified"}
+    assert len({item.fingerprint for item in families}) == len(families)
+
+
+async def test_v2_invalid_seed_rejects_the_whole_enqueue_without_writes(
+    enqueue_factory: tuple[async_sessionmaker[AsyncSession], UUID],
+) -> None:
+    sessions, source_id = enqueue_factory
+    request = CampaignRequest(
+        source_screening_run_ids=(source_id,),
+        preset=ECONOMIC_POLICY_SEARCH_V2_PRESET,
+        seed_family_ids=(uuid4(),),
+        maximum_evaluations=432,
+    )
+    async with sessions() as session:
+        with pytest.raises(CampaignSourceError, match="seed families do not exist"):
+            await enqueue_campaign(session, request, now=NOW)
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignSourceRecord)
+                .where(
+                    MLSearchCampaignSourceRecord.source_screening_run_id == source_id
+                )
+            )
+            == 0
+        )
+
+
 async def test_child_integrity_failure_rolls_back_flushed_parent(
     enqueue_factory: tuple[async_sessionmaker[AsyncSession], UUID],
     monkeypatch: pytest.MonkeyPatch,
@@ -818,6 +900,407 @@ async def test_completed_child_reconciliation_is_idempotent_across_sessions(
                 )
             ),
         ) == snapshot
+
+
+def _v2_metrics(*, passing: bool) -> dict[str, object]:
+    return {
+        "policy_fingerprint": "p" * 64,
+        "observations": 200,
+        "round_trips": 25,
+        "positive_net_folds": 6 if passing else 0,
+        "folds_beating_benchmark": 5 if passing else 0,
+        "median_net_return": "0.01" if passing else "-0.2",
+        "worst_net_return": "-0.01" if passing else "-0.2",
+        "maximum_drawdown": "0.10",
+        "inactive_folds": 0,
+        "compounded_return_1_5x": "0.05",
+        "compounded_return_2x": "0.03",
+        "complete_and_finite": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("classification", "expected"),
+    (
+        ("qualified", "qualified_candidates_found"),
+        ("rejected", "no_qualified_candidate"),
+    ),
+)
+async def test_v2_stage_five_waits_for_qualification_and_completes_idempotently(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    classification: str,
+    expected: str,
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(covered=True)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.contract_version = 2
+    record.policy_version = 2
+    record.classification_version = 2
+    record.current_stage = 4
+    family_record = family(record.id, source_id, state="survived")
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    family_record.current_stage = 4
+    family_record.future_duration_seconds = 3600
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 1
+    run.evaluations_selected = 1
+    evidence = evaluation(run.id)
+    evidence.future_duration_seconds = 3600
+    evidence.hyperparameters = {"alpha": 1.0, "fit_intercept": True}
+    evidence.feature_policy = {"strategy": "all"}
+    family_record.best_evaluation_id = evidence.id
+    family_record.best_metrics = _v2_metrics(passing=True)
+    policy = strategy_policy_grid(3600)[0]
+    family_record.selected_policy = {
+        "policy_fingerprint": policy.fingerprint,
+        "strategy_policy_version": policy.version,
+        "confidence_fraction": str(policy.confidence_fraction),
+        "holding_multiplier": str(policy.holding_multiplier),
+        "regime_policy": policy.regime_policy,
+        "holding_candles": policy.holding_candles,
+    }
+    family_record.selected_policy_fingerprint = policy.fingerprint
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(run)
+        await session.flush()
+        session.add(evidence)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+        assert await coordinate_next_campaign(session, now=NOW)
+        await session.refresh(record)
+        assert record.status == "running"
+        assert record.current_stage == 5
+        assert record.outcome is None
+        qualifications = tuple(
+            (await session.scalars(select(MLEconomicQualificationRecord))).all()
+        )
+        assert len(qualifications) == 1
+        qualification = qualifications[0]
+        assert await coordinate_next_campaign(session, now=NOW)
+        assert (
+            int(
+                await session.scalar(
+                    select(func.count()).select_from(
+                        MLEconomicQualificationCampaignRecord
+                    )
+                )
+                or 0
+            )
+            == 1
+        )
+        qualification.status = "completed"
+        qualification.classification = classification
+        qualification.scenario_metrics = {"base": {"total_net_return": "0.06"}}
+        qualification.quarter_returns = ["0.01"] * 4
+        qualification.trades = []
+        qualification.failed_rules = [] if classification == "qualified" else ["return"]
+        qualification.completed_at = NOW
+        await session.commit()
+        assert await coordinate_next_campaign(session, now=NOW)
+        await session.refresh(record)
+        assert record.status == "completed"
+        assert record.outcome == expected
+
+
+async def test_v2_stage_four_without_strong_candidate_creates_no_qualification(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, _ = factory
+    record = campaign(covered=True)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.current_stage = 4
+    family_record = family(record.id, source_id, state="survived")
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    family_record.current_stage = 4
+    family_record.best_metrics = _v2_metrics(passing=False)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+        assert await coordinate_next_campaign(session, now=NOW)
+        await session.refresh(record)
+        assert record.status == "completed"
+        assert record.outcome == "no_strong_candidate"
+        assert (
+            int(
+                await session.scalar(
+                    select(func.count()).select_from(MLEconomicQualificationRecord)
+                )
+                or 0
+            )
+            == 0
+        )
+
+
+def _qualification_dataset() -> object:
+    boundaries = np.asarray(
+        [
+            datetime_to_ns(datetime(2023, 1, 1, tzinfo=UTC)),
+            datetime_to_ns(datetime(2024, 1, 1, tzinfo=UTC)),
+            datetime_to_ns(datetime(2024, 7, 1, tzinfo=UTC)),
+        ],
+        dtype=np.int64,
+    )
+    target = SimpleNamespace(
+        values=np.asarray([0.01, 0.02, 0.03], dtype=np.float32),
+        eligible=np.ones(3, dtype=np.bool_),
+    )
+    return SimpleNamespace(
+        metadata=SimpleNamespace(
+            requested_start=DEVELOPMENT_START,
+            requested_end=QUALIFICATION_END,
+            fingerprint="d" * 64,
+        ),
+        boundary_time_ns=boundaries,
+        features=np.ones((3, 1), dtype=np.float32),
+        feature_eligible=np.ones(3, dtype=np.bool_),
+        targets=SimpleNamespace(for_duration=lambda _duration: target),
+    )
+
+
+def _assert_thread_value_graph_is_session_independent(value: object) -> None:
+    pending = [value]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        assert not isinstance(current, AsyncSession)
+        assert not hasattr(current, "_sa_instance_state")
+        assert inspect(current, raiseerr=False) is None
+        if isinstance(current, dict):
+            pending.extend(current.keys())
+            pending.extend(current.values())
+        elif isinstance(current, (list, tuple, set)):
+            pending.extend(current)
+        elif is_dataclass(current) and not isinstance(current, type):
+            pending.extend(getattr(current, item.name) for item in fields(current))
+
+
+async def test_v2_qualification_uses_only_immutable_values_after_real_rollback(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions, source_id, result_id = factory
+    campaign_record = campaign(covered=True)
+    campaign_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    campaign_record.current_stage = 4
+    family_record = family(campaign_record.id, source_id, state="survived")
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    family_record.current_stage = 4
+    family_record.future_duration_seconds = 3600
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 1
+    run.evaluations_selected = 1
+    evidence = evaluation(run.id)
+    evidence.future_duration_seconds = 3600
+    evidence.hyperparameters = {"alpha": 1.0, "fit_intercept": True}
+    evidence.feature_policy = {"strategy": "all"}
+    family_record.best_evaluation_id = evidence.id
+    family_record.best_metrics = _v2_metrics(passing=True)
+    policy = strategy_policy_grid(3600)[0]
+    family_record.selected_policy = {
+        "policy_fingerprint": policy.fingerprint,
+        "strategy_policy_version": policy.version,
+        "confidence_fraction": str(policy.confidence_fraction),
+        "holding_multiplier": str(policy.holding_multiplier),
+        "regime_policy": policy.regime_policy,
+        "holding_candles": policy.holding_candles,
+    }
+    family_record.selected_policy_fingerprint = policy.fingerprint
+    async with sessions() as session:
+        session.add(campaign_record)
+        await session.flush()
+        session.add(run)
+        await session.flush()
+        session.add(evidence)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+        assert await coordinate_next_campaign(session, now=NOW)
+        claimed = await claim_next_qualification(session, worker_id="snapshot-worker")
+        assert claimed is not None
+        qualification_id = claimed.id
+        original_evaluation = await session.get(
+            MLRefinementEvaluationRecord, evidence.id
+        )
+        assert original_evaluation is not None
+
+        async def load_dataset_with_real_transaction(**kwargs: object) -> object:
+            owning_session = kwargs["session"]
+            assert isinstance(owning_session, AsyncSession)
+            await owning_session.execute(select(1))
+            return _qualification_dataset()
+
+        monkeypatch.setattr(
+            qualification_queue,
+            "load_ml_qualification_dataset",
+            load_dataset_with_real_transaction,
+        )
+        monkeypatch.setattr(
+            qualification_calculation,
+            "_selected_columns",
+            lambda *_args: np.asarray([0], dtype=np.int64),
+        )
+        monkeypatch.setattr(
+            qualification_calculation,
+            "_fit_predict",
+            lambda _candidate, training_x, _training_y, validation_x, *_args: (
+                np.ones(len(training_x)),
+                np.ones(len(validation_x)),
+                None,
+            ),
+        )
+        monkeypatch.setattr(
+            qualification_calculation,
+            "evaluate_strategy_policy",
+            lambda **_kwargs: {
+                "trades": [],
+                "equity_curve": [
+                    ["2024-01-01T00:00:00+00:00", "10000"],
+                    ["2024-04-01T00:00:00+00:00", "10200"],
+                    ["2024-07-01T00:00:00+00:00", "10400"],
+                    ["2024-10-01T00:00:00+00:00", "10600"],
+                    ["2024-12-31T00:00:00+00:00", "10800"],
+                ],
+                "net_return": "0.08",
+                "return_1_5x": "0.07",
+                "return_2x": "0.06",
+                "maximum_drawdown": "0.05",
+                "round_trips": 20,
+            },
+        )
+        query_threads: list[int] = []
+        assert session.bind is not None
+        event.listen(
+            session.bind.sync_engine,
+            "before_cursor_execute",
+            lambda *_args: query_threads.append(threading.get_ident()),
+        )
+        event_loop_thread = threading.get_ident()
+        real_to_thread = asyncio.to_thread
+
+        async def inspected_to_thread(
+            function: object, /, *args: object, **kwargs: object
+        ) -> object:
+            _assert_thread_value_graph_is_session_independent(args)
+            _assert_thread_value_graph_is_session_independent(kwargs)
+            assert inspect(original_evaluation).expired
+            return await real_to_thread(function, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(asyncio, "to_thread", inspected_to_thread)
+        await process_qualification(
+            session,
+            record=claimed,
+            worker_id="snapshot-worker",
+            heartbeat_interval_seconds=0.01,
+        )
+        assert set(query_threads) == {event_loop_thread}
+    async with sessions() as verification:
+        persisted = await verification.get(
+            MLEconomicQualificationRecord, qualification_id
+        )
+        assert persisted is not None
+        assert persisted.status == "completed"
+        assert persisted.classification == "qualified"
+        assert persisted.scenario_metrics is not None
+
+
+@pytest.mark.parametrize(
+    ("hyperparameters", "feature_policy", "message"),
+    (
+        ({"alpha": "invalid"}, {"strategy": "all"}, "hyperparameter"),
+        (
+            {"alpha": 1.0, "fit_intercept": True},
+            {"strategy": "explicit", "variables": "rsi_14"},
+            "variables",
+        ),
+    ),
+)
+async def test_v2_invalid_persisted_evaluation_fails_before_thread_or_publication(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    hyperparameters: dict[str, object],
+    feature_policy: dict[str, object],
+    message: str,
+) -> None:
+    sessions, source_id, result_id = factory
+    campaign_record = campaign(covered=True)
+    campaign_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    campaign_record.current_stage = 4
+    family_record = family(campaign_record.id, source_id, state="survived")
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    family_record.current_stage = 4
+    family_record.future_duration_seconds = 3600
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 1
+    run.evaluations_selected = 1
+    evidence = evaluation(run.id)
+    evidence.future_duration_seconds = 3600
+    evidence.hyperparameters = hyperparameters
+    evidence.feature_policy = feature_policy
+    family_record.best_evaluation_id = evidence.id
+    family_record.best_metrics = _v2_metrics(passing=True)
+    policy = strategy_policy_grid(3600)[0]
+    family_record.selected_policy = {
+        "policy_fingerprint": policy.fingerprint,
+        "strategy_policy_version": policy.version,
+        "confidence_fraction": str(policy.confidence_fraction),
+        "holding_multiplier": str(policy.holding_multiplier),
+        "regime_policy": policy.regime_policy,
+        "holding_candles": policy.holding_candles,
+    }
+    family_record.selected_policy_fingerprint = policy.fingerprint
+    thread_started = False
+
+    async def unexpected_thread(*_args: object, **_kwargs: object) -> object:
+        nonlocal thread_started
+        thread_started = True
+        raise AssertionError("invalid persisted evidence reached background thread")
+
+    monkeypatch.setattr(asyncio, "to_thread", unexpected_thread)
+    async with sessions() as session:
+        session.add(campaign_record)
+        await session.flush()
+        session.add(run)
+        await session.flush()
+        session.add(evidence)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+        assert await coordinate_next_campaign(session, now=NOW)
+        claimed = await claim_next_qualification(session, worker_id="invalid-worker")
+        assert claimed is not None
+        qualification_id = claimed.id
+        with pytest.raises(ValueError, match=message):
+            await process_qualification(
+                session,
+                record=claimed,
+                worker_id="invalid-worker",
+                heartbeat_interval_seconds=0.01,
+            )
+        assert thread_started is False
+        await session.rollback()
+    async with sessions() as verification:
+        persisted = await verification.get(
+            MLEconomicQualificationRecord, qualification_id
+        )
+        assert persisted is not None
+        assert persisted.status == "running"
+        assert persisted.classification is None
+        assert persisted.scenario_metrics is None
+        assert persisted.quarter_returns is None
+        assert persisted.trades is None
 
 
 async def test_legacy_confidence_bucket_audits_and_enqueues_idempotently(
