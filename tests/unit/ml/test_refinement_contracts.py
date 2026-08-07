@@ -5,6 +5,10 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from app.ml.protected.contracts import (
+    ConfidenceBucketContractError,
+    canonicalize_confidence_bucket,
+)
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.planning import build_refinement_plan
 
@@ -83,6 +87,14 @@ def test_invalid_contract_values_fail_before_execution(
     payload[field] = value
     with pytest.raises(ValidationError):
         MLRefinementRequest.model_validate(payload)
+
+
+def test_unsupported_legacy_confidence_bucket_remains_rejected() -> None:
+    with pytest.raises(
+        ConfidenceBucketContractError,
+        match="configured confidence bucket is unsupported",
+    ):
+        canonicalize_confidence_bucket("0.30", ["0.05", "0.10", "0.20", "0.30"])
 
 
 def test_unknown_hyperparameter_and_invalid_range_are_rejected() -> None:

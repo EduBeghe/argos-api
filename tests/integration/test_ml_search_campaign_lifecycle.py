@@ -20,8 +20,13 @@ from app.ml.campaign import economic_v2_queue as qualification_queue
 from app.ml.campaign import planning as campaign_planning
 from app.ml.campaign import service as campaign_service
 from app.ml.campaign.contracts import (
+    CAMPAIGN_CONFIDENCE_BUCKETS,
     ECONOMIC_POLICY_SEARCH_V2_PRESET,
+    ECONOMIC_V2_CONFIDENCE_FRACTIONS,
     ECONOMIC_V2_DIVERSIFIED_FAMILIES,
+    ECONOMIC_V2_HOLDING_MULTIPLIERS,
+    ECONOMIC_V2_REGIME_POLICIES,
+    ECONOMIC_V2_STRATEGY_POLICY_VERSION,
     FAMILIES_PER_INSTRUMENT,
     CampaignRequest,
 )
@@ -793,6 +798,92 @@ async def test_retry_reclaim_preserves_original_runtime_clock(
         assert persisted is not None
         assert persisted.status == "running"
         assert persisted.first_claimed_at == NOW
+
+
+async def test_v2_retry_requeues_same_failed_child_without_duplicate_graph(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="failed", first_claimed_at=NOW)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.contract_version = 2
+    record.policy_version = 2
+    record.classification_version = 2
+    family_record = family(record.id, source_id)
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    run = refinement_run(source_id, result_id, status="failed")
+    legacy_payload = dict(run.normalized_configuration)
+    legacy_payload["confidence_buckets"] = [
+        str(item) for item in ECONOMIC_V2_CONFIDENCE_FRACTIONS
+    ]
+    legacy_payload["economic_policy_search"] = {
+        "confidence_fractions": [
+            str(item) for item in ECONOMIC_V2_CONFIDENCE_FRACTIONS
+        ],
+        "holding_multipliers": [str(item) for item in ECONOMIC_V2_HOLDING_MULTIPLIERS],
+        "regime_policies": list(ECONOMIC_V2_REGIME_POLICIES),
+        "version": ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+    }
+    run.normalized_configuration = legacy_payload
+    previous_experiment_key = run.experiment_key
+    link = child(record.id, family_record.id, run.id, reused=False)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add_all((family_record, run))
+        await session.flush()
+        session.add(link)
+        await session.commit()
+        retried = await retry_campaign(session, record.id)
+        assert retried.id == record.id
+    async with sessions() as session:
+        queued_run = await session.get(MLRefinementRunRecord, run.id)
+        assert queued_run is not None
+        assert queued_run.status == "queued"
+        assert queued_run.id == run.id
+        assert queued_run.experiment_key != previous_experiment_key
+        assert queued_run.normalized_configuration["confidence_buckets"] == [
+            str(item) for item in CAMPAIGN_CONFIDENCE_BUCKETS
+        ]
+        economic_policy = queued_run.normalized_configuration["economic_policy_search"]
+        assert isinstance(economic_policy, dict)
+        assert economic_policy["confidence_fractions"] == [
+            str(item) for item in ECONOMIC_V2_CONFIDENCE_FRACTIONS
+        ]
+        assert await coordinate_next_campaign(session, now=NOW.replace(second=30))
+    async with sessions() as session:
+        persisted = await session.get(MLSearchCampaignRecord, record.id)
+        reclaimed_run = await session.get(MLRefinementRunRecord, run.id)
+        assert persisted is not None
+        assert reclaimed_run is not None
+        assert persisted.status == "running"
+        assert persisted.first_claimed_at == NOW
+        assert reclaimed_run.status == "queued"
+        assert (
+            await session.scalar(
+                select(func.count(MLSearchCampaignRecord.id)).where(
+                    MLSearchCampaignRecord.id == record.id
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count(MLSearchCampaignFamilyRecord.id)).where(
+                    MLSearchCampaignFamilyRecord.campaign_id == record.id
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count(MLSearchCampaignChildRecord.id)).where(
+                    MLSearchCampaignChildRecord.campaign_id == record.id
+                )
+            )
+            == 1
+        )
 
 
 @pytest.mark.parametrize(

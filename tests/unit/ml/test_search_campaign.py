@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -10,13 +11,16 @@ from app.ml.campaign.contracts import (
     CAMPAIGN_FEE_RATE,
     CAMPAIGN_SEED,
     CAMPAIGN_SLIPPAGE_RATE,
+    ECONOMIC_POLICY_SEARCH_V2_PRESET,
+    ECONOMIC_V2_CONFIDENCE_FRACTIONS,
     FAMILIES_PER_INSTRUMENT,
     STAGE_TRIALS,
     CampaignRequest,
     FeatureVariant,
     campaign_search_spaces,
 )
-from app.ml.campaign.coordinator import select_economic_evidence
+from app.ml.campaign.coordinator import _request_for_family, select_economic_evidence
+from app.ml.campaign.economic_v2_policy import strategy_policy_grid
 from app.ml.campaign.models import MLSearchCampaignFamilyRecord
 from app.ml.campaign.planning import SourceInstrument, build_family_universe
 from app.ml.campaign.promotion import (
@@ -27,7 +31,11 @@ from app.ml.campaign.promotion import (
     passes_stage_gate,
 )
 from app.ml.contract import FUTURE_DURATIONS
-from app.ml.refinement.contracts import PredictionObjective, RidgeSearchSpace
+from app.ml.refinement.contracts import (
+    MLRefinementRequest,
+    PredictionObjective,
+    RidgeSearchSpace,
+)
 from app.ml.refinement.models import MLRefinementEvaluationRecord
 from app.ml.screening.config import ScreeningEngine
 
@@ -140,6 +148,30 @@ def test_contract_contains_exact_policy_values() -> None:
     assert isinstance(ridge, RidgeSearchSpace)
     assert ridge.alpha.expand() == (0.01, 0.1, 1, 10, 100)
     assert ridge.fit_intercept.expand() == (False, True)
+
+
+@pytest.mark.asyncio
+async def test_v2_child_separates_legacy_buckets_from_economic_fractions() -> None:
+    family_record = family()
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    family_record.future_duration_seconds = 3600
+    family_record.objective = PredictionObjective.FUTURE_RETURN_REGRESSION.value
+    session = AsyncMock()
+    session.scalar.return_value = type("SourceResult", (), {"id": uuid4()})()
+
+    request = await _request_for_family(session, family_record, 1, 60)
+
+    assert request.confidence_buckets == CAMPAIGN_CONFIDENCE_BUCKETS
+    assert request.economic_policy_search is not None
+    assert (
+        request.economic_policy_search.confidence_fractions
+        == ECONOMIC_V2_CONFIDENCE_FRACTIONS
+    )
+    assert len(strategy_policy_grid(family_record.future_duration_seconds)) == 45
+    assert MLRefinementRequest.model_validate(
+        request.normalized_payload()
+    ) == request.model_copy(update={"notes": None})
 
 
 def test_universe_is_exact_unique_deterministic_and_interleaved() -> None:

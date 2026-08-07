@@ -739,11 +739,7 @@ async def _request_for_family(
         search_space=(search_space,),
         feature_selection=FeatureSelectionSearch(strategies=(feature,)),
         prediction_objectives=(family.objective,),
-        confidence_buckets=(
-            ECONOMIC_V2_CONFIDENCE_FRACTIONS
-            if family.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
-            else CAMPAIGN_CONFIDENCE_BUCKETS
-        ),
+        confidence_buckets=CAMPAIGN_CONFIDENCE_BUCKETS,
         fee_rate=CAMPAIGN_FEE_RATE,
         slippage_rate=CAMPAIGN_SLIPPAGE_RATE,
         maximum_trials=STAGE_TRIALS[stage - 1],
