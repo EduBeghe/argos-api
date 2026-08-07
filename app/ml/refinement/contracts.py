@@ -320,4 +320,3 @@ class MLRefinementRequest(BaseModel):
                 self.normalized_payload(), sort_keys=True, separators=(",", ":")
             ).encode()
         ).hexdigest()
-

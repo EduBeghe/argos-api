@@ -150,4 +150,3 @@ async def load_refinement_dataset_inputs(
         session=session, instrument=instrument
     )
     return RefinementDatasetInputs(identity_metadata, development)
-

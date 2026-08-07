@@ -100,4 +100,3 @@ def temporal_fold_definitions() -> tuple[TemporalFoldDefinition, ...]:
                 )
             )
     return tuple(folds)
-

@@ -352,4 +352,3 @@ class CampaignContractsResponse(BaseModel):
     presets: tuple[CampaignContract | EconomicPolicySearchV2Contract, ...] = Field(
         default_factory=lambda: (CampaignContract(), EconomicPolicySearchV2Contract())
     )
-

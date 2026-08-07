@@ -615,4 +615,3 @@ def evaluate_refinement_candidate(
         failed,
         perf_counter() - started,
     )
-

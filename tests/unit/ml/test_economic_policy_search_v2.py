@@ -316,4 +316,3 @@ def test_trend_policy_requires_finite_preceding_ema_and_strict_alignment() -> No
         slippage_rate=Decimal("0.0005"),
     )
     assert result["eligible_observations"] == 5
-

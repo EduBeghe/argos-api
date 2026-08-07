@@ -935,4 +935,3 @@ The independently versioned `economic_policy_search_v2` preset adds a bounded
 economic strategy-policy search and immutable calendar-2024 qualification while
 structurally reserving all 2025 evidence. The same documentation describes its
 request, temporal protocol, qualification endpoints, and one-shot enqueue command.
-

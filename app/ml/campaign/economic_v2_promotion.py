@@ -142,4 +142,3 @@ def capped_economic_v2_promotions(
         if (item.family_fingerprint, item.policy_fingerprint) not in selected_ids
     )
     return tuple(selected)
-

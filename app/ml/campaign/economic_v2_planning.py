@@ -212,4 +212,3 @@ def build_economic_v2_universe(
         for items in by_source
         if ordinal < len(items)
     )
-

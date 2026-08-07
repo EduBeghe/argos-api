@@ -172,4 +172,3 @@ def calculate_qualification(
         trades,
         failed,
     )
-

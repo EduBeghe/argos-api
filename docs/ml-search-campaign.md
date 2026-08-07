@@ -149,4 +149,3 @@ future profitability.
 For rollback, stop the research worker and API version using the new endpoints, then
 downgrade one Alembic revision. The downgrade removes only campaign tables and does
 not delete historical screening or refinement evidence.
-

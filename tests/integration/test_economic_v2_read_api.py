@@ -245,4 +245,3 @@ async def test_campaign_detail_exposes_track_counts(
             "qualified": 0,
         },
     }
-

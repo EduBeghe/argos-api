@@ -252,4 +252,3 @@ def aggregate_policy_folds(
             }
         )
     return tuple(aggregates)
-

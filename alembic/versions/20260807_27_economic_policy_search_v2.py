@@ -251,4 +251,3 @@ def downgrade() -> None:
     op.drop_column("ml_search_campaign_families", "search_track")
     op.drop_column("ml_search_campaign_families", "preset")
     op.drop_column("ml_search_campaigns", "preset")
-

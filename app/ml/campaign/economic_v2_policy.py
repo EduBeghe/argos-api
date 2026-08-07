@@ -92,4 +92,3 @@ def failed_qualification_rules(
     if min(quarter_returns) < Decimal("-0.05"):
         failures.append("worst_quarter")
     return tuple(failures)
-
