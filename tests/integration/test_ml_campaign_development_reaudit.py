@@ -604,12 +604,9 @@ def synthetic_development_candles() -> MLCandleColumns:
     end_ns = int(DEVELOPMENT_END.timestamp() * 1_000_000_000)
     open_time_ns = np.arange(start_ns, end_ns, interval_ns, dtype=np.int64)
     ordinal = np.arange(len(open_time_ns), dtype=np.float64)
-    close_price = (
-        100.0
-        + ordinal * 0.00002
-        + 2.0 * np.sin(ordinal * (2.0 * np.pi / 72.0))
-        + 0.4 * np.sin(ordinal * (2.0 * np.pi / 17.0))
-    )
+    random = np.random.default_rng(1729)
+    log_returns = random.normal(0.0, 0.0008, len(open_time_ns))
+    close_price = 100.0 * np.exp(np.cumsum(log_returns))
     open_price = np.concatenate((close_price[:1], close_price[:-1]))
     return MLCandleColumns(
         open_time_ns,
