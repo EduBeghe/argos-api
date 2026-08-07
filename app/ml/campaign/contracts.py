@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.ml.contract import FUTURE_DURATIONS
 from app.ml.refinement.contracts import (
+    SUPPORTED_ECONOMIC_POLICY_REGIME_POLICIES,
     CatBoostSearchSpace,
     LightGBMSearchSpace,
     ParameterGrid,
@@ -54,11 +55,7 @@ ECONOMIC_V2_CONFIDENCE_FRACTIONS = tuple(
     Decimal(item) for item in ("0.05", "0.10", "0.20", "0.30", "0.40")
 )
 ECONOMIC_V2_HOLDING_MULTIPLIERS = tuple(Decimal(item) for item in ("0.5", "1.0", "1.5"))
-ECONOMIC_V2_REGIME_POLICIES = (
-    "all_regimes",
-    "trend_aligned",
-    "volatility_middle_60",
-)
+ECONOMIC_V2_REGIME_POLICIES = SUPPORTED_ECONOMIC_POLICY_REGIME_POLICIES
 
 
 def campaign_search_spaces() -> tuple[

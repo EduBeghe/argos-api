@@ -15,6 +15,11 @@ ML_REFINEMENT_CONTRACT_VERSION = 2
 ML_REFINEMENT_CLASSIFICATION_VERSION = 2
 MAXIMUM_TRIAL_BUDGET = 10_000
 MAXIMUM_RUNTIME_SECONDS = 86_400
+SUPPORTED_ECONOMIC_POLICY_REGIME_POLICIES = (
+    "all_regimes",
+    "trend_aligned",
+    "volatility_middle_60",
+)
 
 
 class PredictionObjective(StrEnum):
@@ -250,7 +255,30 @@ class EconomicPolicySearchConfiguration(BaseModel):
     confidence_fractions: tuple[Decimal, ...]
     holding_multipliers: tuple[Decimal, ...]
     regime_policies: tuple[str, ...]
-    version: int
+    version: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_grid(self) -> "EconomicPolicySearchConfiguration":
+        axes: tuple[tuple[str, tuple[object, ...]], ...] = (
+            ("confidence fractions", self.confidence_fractions),
+            ("holding multipliers", self.holding_multipliers),
+            ("regime policies", self.regime_policies),
+        )
+        for name, values in axes:
+            if not values or len(set(values)) != len(values):
+                raise ValueError(f"economic policy {name} must be non-empty and unique")
+        if any(value <= 0 or value > 1 for value in self.confidence_fractions):
+            raise ValueError("economic policy confidence fractions must be in (0, 1]")
+        if any(value <= 0 for value in self.holding_multipliers):
+            raise ValueError("economic policy holding multipliers must be positive")
+        unsupported = set(self.regime_policies) - set(
+            SUPPORTED_ECONOMIC_POLICY_REGIME_POLICIES
+        )
+        if unsupported:
+            raise ValueError(
+                f"unsupported economic policy regimes: {sorted(unsupported)}"
+            )
+        return self
 
 
 class MLRefinementRequest(BaseModel):

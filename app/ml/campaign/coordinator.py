@@ -20,6 +20,9 @@ from app.ml.refinement.contracts import (
     MLRefinementRequest,
     TopKFeatures,
 )
+from app.ml.refinement.economic_policy_contract import (
+    economic_policy_evidence_compatibility,
+)
 from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementRunRecord
 from app.ml.refinement.persistence import (
     completed_run_is_complete,
@@ -307,6 +310,43 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
         )
         return True
     try:
+        if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET:
+            request_payload = dict(run.normalized_configuration)
+            request_payload["notes"] = run.notes
+            try:
+                request = MLRefinementRequest.model_validate(request_payload)
+            except ValueError as error:
+                raise IncompatibleCampaignEvidenceError(
+                    f"child refinement run {run.id} has an invalid policy request"
+                ) from error
+            for evaluation in evaluations:
+                compatibility = economic_policy_evidence_compatibility(
+                    aggregate_metrics=evaluation.aggregate_metrics,
+                    request=request,
+                    future_duration_seconds=evaluation.future_duration_seconds,
+                )
+                if not compatibility.compatible:
+                    logger.error(
+                        "Campaign child has incompatible economic policy evidence",
+                        extra={
+                            "structured_fields": {
+                                "campaign_id": str(campaign.id),
+                                "run_id": str(run.id),
+                                "evaluation_id": str(evaluation.id),
+                                "reason_code": compatibility.reason_code,
+                                "expected_contract_fingerprint": (
+                                    compatibility.expected_contract
+                                ),
+                                "found_contract_fingerprint": (
+                                    compatibility.found_contract
+                                ),
+                            }
+                        },
+                    )
+                    raise IncompatibleCampaignEvidenceError(
+                        f"child refinement run {run.id} has incompatible policy "
+                        f"evidence: {compatibility.reason_code}"
+                    )
         selected_evidence = (
             select_economic_v2_evidence(family, evaluations)
             if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET

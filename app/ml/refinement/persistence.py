@@ -160,6 +160,7 @@ async def incompatible_run_evaluations(
         if not economic_policy_evidence_compatibility(
             aggregate_metrics=row.aggregate_metrics,
             request=request,
+            future_duration_seconds=row.future_duration_seconds,
         ).compatible
     )
 
@@ -353,6 +354,7 @@ def _compatible_reuse(
     compatibility = economic_policy_evidence_compatibility(
         aggregate_metrics=row.aggregate_metrics,
         request=request,
+        future_duration_seconds=row.future_duration_seconds,
     )
     if compatibility.compatible:
         return row
@@ -363,8 +365,8 @@ def _compatible_reuse(
                 "run_id": str(run_id),
                 "evaluation_id": str(row.id),
                 "reason_code": compatibility.reason_code,
-                "expected_contract": compatibility.expected_contract,
-                "found_contract": compatibility.found_contract,
+                "expected_contract_fingerprint": compatibility.expected_contract,
+                "found_contract_fingerprint": compatibility.found_contract,
             }
         },
     )
