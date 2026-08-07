@@ -12,8 +12,10 @@ from app.ml.reader import MLCandleColumns
 from app.ml.refinement.calculation import _selected_columns, fit_refinement_model
 from app.ml.refinement.contracts import PredictionObjective
 from app.ml.refinement.models import MLRefinementEvaluationRecord
-from app.ml.refinement.planning import PlannedEvaluation
-from app.ml.screening.config import ScreeningEngine
+from app.ml.refinement.planning import (
+    PlannedEvaluation,
+    planned_evaluation_from_persisted_values,
+)
 from app.paper.config import SimulationConfiguration
 
 from .contracts import (
@@ -118,23 +120,13 @@ def _signed_positive_scores(
 
 
 def _candidate(evaluation: MLRefinementEvaluationRecord) -> PlannedEvaluation:
-    policy = evaluation.feature_policy
-    variables = policy.get("variables")
-    parameters: list[tuple[str, bool | int | float]] = []
-    for key, value in evaluation.hyperparameters.items():
-        if not isinstance(value, (bool, int, float)):
-            raise ValueError(f"invalid frozen hyperparameter: {key}")
-        parameters.append((str(key), value))
-    top_k = policy.get("top_k")
-    return PlannedEvaluation(
-        evaluation.fingerprint,
-        ScreeningEngine(evaluation.engine),
-        evaluation.future_duration_seconds,
-        PredictionObjective(evaluation.objective),
-        tuple(sorted(parameters)),
-        str(policy["strategy"]),
-        tuple(str(item) for item in variables) if isinstance(variables, list) else None,
-        top_k if isinstance(top_k, int) and not isinstance(top_k, bool) else None,
+    return planned_evaluation_from_persisted_values(
+        fingerprint=evaluation.fingerprint,
+        engine=evaluation.engine,
+        future_duration_seconds=evaluation.future_duration_seconds,
+        objective=evaluation.objective,
+        hyperparameters=evaluation.hyperparameters,
+        feature_policy=evaluation.feature_policy,
     )
 
 

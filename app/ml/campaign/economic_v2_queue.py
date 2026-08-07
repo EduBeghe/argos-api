@@ -17,6 +17,7 @@ from app.ml.refinement.models import (
     MLRefinementRunRecord,
 )
 from app.ml.refinement.persistence import completed_run_is_complete
+from app.ml.refinement.planning import planned_evaluation_from_persisted_values
 
 from .contracts import ECONOMIC_V2_STRATEGY_POLICY_VERSION
 from .economic_v2_identity import (
@@ -137,10 +138,17 @@ async def process_qualification(
 ) -> None:
     if heartbeat_interval_seconds <= 0:
         raise ValueError("qualification heartbeat interval must be positive")
+    qualification_id = record.id
+    candidate_fingerprint = record.candidate_fingerprint
+    policy_fingerprint = record.policy_fingerprint
+    deterministic_seed = int(str(record.frozen_inputs["deterministic_seed"]))
+    session_bind = session.bind
     if record.status != "running" or record.worker_id != worker_id:
         raise QualificationLeaseLostError("worker does not own qualification lease")
     if record.cancellation_requested_at is not None:
-        await _cancel_owned(session, qualification_id=record.id, worker_id=worker_id)
+        await _cancel_owned(
+            session, qualification_id=qualification_id, worker_id=worker_id
+        )
         return
     family = await session.get(MLSearchCampaignFamilyRecord, record.family_id)
     evaluation_id = record.frozen_inputs.get("evaluation_id")
@@ -177,6 +185,14 @@ async def process_qualification(
         or evaluation.future_duration_seconds != family.future_duration_seconds
     ):
         raise RuntimeError("qualification_identity_mismatch")
+    candidate = planned_evaluation_from_persisted_values(
+        fingerprint=evaluation.fingerprint,
+        engine=evaluation.engine,
+        future_duration_seconds=evaluation.future_duration_seconds,
+        objective=evaluation.objective,
+        hyperparameters=evaluation.hyperparameters,
+        feature_policy=evaluation.feature_policy,
+    )
     policy_payload = record.policy_identity
     if (
         int(str(policy_payload.get("strategy_policy_version", 0)))
@@ -227,10 +243,10 @@ async def process_qualification(
         capability=InstrumentCapability.SCORING,
     ).instrument
     if not await heartbeat_qualification(
-        session, qualification_id=record.id, worker_id=worker_id
+        session, qualification_id=qualification_id, worker_id=worker_id
     ):
         if await _cancel_owned(
-            session, qualification_id=record.id, worker_id=worker_id
+            session, qualification_id=qualification_id, worker_id=worker_id
         ):
             return
         raise QualificationLeaseLostError("worker lost qualification lease")
@@ -238,9 +254,9 @@ async def process_qualification(
         "Economic v2 qualification started",
         extra={
             "structured_fields": {
-                "qualification_id": str(record.id),
-                "candidate_fingerprint": record.candidate_fingerprint,
-                "policy_fingerprint": record.policy_fingerprint,
+                "qualification_id": str(qualification_id),
+                "candidate_fingerprint": candidate_fingerprint,
+                "policy_fingerprint": policy_fingerprint,
                 "read_start": "2020-01-01T00:00:00+00:00",
                 "read_end_exclusive": "2025-01-01T00:00:00+00:00",
             }
@@ -250,7 +266,7 @@ async def process_qualification(
     lease_error: Exception | None = None
     work_error: Exception | None = None
     result = None
-    factory = async_sessionmaker(session.bind, expire_on_commit=False)
+    factory = async_sessionmaker(session_bind, expire_on_commit=False)
 
     async def maintain_lease() -> None:
         nonlocal lease_error
@@ -264,7 +280,7 @@ async def process_qualification(
                     async with factory() as heartbeat_session:
                         if not await heartbeat_qualification(
                             heartbeat_session,
-                            qualification_id=record.id,
+                            qualification_id=qualification_id,
                             worker_id=worker_id,
                         ):
                             raise QualificationLeaseLostError(
@@ -282,9 +298,9 @@ async def process_qualification(
         result = await asyncio.to_thread(
             calculate_qualification,
             dataset=dataset,
-            evaluation=evaluation,
+            candidate=candidate,
             policy=policy,
-            deterministic_seed=int(str(record.frozen_inputs["deterministic_seed"])),
+            deterministic_seed=deterministic_seed,
         )
     except Exception as error:
         work_error = error
@@ -293,7 +309,7 @@ async def process_qualification(
         await heartbeat_task
     if lease_error is not None:
         if await _cancel_owned(
-            session, qualification_id=record.id, worker_id=worker_id
+            session, qualification_id=qualification_id, worker_id=worker_id
         ):
             return
         raise QualificationLeaseLostError(
@@ -305,7 +321,7 @@ async def process_qualification(
     final = await session.execute(
         update(MLEconomicQualificationRecord)
         .where(
-            MLEconomicQualificationRecord.id == record.id,
+            MLEconomicQualificationRecord.id == qualification_id,
             MLEconomicQualificationRecord.status == "running",
             MLEconomicQualificationRecord.worker_id == worker_id,
             MLEconomicQualificationRecord.cancellation_requested_at.is_(None),
@@ -328,7 +344,7 @@ async def process_qualification(
     if int(final.rowcount) != 1:  # type: ignore[attr-defined]
         await session.rollback()
         if await _cancel_owned(
-            session, qualification_id=record.id, worker_id=worker_id
+            session, qualification_id=qualification_id, worker_id=worker_id
         ):
             return
         raise QualificationLeaseLostError("worker lost qualification lease")
@@ -337,7 +353,7 @@ async def process_qualification(
         "Economic v2 qualification completed",
         extra={
             "structured_fields": {
-                "qualification_id": str(record.id),
+                "qualification_id": str(qualification_id),
                 "classification": "qualified"
                 if not result.failed_rules
                 else "rejected",

@@ -102,6 +102,13 @@ the new owner; cancellation is also checked at the ownership boundary. The share
 boundary guard rejects every v2 read extending past
 `2025-01-01T00:00:00Z`.
 
+Before releasing the database read transaction, the worker materializes the selected
+evaluation as an immutable `PlannedEvaluation` containing only normalized scientific
+values. Background CPU calculation receives that snapshot, the fully materialized
+dataset, and the frozen policy; it never receives an ORM record, session, connection,
+or lazy query result. This keeps the long calculation outside a database transaction
+without allowing rollback-expired ORM state to cross the thread boundary.
+
 Discover both preset contracts at
 `GET /optimization/ml-search-campaign-contract/v2`. Qualification evidence is
 read-only and paginated at

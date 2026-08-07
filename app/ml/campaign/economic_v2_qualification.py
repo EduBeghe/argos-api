@@ -11,9 +11,8 @@ import numpy as np
 from app.ml.contract import DEVELOPMENT_END, QUALIFICATION_END, SPLIT_GAP
 from app.ml.dataset import MLExperimentDataset
 from app.ml.gaps import datetime_to_ns, ns_to_datetime
-from app.ml.protected.validation import _candidate
 from app.ml.refinement.calculation import _fit_predict, _selected_columns
-from app.ml.refinement.models import MLRefinementEvaluationRecord
+from app.ml.refinement.planning import PlannedEvaluation
 
 from .contracts import CAMPAIGN_FEE_RATE, CAMPAIGN_SLIPPAGE_RATE
 from .economic_v2_calculation import evaluate_strategy_policy
@@ -85,7 +84,7 @@ def _period_return(
 def calculate_qualification(
     *,
     dataset: MLExperimentDataset,
-    evaluation: MLRefinementEvaluationRecord,
+    candidate: PlannedEvaluation,
     policy: StrategyPolicy,
     deterministic_seed: int,
 ) -> QualificationResult:
@@ -95,7 +94,6 @@ def calculate_qualification(
     )
     if dataset.metadata.requested_end != QUALIFICATION_END:
         raise ValueError("qualification dataset must end exactly at 2025-01-01 UTC")
-    candidate = _candidate(evaluation)
     target = dataset.targets.for_duration(
         timedelta(seconds=candidate.future_duration_seconds)
     )

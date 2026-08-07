@@ -41,6 +41,7 @@ from app.ml.campaign.planning import SourceInstrument, build_family_universe
 from app.ml.dataset import MLExperimentDataset
 from app.ml.gaps import datetime_to_ns
 from app.ml.refinement.contracts import PredictionObjective
+from app.ml.refinement.planning import planned_evaluation_from_persisted_values
 from app.ml.screening.config import ScreeningEngine
 
 
@@ -53,6 +54,51 @@ def _source(asset: str = "btc_usdt") -> SourceInstrument:
         "5m",
         "a" * 64,
     )
+
+
+def test_persisted_evaluation_snapshot_is_deeply_session_independent() -> None:
+    hyperparameters: dict[str, object] = {"alpha": 1.0, "fit_intercept": True}
+    feature_policy: dict[str, object] = {
+        "strategy": "explicit",
+        "variables": ["return_1", "rsi_14"],
+    }
+    candidate = planned_evaluation_from_persisted_values(
+        fingerprint="e" * 64,
+        engine="ridge",
+        future_duration_seconds=3600,
+        objective="future_return_regression",
+        hyperparameters=hyperparameters,
+        feature_policy=feature_policy,
+    )
+    hyperparameters["alpha"] = 100.0
+    assert isinstance(feature_policy["variables"], list)
+    feature_policy["variables"].append("atr_14")
+    assert candidate.hyperparameters == (("alpha", 1.0), ("fit_intercept", True))
+    assert candidate.explicit_variables == ("return_1", "rsi_14")
+
+
+@pytest.mark.parametrize(
+    ("hyperparameters", "feature_policy", "message"),
+    (
+        ({"alpha": "invalid"}, {"strategy": "all"}, "hyperparameter"),
+        ({"alpha": 1.0}, {"strategy": "explicit", "variables": "rsi_14"}, "variables"),
+        ({"alpha": 1.0}, {"strategy": "top_k", "top_k": True}, "top_k"),
+    ),
+)
+def test_persisted_evaluation_snapshot_rejects_malformed_values(
+    hyperparameters: dict[str, object],
+    feature_policy: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        planned_evaluation_from_persisted_values(
+            fingerprint="e" * 64,
+            engine="ridge",
+            future_duration_seconds=3600,
+            objective="future_return_regression",
+            hyperparameters=hyperparameters,
+            feature_policy=feature_policy,
+        )
 
 
 def _evidence(**overrides: object) -> EconomicV2Evidence:
