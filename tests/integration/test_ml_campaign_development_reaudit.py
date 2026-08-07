@@ -737,7 +737,7 @@ async def test_selected_candidate_runs_real_development_calculation_and_is_read_
         session=session, campaign_id=campaign_id
     )
 
-    assert not first_invalid and not second_invalid
+    assert not first_invalid and not second_invalid, (first, second)
     assert report_json(first) == report_json(second)
     assert first["counts"]["selected"] == 1  # type: ignore[index]
     result = first["results"][0]  # type: ignore[index]
