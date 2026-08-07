@@ -145,3 +145,27 @@ def test_protected_simulation_exits_only_on_next_cadence_boundary() -> None:
     assert result.trades[0].entry_at == start
     assert result.trades[0].exit_at == start + timedelta(minutes=60)
     assert all(point.minute in {0, 30} for point, _ in result.equity_curve)
+
+
+def test_protected_simulation_does_not_open_on_final_prediction() -> None:
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    result = simulate_fixed_horizon_long_only(
+        predictions=(
+            ProtectedPrediction(start, Decimal("0.10"), Decimal("100")),
+            ProtectedPrediction(
+                start + timedelta(minutes=30), Decimal("0.90"), Decimal("101")
+            ),
+        ),
+        instrument=Instrument(
+            Asset.BTC_USDT,
+            Provider.BINANCE,
+            MarketType.SPOT,
+            Interval.FIVE_MINUTES,
+        ),
+        threshold=Decimal("0.80"),
+        hold=timedelta(minutes=30),
+        configuration=SimulationConfiguration(),
+    )
+
+    assert result.trades == ()
+    assert result.final_equity == result.initial_equity
