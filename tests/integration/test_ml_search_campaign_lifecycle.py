@@ -867,6 +867,82 @@ async def test_v2_retry_requeues_same_failed_child_without_duplicate_graph(
             )
             == 1
         )
+
+
+async def test_v2_incompatible_completed_child_fails_then_repairs_same_graph(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="running", first_claimed_at=NOW)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.contract_version = 2
+    record.policy_version = 2
+    record.classification_version = 2
+    family_record = family(record.id, source_id)
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    run = refinement_run(source_id, result_id, status="completed")
+    payload = dict(run.normalized_configuration)
+    payload["confidence_buckets"] = [str(item) for item in CAMPAIGN_CONFIDENCE_BUCKETS]
+    payload["economic_policy_search"] = {
+        "confidence_fractions": [
+            str(item) for item in ECONOMIC_V2_CONFIDENCE_FRACTIONS
+        ],
+        "holding_multipliers": [str(item) for item in ECONOMIC_V2_HOLDING_MULTIPLIERS],
+        "regime_policies": list(ECONOMIC_V2_REGIME_POLICIES),
+        "version": ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+    }
+    run.normalized_configuration = payload
+    run.evaluations_selected = 1
+    run.evaluations_computed = 0
+    run.evaluations_reused = 1
+    source_run = refinement_run(source_id, result_id, status="completed")
+    source_run.experiment_key = f"{PREFIX}legacy-source-{source_run.id}"[:64]
+    source_run.evaluations_selected = 1
+    source_run.evaluations_computed = 1
+    legacy_source = evaluation(source_run.id, "a" * 64)
+    incompatible_clone = evaluation(run.id, "b" * 64)
+    incompatible_clone.reused_from_evaluation_id = legacy_source.id
+    link = child(record.id, family_record.id, run.id, reused=False)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add_all((family_record, source_run, run))
+        await session.flush()
+        session.add_all((legacy_source, incompatible_clone))
+        await session.flush()
+        session.add(link)
+        await session.commit()
+
+        assert await coordinate_next_campaign(session, now=NOW)
+        await session.refresh(record)
+        assert record.status == "failed"
+        assert record.failure_type == "incompatible_economic_policy_evidence"
+
+        retried = await retry_campaign(session, record.id)
+        assert retried.id == record.id
+        assert retried.status == "queued"
+
+    async with sessions() as session:
+        repaired = await session.get(MLRefinementRunRecord, run.id)
+        assert repaired is not None
+        assert repaired.status == "queued"
+        assert (
+            await session.get(MLRefinementEvaluationRecord, incompatible_clone.id)
+            is None
+        )
+        assert (
+            await session.get(MLRefinementEvaluationRecord, legacy_source.id)
+            is not None
+        )
+        assert (
+            await session.scalar(
+                select(func.count(MLSearchCampaignChildRecord.id)).where(
+                    MLSearchCampaignChildRecord.campaign_id == record.id
+                )
+            )
+            == 1
+        )
         assert (
             await session.scalar(
                 select(func.count(MLSearchCampaignFamilyRecord.id)).where(
@@ -1591,3 +1667,4 @@ async def test_other_evidence_failure_still_blocks_manifest_enqueue(
             )
             == 0
         )
+

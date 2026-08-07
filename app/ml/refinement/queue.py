@@ -103,7 +103,7 @@ async def enqueue_refinement(
         if existing.status == "running":
             return EnqueueResult(existing, QueueDisposition.ALREADY_RUNNING)
         if existing.status == "completed" and await completed_run_is_complete(
-            session, existing
+            session, existing, request
         ):
             return EnqueueResult(existing, QueueDisposition.REUSED_COMPLETED)
         if existing.status not in {"failed", "cancelled"}:
@@ -298,3 +298,4 @@ async def heartbeat(session: AsyncSession, run_id: UUID, worker_id: str) -> bool
     )
     await session.commit()
     return bool(result.rowcount)  # type: ignore[attr-defined]
+

@@ -149,7 +149,7 @@ async def execute_refinement(
     if (
         claimed_run is None
         and existing is not None
-        and await completed_run_is_complete(session, existing)
+        and await completed_run_is_complete(session, existing, request)
     ):
         return RefinementExecutionResult(
             existing.id,
@@ -240,7 +240,9 @@ async def execute_refinement(
                 versions=versions,
                 deterministic_seed=request.deterministic_seed,
             )
-            retained = await existing_run_evaluation(session, run.id, fingerprint)
+            retained = await existing_run_evaluation(
+                session, run.id, fingerprint, request
+            )
             if retained is not None:
                 reused_count += 1
                 await record_progress(
@@ -251,7 +253,7 @@ async def execute_refinement(
                     worker_id=worker_id,
                 )
                 continue
-            reused = await reusable_evaluation(session, fingerprint)
+            reused = await reusable_evaluation(session, fingerprint, request)
             if reused is not None:
                 await persist_evaluation(
                     session=session,
@@ -385,3 +387,4 @@ async def execute_refinement(
         omitted > 0,
         reason,
     )
+

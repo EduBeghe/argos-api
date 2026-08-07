@@ -74,6 +74,12 @@ logger = logging.getLogger(__name__)
 class CampaignCoordinationError(RuntimeError):
     """Expected persisted-state error that fails only the affected campaign."""
 
+    code = "campaign_coordination_error"
+
+
+class IncompatibleCampaignEvidenceError(CampaignCoordinationError):
+    code = "incompatible_economic_policy_evidence"
+
 
 def _number(value: object) -> Decimal | None:
     return None if value is None else Decimal(str(value))
@@ -153,26 +159,34 @@ def select_economic_v2_evidence(
         policy = _mapping(row.aggregate_metrics.get("selected_economic_policy_v2"))
         if not policy:
             continue
-        evidence = EconomicV2Evidence(
-            family.fingerprint,
-            str(policy["policy_fingerprint"]),
-            str(family.source_screening_run_id),
-            family.engine,
-            family.objective,
-            _integer(policy["eligible_observations"]),
-            _integer(policy["round_trips"]),
-            _integer(policy["positive_net_folds"]),
-            _integer(policy["folds_beating_buy_and_hold"]),
-            Decimal(str(policy["median_net_return"])),
-            Decimal(str(policy["worst_net_return"])),
-            Decimal(str(policy["maximum_drawdown"])),
-            _integer(policy["inactive_folds"]),
-            Decimal(str(policy["compounded_return_1_5x"])),
-            Decimal(str(policy["compounded_return_2x"])),
-        )
+        try:
+            evidence = EconomicV2Evidence(
+                family.fingerprint,
+                str(policy["policy_fingerprint"]),
+                str(family.source_screening_run_id),
+                family.engine,
+                family.objective,
+                _integer(policy["eligible_observations"]),
+                _integer(policy["round_trips"]),
+                _integer(policy["positive_net_folds"]),
+                _integer(policy["folds_beating_buy_and_hold"]),
+                Decimal(str(policy["median_net_return"])),
+                Decimal(str(policy["worst_net_return"])),
+                Decimal(str(policy["maximum_drawdown"])),
+                _integer(policy["inactive_folds"]),
+                Decimal(str(policy["compounded_return_1_5x"])),
+                Decimal(str(policy["compounded_return_2x"])),
+            )
+        except (KeyError, ValueError) as error:
+            raise IncompatibleCampaignEvidenceError(
+                f"campaign v2 evaluation {row.id} has malformed "
+                "strategy-policy evidence"
+            ) from error
         candidates.append(SelectedEconomicV2Evidence(row, evidence, policy))
     if not candidates:
-        raise ValueError("campaign v2 child has no strategy-policy evidence")
+        raise IncompatibleCampaignEvidenceError(
+            "campaign v2 child has no compatible strategy-policy evidence"
+        )
     return min(candidates, key=lambda item: economic_v2_rank(item.evidence))
 
 
@@ -292,11 +306,20 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
             message=f"child refinement run {run.id} has incomplete evidence",
         )
         return True
-    selected_evidence = (
-        select_economic_v2_evidence(family, evaluations)
-        if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
-        else select_economic_evidence(family, evaluations)
-    )
+    try:
+        selected_evidence = (
+            select_economic_v2_evidence(family, evaluations)
+            if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
+            else select_economic_evidence(family, evaluations)
+        )
+    except CampaignCoordinationError as error:
+        await _fail_campaign(
+            session,
+            campaign,
+            failure_type=error.code,
+            message=str(error),
+        )
+        return True
     evidence = selected_evidence.evidence
     family.current_stage = child.stage
     family.evaluations_completed = len(evaluations)
@@ -784,7 +807,7 @@ async def _stage_child_run(
         if existing.status in {"queued", "running"}:
             return existing, True
         if existing.status == "completed" and await completed_run_is_complete(
-            session, existing
+            session, existing, request
         ):
             return existing, True
         if existing.status == "completed":
@@ -993,3 +1016,4 @@ async def coordinate_next_campaign(
     family.evaluations_planned = cumulative
     await session.commit()
     return True
+
