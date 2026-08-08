@@ -1095,6 +1095,10 @@ async def test_completed_child_reconciliation_is_idempotent_across_sessions(
         first_family = await session.get(MLSearchCampaignFamilyRecord, family_record.id)
         assert first_campaign is not None
         assert first_family is not None
+        assert first_campaign.status != "failed"
+        assert first_campaign.failure_type is None
+        assert first_campaign.evaluations_computed == 1
+        assert first_campaign.evaluations_reused == 0
         snapshot = (
             first_campaign.families_covered,
             first_campaign.families_uncovered,
