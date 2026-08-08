@@ -166,7 +166,8 @@ def source_result(run_id: UUID, result_id: UUID) -> MLModelScreeningResultRecord
     )
 
 
-def empty_development_dataset() -> MLExperimentDataset:
+def minimal_development_dataset() -> MLExperimentDataset:
+    candle_open = DEVELOPMENT_START
     return build_ml_experiment_dataset(
         instrument=Instrument(
             Asset.BTC_USDT,
@@ -175,13 +176,13 @@ def empty_development_dataset() -> MLExperimentDataset:
             Interval.FIVE_MINUTES,
         ),
         columns=candle_columns(
-            open_times=[],
-            close_times=[],
-            open_prices=[],
-            high_prices=[],
-            low_prices=[],
-            close_prices=[],
-            volumes=[],
+            open_times=[candle_open],
+            close_times=[candle_open + timedelta(minutes=5, microseconds=-1)],
+            open_prices=[100.0],
+            high_prices=[101.0],
+            low_prices=[99.0],
+            close_prices=[100.5],
+            volumes=[10.0],
         ),
         requested_end=FINAL_TEST_START,
     )
@@ -235,12 +236,26 @@ async def test_evaluation_parent_precedes_manifest_and_rollback_retry_is_atomic(
     factory, source_run_id, source_result_id = refinement_factory
     refinement_request = request(source_run_id, source_result_id)
     plan = build_refinement_plan(refinement_request)
-    dataset = empty_development_dataset()
+    dataset = minimal_development_dataset()
     fingerprint = "f" * 64
+    target = dataset.targets.for_duration(timedelta(minutes=30))
+    eligible = dataset.feature_eligible & target.eligible
     result = RefinementEvaluationResult(
         plan.evaluations[0],
-        (),
-        {"fold_count": 0},
+        tuple(
+            RefinementFoldResult(
+                fold.definition.name,
+                int(eligible[fold.training_indices].sum()),
+                int(eligible[fold.validation_indices].sum()),
+                (),
+                {},
+                (),
+                0.0,
+                "insufficient_training_rows",
+            )
+            for fold in dataset.folds
+        ),
+        {"fold_count": len(dataset.folds)},
         RefinementClassification.INCOMPLETE,
         ("incomplete_fold_count",),
         0.1,
@@ -963,7 +978,7 @@ async def test_zero_progress_fingerprint_failure_retries_the_same_run_and_advanc
     assert UUID(retry.json()["run"]["id"]) == run_id
 
     plan = build_refinement_plan(refinement_request)
-    dataset = empty_development_dataset()
+    dataset = minimal_development_dataset()
     instrument = dataset.metadata.instrument
     async with factory() as session:
         claimed = await claim_next_run(
