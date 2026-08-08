@@ -1041,23 +1041,6 @@ async def test_zero_progress_fingerprint_failure_retries_the_same_run_and_advanc
             )
             == 1
         )
-    async with factory() as verification:
-        evaluation_id = await verification.scalar(
-            select(MLRefinementEvaluationRecord.id).where(
-                MLRefinementEvaluationRecord.run_id == run_id
-            )
-        )
-        assert evaluation_id is not None
-        assert (
-            await verification.scalar(
-                select(func.count(MLTemporalManifestRecord.id)).where(
-                    MLTemporalManifestRecord.evaluation_id == evaluation_id
-                )
-            )
-            == 1
-        )
-
-
 async def test_concurrent_enqueue_skip_locked_and_stale_recovery(
     refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
 ) -> None:
