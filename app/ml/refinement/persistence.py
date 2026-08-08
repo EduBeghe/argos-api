@@ -493,6 +493,10 @@ async def persist_evaluation(
         created_at=now,
     )
     session.add(record)
+    # The temporal manifest and any future evaluation evidence reference this row.
+    # Flush the parent explicitly so correctness does not depend on SQLAlchemy's
+    # incidental ordering for independently mapped records with assigned UUIDs.
+    await session.flush()
     if (
         development_dataset is not None
         and canonical_dataset_fingerprint is not None

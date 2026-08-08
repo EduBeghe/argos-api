@@ -31,7 +31,12 @@ from app.ml.campaign.contracts import (
     ECONOMIC_V2_STRATEGY_POLICY_VERSION,
 )
 from app.ml.contract import DEVELOPMENT_START, FINAL_TEST_END, FINAL_TEST_START
-from app.ml.dataset import MLDatasetMetadata, build_ml_experiment_dataset
+from app.ml.dataset import (
+    MLDatasetMetadata,
+    MLExperimentDataset,
+    build_ml_experiment_dataset,
+)
+from app.ml.protected.models import MLTemporalManifestRecord
 from app.ml.reader import candle_columns
 from app.ml.refinement import service as refinement_service
 from app.ml.refinement.calculation import (
@@ -161,6 +166,28 @@ def source_result(run_id: UUID, result_id: UUID) -> MLModelScreeningResultRecord
     )
 
 
+def minimal_development_dataset() -> MLExperimentDataset:
+    candle_open = DEVELOPMENT_START
+    return build_ml_experiment_dataset(
+        instrument=Instrument(
+            Asset.BTC_USDT,
+            Provider.BINANCE,
+            MarketType.SPOT,
+            Interval.FIVE_MINUTES,
+        ),
+        columns=candle_columns(
+            open_times=[candle_open],
+            close_times=[candle_open + timedelta(minutes=5, microseconds=-1)],
+            open_prices=[100.0],
+            high_prices=[101.0],
+            low_prices=[99.0],
+            close_prices=[100.5],
+            volumes=[10.0],
+        ),
+        requested_end=FINAL_TEST_START,
+    )
+
+
 @pytest_asyncio.fixture
 async def refinement_factory() -> AsyncIterator[
     tuple[async_sessionmaker[AsyncSession], UUID, UUID]
@@ -171,6 +198,18 @@ async def refinement_factory() -> AsyncIterator[
     async with factory() as session:
         prior_source_runs = select(MLModelScreeningRunRecord.id).where(
             MLModelScreeningRunRecord.experiment_key.like(f"{PREFIX}%")
+        )
+        prior_refinement_runs = select(MLRefinementRunRecord.id).where(
+            MLRefinementRunRecord.source_screening_run_id.in_(prior_source_runs)
+        )
+        await session.execute(
+            delete(MLTemporalManifestRecord).where(
+                MLTemporalManifestRecord.evaluation_id.in_(
+                    select(MLRefinementEvaluationRecord.id).where(
+                        MLRefinementEvaluationRecord.run_id.in_(prior_refinement_runs)
+                    )
+                )
+            )
         )
         await session.execute(
             delete(MLRefinementRunRecord).where(
@@ -188,6 +227,18 @@ async def refinement_factory() -> AsyncIterator[
         await session.commit()
     yield factory, run_id, result_id
     async with factory() as session:
+        refinement_runs = select(MLRefinementRunRecord.id).where(
+            MLRefinementRunRecord.source_screening_run_id == run_id
+        )
+        await session.execute(
+            delete(MLTemporalManifestRecord).where(
+                MLTemporalManifestRecord.evaluation_id.in_(
+                    select(MLRefinementEvaluationRecord.id).where(
+                        MLRefinementEvaluationRecord.run_id.in_(refinement_runs)
+                    )
+                )
+            )
+        )
         await session.execute(
             delete(MLRefinementRunRecord).where(
                 MLRefinementRunRecord.source_screening_run_id == run_id
@@ -200,6 +251,167 @@ async def refinement_factory() -> AsyncIterator[
         )
         await session.commit()
     await engine.dispose()
+
+
+async def test_evaluation_parent_precedes_manifest_and_rollback_retry_is_atomic(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    refinement_request = request(source_run_id, source_result_id)
+    plan = build_refinement_plan(refinement_request)
+    dataset = minimal_development_dataset()
+    fingerprint = "f" * 64
+    target = dataset.targets.for_duration(timedelta(minutes=30))
+    eligible = dataset.feature_eligible & target.eligible
+    result = RefinementEvaluationResult(
+        plan.evaluations[0],
+        tuple(
+            RefinementFoldResult(
+                fold.definition.name,
+                int(eligible[fold.training_indices].sum()),
+                int(eligible[fold.validation_indices].sum()),
+                (),
+                {},
+                (),
+                0.0,
+                "insufficient_training_rows",
+            )
+            for fold in dataset.folds
+        ),
+        {"fold_count": len(dataset.folds)},
+        RefinementClassification.INCOMPLETE,
+        ("incomplete_fold_count",),
+        0.1,
+    )
+    async with factory() as session:
+        run = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key="a" * 64,
+            dataset_fingerprint="d" * 64,
+            versions=library_versions(),
+            now=NOW,
+        )
+        run_id = run.id
+
+        def fail_after_parent_flush(**_kwargs: object) -> object:
+            raise RuntimeError("forced dependent evidence failure")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                "app.ml.refinement.persistence.reconstruct_temporal_manifest",
+                fail_after_parent_flush,
+            )
+            with pytest.raises(RuntimeError, match="forced dependent evidence failure"):
+                await persist_evaluation(
+                    session=session,
+                    run_id=run_id,
+                    fingerprint=fingerprint,
+                    result=result,
+                    reused=None,
+                    request=refinement_request,
+                    now=NOW,
+                    development_dataset=dataset,
+                    canonical_dataset_fingerprint="d" * 64,
+                )
+        await session.rollback()
+
+    async with factory() as verification:
+        assert (
+            await verification.scalar(
+                select(func.count(MLRefinementEvaluationRecord.id)).where(
+                    MLRefinementEvaluationRecord.run_id == run_id
+                )
+            )
+            == 0
+        )
+        assert (
+            await verification.scalar(
+                select(func.count(MLTemporalManifestRecord.id))
+                .join(
+                    MLRefinementEvaluationRecord,
+                    MLRefinementEvaluationRecord.id
+                    == MLTemporalManifestRecord.evaluation_id,
+                )
+                .where(MLRefinementEvaluationRecord.run_id == run_id)
+            )
+            == 0
+        )
+
+    async with factory() as session:
+        await persist_evaluation(
+            session=session,
+            run_id=run_id,
+            fingerprint=fingerprint,
+            result=result,
+            reused=None,
+            request=refinement_request,
+            now=NOW,
+            development_dataset=dataset,
+            canonical_dataset_fingerprint="d" * 64,
+        )
+        retained = await existing_run_evaluation(session, run_id, fingerprint)
+        assert retained is not None
+
+    async with factory() as verification:
+        evaluation_ids = tuple(
+            await verification.scalars(
+                select(MLRefinementEvaluationRecord.id).where(
+                    MLRefinementEvaluationRecord.run_id == run_id
+                )
+            )
+        )
+        assert len(evaluation_ids) == 1
+        manifests = tuple(
+            await verification.scalars(
+                select(MLTemporalManifestRecord).where(
+                    MLTemporalManifestRecord.evaluation_id == evaluation_ids[0]
+                )
+            )
+        )
+        assert len(manifests) == 1
+        assert manifests[0].status == "completed"
+        assert manifests[0].dataset_fingerprint == "d" * 64
+
+
+async def test_invalid_evaluation_source_writes_no_rows(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    refinement_request = request(source_run_id, source_result_id)
+    plan = build_refinement_plan(refinement_request)
+    async with factory() as session:
+        run = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key="i" * 64,
+            dataset_fingerprint="d" * 64,
+            versions=library_versions(),
+            now=NOW,
+        )
+        with pytest.raises(
+            ValueError, match="exactly one evaluation source is required"
+        ):
+            await persist_evaluation(
+                session=session,
+                run_id=run.id,
+                fingerprint="n" * 64,
+                result=None,
+                reused=None,
+                request=refinement_request,
+                now=NOW,
+            )
+        assert (
+            await session.scalar(
+                select(func.count(MLRefinementEvaluationRecord.id)).where(
+                    MLRefinementEvaluationRecord.run_id == run.id
+                )
+            )
+            == 0
+        )
 
 
 async def test_persistence_reuse_and_read_only_api(
@@ -790,22 +1002,8 @@ async def test_zero_progress_fingerprint_failure_retries_the_same_run_and_advanc
     assert UUID(retry.json()["run"]["id"]) == run_id
 
     plan = build_refinement_plan(refinement_request)
-    instrument = Instrument(
-        Asset.BTC_USDT, Provider.BINANCE, MarketType.SPOT, Interval.FIVE_MINUTES
-    )
-    dataset = build_ml_experiment_dataset(
-        instrument=instrument,
-        columns=candle_columns(
-            open_times=[],
-            close_times=[],
-            open_prices=[],
-            high_prices=[],
-            low_prices=[],
-            close_prices=[],
-            volumes=[],
-        ),
-        requested_end=FINAL_TEST_START,
-    )
+    dataset = minimal_development_dataset()
+    instrument = dataset.metadata.instrument
     async with factory() as session:
         claimed = await claim_next_run(
             session, worker_id="worker-new", now=NOW + timedelta(seconds=2)
