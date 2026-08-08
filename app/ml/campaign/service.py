@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,10 +18,13 @@ from app.ml.contract import (
     ML_EXPERIMENT_CONTRACT_VERSION,
     VARIABLE_REGISTRY_VERSION,
 )
-from app.ml.protected.models import MLFinalValidationRecord
-from app.ml.refinement.contracts import PredictionObjective
+from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
+from app.ml.refinement.contracts import MLRefinementRequest, PredictionObjective
 from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementRunRecord
-from app.ml.refinement.persistence import completed_run_is_complete
+from app.ml.refinement.persistence import (
+    completed_run_is_complete,
+    incompatible_run_evaluations,
+)
 from app.ml.screening.config import ML_MODEL_SCREENING_VERSION, ScreeningEngine
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
@@ -606,16 +609,69 @@ async def retry_campaign(
         raise CampaignConflictError(
             "failed campaign responsible child has no refinement run"
         )
-    reset_required = run.status in {"failed", "cancelled"}
+    request_payload = dict(run.normalized_configuration)
+    request_payload["notes"] = run.notes
+    try:
+        refinement_request = MLRefinementRequest.model_validate(request_payload)
+    except (TypeError, ValueError) as error:
+        raise CampaignConflictError(
+            "failed campaign child configuration cannot be reconstructed"
+        ) from error
+    incompatible = await incompatible_run_evaluations(session, run, refinement_request)
+    reset_required = run.status in {"failed", "cancelled"} or bool(incompatible)
     resume_shared = run.status in {"queued", "running"}
     if run.status == "completed":
-        reset_required = not await completed_run_is_complete(session, run)
+        reset_required = not await completed_run_is_complete(
+            session, run, refinement_request
+        )
         resume_shared = not reset_required
     if not reset_required and not resume_shared:
         raise CampaignConflictError(
             "failed campaign responsible child is not retryable"
         )
     if reset_required:
+        incompatible_ids = tuple(row.id for row in incompatible)
+        if incompatible_ids:
+            protected_reference = False
+            for model, column in (
+                (
+                    MLSearchCampaignFamilyRecord,
+                    MLSearchCampaignFamilyRecord.best_evaluation_id,
+                ),
+                (MLFinalValidationRecord, MLFinalValidationRecord.evaluation_id),
+                (MLTemporalManifestRecord, MLTemporalManifestRecord.evaluation_id),
+                (
+                    MLRefinementEvaluationRecord,
+                    MLRefinementEvaluationRecord.reused_from_evaluation_id,
+                ),
+            ):
+                reference = await session.scalar(
+                    select(model.id).where(column.in_(incompatible_ids)).limit(1)
+                )
+                if reference is not None:
+                    protected_reference = True
+                    break
+            if protected_reference:
+                raise CampaignConflictError(
+                    "incompatible child evidence is referenced and cannot be repaired"
+                )
+            await session.execute(
+                delete(MLRefinementEvaluationRecord).where(
+                    MLRefinementEvaluationRecord.id.in_(incompatible_ids),
+                    MLRefinementEvaluationRecord.run_id == run.id,
+                )
+            )
+            logger.warning(
+                "Removed incompatible campaign child evidence for retry",
+                extra={
+                    "structured_fields": {
+                        "campaign_id": str(record.id),
+                        "run_id": str(run.id),
+                        "evaluation_ids": [str(item) for item in incompatible_ids],
+                        "reason_code": "incompatible_economic_policy_evidence",
+                    }
+                },
+            )
         try:
             reset_refinement_run(run)
         except (TypeError, ValueError) as error:

@@ -1,8 +1,9 @@
-import hashlib
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+
+from app.ml.refinement.contracts import EconomicPolicySearchConfiguration
+from app.ml.refinement.economic_policy_contract import economic_policy_fingerprint
 
 from .contracts import (
     ECONOMIC_V2_CONFIDENCE_FRACTIONS,
@@ -31,22 +32,29 @@ def exact_holding_candles(horizon_seconds: int, multiplier: Decimal) -> int:
     return int(integral)
 
 
-def strategy_policy_grid(horizon_seconds: int) -> tuple[StrategyPolicy, ...]:
+def strategy_policy_grid(
+    horizon_seconds: int,
+    configuration: EconomicPolicySearchConfiguration | None = None,
+) -> tuple[StrategyPolicy, ...]:
+    if configuration is None:
+        configuration = EconomicPolicySearchConfiguration(
+            confidence_fractions=ECONOMIC_V2_CONFIDENCE_FRACTIONS,
+            holding_multipliers=ECONOMIC_V2_HOLDING_MULTIPLIERS,
+            regime_policies=ECONOMIC_V2_REGIME_POLICIES,
+            version=ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+        )
     policies: list[StrategyPolicy] = []
-    for confidence in ECONOMIC_V2_CONFIDENCE_FRACTIONS:
-        for multiplier in ECONOMIC_V2_HOLDING_MULTIPLIERS:
+    for confidence in sorted(configuration.confidence_fractions):
+        for multiplier in sorted(configuration.holding_multipliers):
             holding_candles = exact_holding_candles(horizon_seconds, multiplier)
-            for regime in ECONOMIC_V2_REGIME_POLICIES:
-                payload = {
-                    "confidence_fraction": str(confidence),
-                    "holding_candles": holding_candles,
-                    "holding_multiplier": str(multiplier),
-                    "regime_policy": regime,
-                    "version": ECONOMIC_V2_STRATEGY_POLICY_VERSION,
-                }
-                fingerprint = hashlib.sha256(
-                    json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-                ).hexdigest()
+            for regime in sorted(configuration.regime_policies):
+                fingerprint = economic_policy_fingerprint(
+                    confidence_fraction=confidence,
+                    holding_multiplier=multiplier,
+                    regime_policy=regime,
+                    holding_candles=holding_candles,
+                    version=configuration.version,
+                )
                 policies.append(
                     StrategyPolicy(
                         fingerprint,
@@ -54,6 +62,7 @@ def strategy_policy_grid(horizon_seconds: int) -> tuple[StrategyPolicy, ...]:
                         multiplier,
                         regime,
                         holding_candles,
+                        configuration.version,
                     )
                 )
     return tuple(policies)

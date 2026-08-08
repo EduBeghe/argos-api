@@ -18,6 +18,7 @@ from .contracts import (
     RidgeSearchSpace,
     TopKFeatures,
 )
+from .economic_policy_contract import canonical_economic_policy_configuration
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +243,13 @@ def build_refinement_plan(request: MLRefinementRequest) -> RefinementPlan:
                 ],
                 "seed": request.deterministic_seed,
             }
+            if request.economic_policy_search is not None:
+                # Policy version or grid changes are part of the scientific identity.
+                payload["economic_policy_search"] = (
+                    canonical_economic_policy_configuration(
+                        request.economic_policy_search
+                    )
+                )
             candidates.append(
                 PlannedEvaluation(
                     _fingerprint(payload),

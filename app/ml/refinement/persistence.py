@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import math
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -30,10 +31,12 @@ from .contracts import (
     ML_REFINEMENT_CONTRACT_VERSION,
     MLRefinementRequest,
 )
+from .economic_policy_contract import economic_policy_evidence_compatibility
 from .models import MLRefinementEvaluationRecord, MLRefinementRunRecord
 from .planning import RefinementPlan
 
 METRIC_QUANTUM = Decimal("0.000000000000000001")
+logger = logging.getLogger(__name__)
 
 
 class MLRefinementError(RuntimeError):
@@ -115,17 +118,50 @@ async def find_completed_run(
 
 
 async def completed_run_is_complete(
-    session: AsyncSession, run: MLRefinementRunRecord
+    session: AsyncSession,
+    run: MLRefinementRunRecord,
+    request: MLRefinementRequest | None = None,
 ) -> bool:
     count = await session.scalar(
         select(func.count(MLRefinementEvaluationRecord.id)).where(
             MLRefinementEvaluationRecord.run_id == run.id
         )
     )
-    return (
+    count_complete = (
         count == run.evaluations_selected
         and run.evaluations_computed + run.evaluations_reused
         == run.evaluations_selected
+    )
+    if not count_complete or request is None:
+        return count_complete
+    return not await incompatible_run_evaluations(session, run, request)
+
+
+async def incompatible_run_evaluations(
+    session: AsyncSession,
+    run: MLRefinementRunRecord,
+    request: MLRefinementRequest,
+) -> tuple[MLRefinementEvaluationRecord, ...]:
+    rows = tuple(
+        (
+            await session.scalars(
+                select(MLRefinementEvaluationRecord)
+                .where(MLRefinementEvaluationRecord.run_id == run.id)
+                .order_by(
+                    MLRefinementEvaluationRecord.created_at,
+                    MLRefinementEvaluationRecord.id,
+                )
+            )
+        ).all()
+    )
+    return tuple(
+        row
+        for row in rows
+        if not economic_policy_evidence_compatibility(
+            aggregate_metrics=row.aggregate_metrics,
+            request=request,
+            future_duration_seconds=row.future_duration_seconds,
+        ).compatible
     )
 
 
@@ -261,9 +297,12 @@ def effective_evaluation_fingerprint(
 
 
 async def existing_run_evaluation(
-    session: AsyncSession, run_id: UUID, fingerprint: str
+    session: AsyncSession,
+    run_id: UUID,
+    fingerprint: str,
+    request: MLRefinementRequest | None = None,
 ) -> MLRefinementEvaluationRecord | None:
-    return cast(
+    row = cast(
         MLRefinementEvaluationRecord | None,
         await session.scalar(
             select(MLRefinementEvaluationRecord).where(
@@ -272,27 +311,66 @@ async def existing_run_evaluation(
             )
         ),
     )
+    return _compatible_reuse(row, request=request, run_id=run_id)
 
 
 async def reusable_evaluation(
-    session: AsyncSession, fingerprint: str
+    session: AsyncSession,
+    fingerprint: str,
+    request: MLRefinementRequest | None = None,
 ) -> MLRefinementEvaluationRecord | None:
-    return cast(
-        MLRefinementEvaluationRecord | None,
-        await session.scalar(
-            select(MLRefinementEvaluationRecord)
-            .join(
-                MLRefinementRunRecord,
-                MLRefinementRunRecord.id == MLRefinementEvaluationRecord.run_id,
+    rows = tuple(
+        (
+            await session.scalars(
+                select(MLRefinementEvaluationRecord)
+                .join(
+                    MLRefinementRunRecord,
+                    MLRefinementRunRecord.id == MLRefinementEvaluationRecord.run_id,
+                )
+                .where(
+                    MLRefinementEvaluationRecord.fingerprint == fingerprint,
+                    MLRefinementRunRecord.status == "completed",
+                )
+                .order_by(MLRefinementEvaluationRecord.created_at.desc())
+                .limit(100)
             )
-            .where(
-                MLRefinementEvaluationRecord.fingerprint == fingerprint,
-                MLRefinementRunRecord.status == "completed",
-            )
-            .order_by(MLRefinementEvaluationRecord.created_at.desc())
-            .limit(1)
-        ),
+        ).all()
     )
+    for row in rows:
+        compatible = _compatible_reuse(row, request=request, run_id=row.run_id)
+        if compatible is not None:
+            return compatible
+    return None
+
+
+def _compatible_reuse(
+    row: MLRefinementEvaluationRecord | None,
+    *,
+    request: MLRefinementRequest | None,
+    run_id: UUID,
+) -> MLRefinementEvaluationRecord | None:
+    if row is None or request is None:
+        return row
+    compatibility = economic_policy_evidence_compatibility(
+        aggregate_metrics=row.aggregate_metrics,
+        request=request,
+        future_duration_seconds=row.future_duration_seconds,
+    )
+    if compatibility.compatible:
+        return row
+    logger.warning(
+        "Rejected semantically incompatible ML refinement reuse",
+        extra={
+            "structured_fields": {
+                "run_id": str(run_id),
+                "evaluation_id": str(row.id),
+                "reason_code": compatibility.reason_code,
+                "expected_contract_fingerprint": compatibility.expected_contract,
+                "found_contract_fingerprint": compatibility.found_contract,
+            }
+        },
+    )
+    return None
 
 
 def _json_safe(value: object) -> object:

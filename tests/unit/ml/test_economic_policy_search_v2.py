@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.market.catalog import Instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.campaign import economic_v2_calculation
 from app.ml.campaign.contracts import (
     ECONOMIC_POLICY_SEARCH_V2_PRESET,
     ECONOMIC_V2_DIVERSIFIED_FAMILIES,
@@ -17,12 +18,16 @@ from app.ml.campaign.contracts import (
     campaign_search_spaces,
     seeded_local_search_space,
 )
-from app.ml.campaign.economic_v2_calculation import evaluate_strategy_policy
+from app.ml.campaign.economic_v2_calculation import (
+    evaluate_policy_grid_fold,
+    evaluate_strategy_policy,
+)
 from app.ml.campaign.economic_v2_planning import (
     SeedFamily,
     build_economic_v2_universe,
 )
 from app.ml.campaign.economic_v2_policy import (
+    StrategyPolicy,
     enforce_v2_market_boundary,
     exact_holding_candles,
     failed_qualification_rules,
@@ -40,7 +45,10 @@ from app.ml.campaign.economic_v2_qualification import (
 from app.ml.campaign.planning import SourceInstrument, build_family_universe
 from app.ml.dataset import MLExperimentDataset
 from app.ml.gaps import datetime_to_ns
-from app.ml.refinement.contracts import PredictionObjective
+from app.ml.refinement.contracts import (
+    EconomicPolicySearchConfiguration,
+    PredictionObjective,
+)
 from app.ml.refinement.planning import planned_evaluation_from_persisted_values
 from app.ml.screening.config import ScreeningEngine
 
@@ -290,6 +298,41 @@ def test_policy_grid_has_45_sensitive_deterministic_identities() -> None:
     assert exact_holding_candles(3600, Decimal("0.5")) == 6
     with pytest.raises(ValueError, match="exact five-minute candles"):
         exact_holding_candles(301, Decimal("0.5"))
+
+
+def test_policy_fold_evaluates_exact_configured_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration = EconomicPolicySearchConfiguration(
+        confidence_fractions=(Decimal("0.20"), Decimal("0.05")),
+        holding_multipliers=(Decimal("1.5"), Decimal("0.5")),
+        regime_policies=("trend_aligned", "all_regimes"),
+        version=7,
+    )
+    seen: list[StrategyPolicy] = []
+
+    def capture(**kwargs: object) -> dict[str, object]:
+        policy = cast(StrategyPolicy, kwargs["policy"])
+        seen.append(policy)
+        return {"policy_fingerprint": policy.fingerprint}
+
+    monkeypatch.setattr(economic_v2_calculation, "evaluate_strategy_policy", capture)
+    rows = np.asarray([0], dtype=np.int64)
+    result = evaluate_policy_grid_fold(
+        dataset=cast(MLExperimentDataset, object()),
+        training=rows,
+        validation=rows,
+        training_scores=np.asarray([0.1]),
+        validation_scores=np.asarray([0.1]),
+        horizon_seconds=3600,
+        fee_rate=Decimal("0.001"),
+        slippage_rate=Decimal("0.0005"),
+        policy_configuration=configuration,
+    )
+
+    assert len(result) == len(seen) == 8
+    assert tuple(seen) == strategy_policy_grid(3600, configuration)
+    assert {item.version for item in seen} == {7}
 
 
 @pytest.mark.parametrize("stage", (1, 2, 3))

@@ -20,6 +20,9 @@ from app.ml.refinement.contracts import (
     MLRefinementRequest,
     TopKFeatures,
 )
+from app.ml.refinement.economic_policy_contract import (
+    economic_policy_evidence_compatibility,
+)
 from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementRunRecord
 from app.ml.refinement.persistence import (
     completed_run_is_complete,
@@ -73,6 +76,12 @@ logger = logging.getLogger(__name__)
 
 class CampaignCoordinationError(RuntimeError):
     """Expected persisted-state error that fails only the affected campaign."""
+
+    code = "campaign_coordination_error"
+
+
+class IncompatibleCampaignEvidenceError(CampaignCoordinationError):
+    code = "incompatible_economic_policy_evidence"
 
 
 def _number(value: object) -> Decimal | None:
@@ -153,26 +162,34 @@ def select_economic_v2_evidence(
         policy = _mapping(row.aggregate_metrics.get("selected_economic_policy_v2"))
         if not policy:
             continue
-        evidence = EconomicV2Evidence(
-            family.fingerprint,
-            str(policy["policy_fingerprint"]),
-            str(family.source_screening_run_id),
-            family.engine,
-            family.objective,
-            _integer(policy["eligible_observations"]),
-            _integer(policy["round_trips"]),
-            _integer(policy["positive_net_folds"]),
-            _integer(policy["folds_beating_buy_and_hold"]),
-            Decimal(str(policy["median_net_return"])),
-            Decimal(str(policy["worst_net_return"])),
-            Decimal(str(policy["maximum_drawdown"])),
-            _integer(policy["inactive_folds"]),
-            Decimal(str(policy["compounded_return_1_5x"])),
-            Decimal(str(policy["compounded_return_2x"])),
-        )
+        try:
+            evidence = EconomicV2Evidence(
+                family.fingerprint,
+                str(policy["policy_fingerprint"]),
+                str(family.source_screening_run_id),
+                family.engine,
+                family.objective,
+                _integer(policy["eligible_observations"]),
+                _integer(policy["round_trips"]),
+                _integer(policy["positive_net_folds"]),
+                _integer(policy["folds_beating_buy_and_hold"]),
+                Decimal(str(policy["median_net_return"])),
+                Decimal(str(policy["worst_net_return"])),
+                Decimal(str(policy["maximum_drawdown"])),
+                _integer(policy["inactive_folds"]),
+                Decimal(str(policy["compounded_return_1_5x"])),
+                Decimal(str(policy["compounded_return_2x"])),
+            )
+        except (KeyError, ValueError) as error:
+            raise IncompatibleCampaignEvidenceError(
+                f"campaign v2 evaluation {row.id} has malformed "
+                "strategy-policy evidence"
+            ) from error
         candidates.append(SelectedEconomicV2Evidence(row, evidence, policy))
     if not candidates:
-        raise ValueError("campaign v2 child has no strategy-policy evidence")
+        raise IncompatibleCampaignEvidenceError(
+            "campaign v2 child has no compatible strategy-policy evidence"
+        )
     return min(candidates, key=lambda item: economic_v2_rank(item.evidence))
 
 
@@ -292,11 +309,57 @@ async def _reconcile(session: AsyncSession, campaign: MLSearchCampaignRecord) ->
             message=f"child refinement run {run.id} has incomplete evidence",
         )
         return True
-    selected_evidence = (
-        select_economic_v2_evidence(family, evaluations)
-        if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
-        else select_economic_evidence(family, evaluations)
-    )
+    try:
+        if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET:
+            request_payload = dict(run.normalized_configuration)
+            request_payload["notes"] = run.notes
+            try:
+                request = MLRefinementRequest.model_validate(request_payload)
+            except ValueError as error:
+                raise IncompatibleCampaignEvidenceError(
+                    f"child refinement run {run.id} has an invalid policy request"
+                ) from error
+            for evaluation in evaluations:
+                compatibility = economic_policy_evidence_compatibility(
+                    aggregate_metrics=evaluation.aggregate_metrics,
+                    request=request,
+                    future_duration_seconds=evaluation.future_duration_seconds,
+                )
+                if not compatibility.compatible:
+                    logger.error(
+                        "Campaign child has incompatible economic policy evidence",
+                        extra={
+                            "structured_fields": {
+                                "campaign_id": str(campaign.id),
+                                "run_id": str(run.id),
+                                "evaluation_id": str(evaluation.id),
+                                "reason_code": compatibility.reason_code,
+                                "expected_contract_fingerprint": (
+                                    compatibility.expected_contract
+                                ),
+                                "found_contract_fingerprint": (
+                                    compatibility.found_contract
+                                ),
+                            }
+                        },
+                    )
+                    raise IncompatibleCampaignEvidenceError(
+                        f"child refinement run {run.id} has incompatible policy "
+                        f"evidence: {compatibility.reason_code}"
+                    )
+        selected_evidence = (
+            select_economic_v2_evidence(family, evaluations)
+            if campaign.preset == ECONOMIC_POLICY_SEARCH_V2_PRESET
+            else select_economic_evidence(family, evaluations)
+        )
+    except CampaignCoordinationError as error:
+        await _fail_campaign(
+            session,
+            campaign,
+            failure_type=error.code,
+            message=str(error),
+        )
+        return True
     evidence = selected_evidence.evidence
     family.current_stage = child.stage
     family.evaluations_completed = len(evaluations)
@@ -784,7 +847,7 @@ async def _stage_child_run(
         if existing.status in {"queued", "running"}:
             return existing, True
         if existing.status == "completed" and await completed_run_is_complete(
-            session, existing
+            session, existing, request
         ):
             return existing, True
         if existing.status == "completed":

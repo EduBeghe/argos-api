@@ -2,9 +2,10 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 from dataclasses import fields, is_dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import numpy as np
@@ -15,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.jobs import process_ml_refinement_queue as refinement_worker
 from app.ml.campaign import economic_v2_qualification as qualification_calculation
 from app.ml.campaign import economic_v2_queue as qualification_queue
 from app.ml.campaign import planning as campaign_planning
@@ -863,6 +865,146 @@ async def test_v2_retry_requeues_same_failed_child_without_duplicate_graph(
             await session.scalar(
                 select(func.count(MLSearchCampaignRecord.id)).where(
                     MLSearchCampaignRecord.id == record.id
+                )
+            )
+            == 1
+        )
+
+
+async def test_v2_incompatible_completed_child_fails_then_repairs_same_graph(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="running", first_claimed_at=NOW)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.contract_version = 2
+    record.policy_version = 2
+    record.classification_version = 2
+    family_record = family(record.id, source_id)
+    family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    family_record.search_track = "diversified"
+    run = refinement_run(source_id, result_id, status="completed")
+    payload = dict(run.normalized_configuration)
+    payload["confidence_buckets"] = [str(item) for item in CAMPAIGN_CONFIDENCE_BUCKETS]
+    payload["economic_policy_search"] = {
+        "confidence_fractions": [
+            str(item) for item in ECONOMIC_V2_CONFIDENCE_FRACTIONS
+        ],
+        "holding_multipliers": [str(item) for item in ECONOMIC_V2_HOLDING_MULTIPLIERS],
+        "regime_policies": list(ECONOMIC_V2_REGIME_POLICIES),
+        "version": ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+    }
+    run.normalized_configuration = payload
+    run.evaluations_selected = 1
+    run.evaluations_computed = 0
+    run.evaluations_reused = 1
+    source_run = refinement_run(source_id, result_id, status="completed")
+    source_run.experiment_key = f"{PREFIX}legacy-source-{source_run.id}"[:64]
+    source_run.evaluations_selected = 1
+    source_run.evaluations_computed = 1
+    legacy_source = evaluation(source_run.id, "a" * 64)
+    incompatible_clone = evaluation(run.id, "b" * 64)
+    incompatible_clone.reused_from_evaluation_id = legacy_source.id
+    link = child(record.id, family_record.id, run.id, reused=False)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add_all((family_record, source_run, run))
+        await session.flush()
+        session.add_all((legacy_source, incompatible_clone))
+        await session.flush()
+        session.add(link)
+        await session.commit()
+
+    qualification = SimpleNamespace(id=uuid4())
+    monkeypatch.setattr(refinement_worker, "fail_stale_protected_work", AsyncMock())
+    monkeypatch.setattr(
+        refinement_worker, "claim_protected_work", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(refinement_worker, "fail_stale_qualifications", AsyncMock())
+    monkeypatch.setattr(
+        refinement_worker,
+        "claim_next_qualification",
+        AsyncMock(side_effect=(None, qualification)),
+    )
+    process_qualification = AsyncMock()
+    monkeypatch.setattr(
+        refinement_worker, "process_qualification", process_qualification
+    )
+    monkeypatch.setattr(refinement_worker, "fail_stale_runs", AsyncMock(return_value=0))
+    monkeypatch.setattr(
+        refinement_worker, "claim_next_run", AsyncMock(return_value=None)
+    )
+
+    assert not await refinement_worker.process_once(
+        sessions, worker_id="test-worker", stale_after=timedelta(hours=2)
+    )
+    assert await refinement_worker.process_once(
+        sessions, worker_id="test-worker", stale_after=timedelta(hours=2)
+    )
+    process_qualification.assert_awaited_once()
+
+    async with sessions() as session:
+        persisted_campaign = await session.get(MLSearchCampaignRecord, record.id)
+        protected_family = await session.get(
+            MLSearchCampaignFamilyRecord, family_record.id
+        )
+        assert persisted_campaign is not None
+        assert protected_family is not None
+        assert persisted_campaign.status == "failed"
+        assert (
+            persisted_campaign.failure_type == "incompatible_economic_policy_evidence"
+        )
+        protected_family.best_evaluation_id = incompatible_clone.id
+        await session.commit()
+        with pytest.raises(CampaignConflictError, match="referenced"):
+            await retry_campaign(session, persisted_campaign.id)
+        await session.rollback()
+        assert (
+            await session.get(MLRefinementEvaluationRecord, incompatible_clone.id)
+            is not None
+        )
+        unchanged_run = await session.get(MLRefinementRunRecord, run.id)
+        unchanged_campaign = await session.get(MLSearchCampaignRecord, record.id)
+        assert unchanged_run is not None and unchanged_run.status == "completed"
+        assert unchanged_campaign is not None and unchanged_campaign.status == "failed"
+
+        protected_family = await session.get(
+            MLSearchCampaignFamilyRecord, family_record.id
+        )
+        assert protected_family is not None
+        protected_family.best_evaluation_id = None
+        await session.commit()
+
+    async def concurrent_retry() -> MLSearchCampaignRecord | CampaignConflictError:
+        async with sessions() as session:
+            try:
+                return await retry_campaign(session, record.id)
+            except CampaignConflictError as error:
+                await session.rollback()
+                return error
+
+    retry_results = await asyncio.gather(concurrent_retry(), concurrent_retry())
+    assert sum(isinstance(item, MLSearchCampaignRecord) for item in retry_results) == 1
+    assert sum(isinstance(item, CampaignConflictError) for item in retry_results) == 1
+
+    async with sessions() as session:
+        repaired = await session.get(MLRefinementRunRecord, run.id)
+        assert repaired is not None
+        assert repaired.status == "queued"
+        assert (
+            await session.get(MLRefinementEvaluationRecord, incompatible_clone.id)
+            is None
+        )
+        assert (
+            await session.get(MLRefinementEvaluationRecord, legacy_source.id)
+            is not None
+        )
+        assert (
+            await session.scalar(
+                select(func.count(MLSearchCampaignChildRecord.id)).where(
+                    MLSearchCampaignChildRecord.campaign_id == record.id
                 )
             )
             == 1

@@ -23,6 +23,7 @@ from .contracts import (
     PredictionObjective,
     RefinementClassification,
 )
+from .economic_policy_contract import economic_policy_search_contract
 from .evidence import RefinementEvidence, classify_refinement_evidence
 from .planning import PlannedEvaluation
 
@@ -518,6 +519,7 @@ def evaluate_refinement_candidate(
                     horizon_seconds=candidate.future_duration_seconds,
                     fee_rate=request.fee_rate,
                     slippage_rate=request.slippage_rate,
+                    policy_configuration=request.economic_policy_search,
                 )
             )
         folds.append(
@@ -607,6 +609,9 @@ def evaluate_refinement_candidate(
         )
         aggregate["economic_policy_v2_aggregates"] = policy_aggregates
         aggregate["selected_economic_policy_v2"] = selected_policy
+        aggregate["economic_policy_search_contract"] = economic_policy_search_contract(
+            request.economic_policy_search
+        )
     return RefinementEvaluationResult(
         candidate,
         tuple(folds),

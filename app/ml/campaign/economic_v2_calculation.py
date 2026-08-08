@@ -14,6 +14,7 @@ from app.ml.protected.simulation import (
     simulate_buy_and_hold,
     simulate_fixed_horizon_long_only,
 )
+from app.ml.refinement.contracts import EconomicPolicySearchConfiguration
 from app.paper.config import SimulationConfiguration
 
 from .economic_v2_policy import StrategyPolicy, strategy_policy_grid
@@ -180,8 +181,9 @@ def evaluate_policy_grid_fold(
     horizon_seconds: int,
     fee_rate: Decimal,
     slippage_rate: Decimal,
+    policy_configuration: EconomicPolicySearchConfiguration | None = None,
 ) -> tuple[dict[str, object], ...]:
-    """Evaluate all 45 frozen policies from one fitted model's score arrays."""
+    """Evaluate exactly the requested grid or the frozen campaign grid."""
 
     return tuple(
         evaluate_strategy_policy(
@@ -195,7 +197,7 @@ def evaluate_policy_grid_fold(
             fee_rate=fee_rate,
             slippage_rate=slippage_rate,
         )
-        for policy in strategy_policy_grid(horizon_seconds)
+        for policy in strategy_policy_grid(horizon_seconds, policy_configuration)
     )
 
 
