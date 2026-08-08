@@ -1041,6 +1041,8 @@ async def test_zero_progress_fingerprint_failure_retries_the_same_run_and_advanc
             )
             == 1
         )
+
+
 async def test_concurrent_enqueue_skip_locked_and_stale_recovery(
     refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
 ) -> None:
