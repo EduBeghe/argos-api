@@ -199,6 +199,18 @@ async def refinement_factory() -> AsyncIterator[
         prior_source_runs = select(MLModelScreeningRunRecord.id).where(
             MLModelScreeningRunRecord.experiment_key.like(f"{PREFIX}%")
         )
+        prior_refinement_runs = select(MLRefinementRunRecord.id).where(
+            MLRefinementRunRecord.source_screening_run_id.in_(prior_source_runs)
+        )
+        await session.execute(
+            delete(MLTemporalManifestRecord).where(
+                MLTemporalManifestRecord.evaluation_id.in_(
+                    select(MLRefinementEvaluationRecord.id).where(
+                        MLRefinementEvaluationRecord.run_id.in_(prior_refinement_runs)
+                    )
+                )
+            )
+        )
         await session.execute(
             delete(MLRefinementRunRecord).where(
                 MLRefinementRunRecord.source_screening_run_id.in_(prior_source_runs)
@@ -215,6 +227,18 @@ async def refinement_factory() -> AsyncIterator[
         await session.commit()
     yield factory, run_id, result_id
     async with factory() as session:
+        refinement_runs = select(MLRefinementRunRecord.id).where(
+            MLRefinementRunRecord.source_screening_run_id == run_id
+        )
+        await session.execute(
+            delete(MLTemporalManifestRecord).where(
+                MLTemporalManifestRecord.evaluation_id.in_(
+                    select(MLRefinementEvaluationRecord.id).where(
+                        MLRefinementEvaluationRecord.run_id.in_(refinement_runs)
+                    )
+                )
+            )
+        )
         await session.execute(
             delete(MLRefinementRunRecord).where(
                 MLRefinementRunRecord.source_screening_run_id == run_id
