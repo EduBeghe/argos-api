@@ -143,7 +143,7 @@ async def process_once(
                 "family_id": str(getattr(qualification, "family_id", "unknown")),
                 "qualification_id": str(qualification.id),
                 "provenance": str(getattr(qualification, "provenance", "unknown")),
-                "status": qualification.status,
+                "status": str(getattr(qualification, "status", "unknown")),
                 "evidence_end_exclusive": str(
                     getattr(qualification, "evidence_end_exclusive", "unknown")
                 ),
