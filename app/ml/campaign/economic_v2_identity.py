@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from app.ml.contract import (
     MISSING_DATA_POLICY_VERSION,
@@ -44,6 +45,8 @@ def qualification_identity_payload(
     policy: dict[str, object],
     provenance: str = AUTOMATIC_QUALIFICATION_PROVENANCE,
     development_manifest: MLTemporalManifestRecord | None = None,
+    development_manifest_owner_evaluation_id: UUID | None = None,
+    reuse_lineage_evaluation_ids: tuple[UUID, ...] | None = None,
 ) -> dict[str, object]:
     """Build the complete immutable scientific identity for 2024 qualification."""
 
@@ -100,6 +103,8 @@ def qualification_identity_payload(
         if (
             development_manifest is None
             or development_manifest.manifest_fingerprint is None
+            or development_manifest_owner_evaluation_id is None
+            or not reuse_lineage_evaluation_ids
         ):
             raise ValueError(
                 "diagnostic qualification requires a verified development manifest"
@@ -119,6 +124,9 @@ def qualification_identity_payload(
                     diagnostic_manifest
                 ),
                 "development_temporal_manifest_id": str(development_manifest.id),
+                "development_temporal_manifest_owner_evaluation_id": str(
+                    development_manifest_owner_evaluation_id
+                ),
                 "development_temporal_manifest_fingerprint": (
                     development_manifest.manifest_fingerprint
                 ),
@@ -128,6 +136,9 @@ def qualification_identity_payload(
                 "development_split_policy_version": (
                     development_manifest.split_policy_version
                 ),
+                "reuse_lineage_evaluation_ids": [
+                    str(item) for item in reuse_lineage_evaluation_ids
+                ],
                 "cost_multipliers": ["1", "1.5", "2"],
             }
         )
