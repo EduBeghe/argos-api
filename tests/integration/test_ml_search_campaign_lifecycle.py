@@ -417,6 +417,19 @@ async def factory() -> AsyncIterator[
                 MLSearchCampaignRecord.id.in_(campaign_ids)
             )
         )
+        evaluation_ids = (
+            select(MLRefinementEvaluationRecord.id)
+            .join(
+                MLRefinementRunRecord,
+                MLRefinementRunRecord.id == MLRefinementEvaluationRecord.run_id,
+            )
+            .where(MLRefinementRunRecord.source_screening_run_id == source_id)
+        )
+        await session.execute(
+            delete(MLTemporalManifestRecord).where(
+                MLTemporalManifestRecord.evaluation_id.in_(evaluation_ids)
+            )
+        )
         await session.execute(
             delete(MLRefinementRunRecord).where(
                 MLRefinementRunRecord.source_screening_run_id == source_id
@@ -758,6 +771,9 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
     request = DiagnosticQualificationRequest(
         family_ids=tuple(item.id for item in families)
     )
+    campaign_id = record.id
+    family_ids = tuple(item.id for item in families)
+    evaluation_ids = tuple(item.id for item in evaluations)
     async with sessions() as session:
         session.add(record)
         await session.flush()
@@ -802,31 +818,8 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
         assert record.completed_at == original_completed_at
         assert all(item.state == "discarded" for item in families)
 
-        top_k_index = next(
-            index
-            for index, item in enumerate(evaluations)
-            if item.feature_policy["strategy"] == "top_k"
-        )
-        valid_top_k_policy = dict(evaluations[top_k_index].feature_policy)
-        evaluations[top_k_index].feature_policy = {
-            **valid_top_k_policy,
-            "top_k": True,
-        }
-        await session.commit()
-        with pytest.raises(DiagnosticQualificationConflictError) as malformed:
-            await enqueue_diagnostic_qualifications(
-                session,
-                campaign_id=record.id,
-                request=DiagnosticQualificationRequest(
-                    family_ids=(families[top_k_index].id,)
-                ),
-            )
-        assert malformed.value.reason_code == "family_refinement_evidence_incompatible"
-        evaluations[top_k_index].feature_policy = valid_top_k_policy
-        await session.commit()
-
         api_response = client.post(
-            f"/optimization/ml-search-campaigns/{record.id}/diagnostic-qualifications",
+            f"/optimization/ml-search-campaigns/{campaign_id}/diagnostic-qualifications",
             json={"family_ids": [str(item) for item in reversed(request.family_ids)]},
         )
         assert api_response.status_code == 202
@@ -855,17 +848,45 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
             == 6
         )
 
+        top_k_index = next(
+            index
+            for index, item in enumerate(planned)
+            if item.feature_strategy == "top_k"
+        )
+        top_k_evaluation = await session.get(
+            MLRefinementEvaluationRecord, evaluation_ids[top_k_index]
+        )
+        assert top_k_evaluation is not None
+        valid_top_k_policy = dict(top_k_evaluation.feature_policy)
+        top_k_evaluation.feature_policy = {**valid_top_k_policy, "top_k": True}
+        await session.commit()
+        with pytest.raises(DiagnosticQualificationConflictError) as malformed:
+            await enqueue_diagnostic_qualifications(
+                session,
+                campaign_id=campaign_id,
+                request=DiagnosticQualificationRequest(
+                    family_ids=(family_ids[top_k_index],)
+                ),
+            )
+        assert malformed.value.reason_code == "family_refinement_evidence_incompatible"
+        top_k_evaluation = await session.get(
+            MLRefinementEvaluationRecord, evaluation_ids[top_k_index]
+        )
+        assert top_k_evaluation is not None
+        top_k_evaluation.feature_policy = valid_top_k_policy
+        await session.commit()
+
         await session.execute(
             delete(MLTemporalManifestRecord).where(
-                MLTemporalManifestRecord.evaluation_id == evaluations[0].id
+                MLTemporalManifestRecord.evaluation_id == evaluation_ids[0]
             )
         )
         await session.commit()
         with pytest.raises(DiagnosticQualificationConflictError) as missing_manifest:
             await enqueue_diagnostic_qualifications(
                 session,
-                campaign_id=record.id,
-                request=DiagnosticQualificationRequest(family_ids=(families[0].id,)),
+                campaign_id=campaign_id,
+                request=DiagnosticQualificationRequest(family_ids=(family_ids[0],)),
             )
         assert (
             missing_manifest.value.reason_code
