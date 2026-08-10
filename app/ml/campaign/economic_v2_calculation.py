@@ -250,7 +250,6 @@ def aggregate_policy_folds(
                 ),
                 "compounded_return_1_5x": str(_compound(returns_1_5x)),
                 "compounded_return_2x": str(_compound(returns_2x)),
-                "folds": items,
             }
         )
     return tuple(aggregates)

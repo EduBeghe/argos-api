@@ -406,21 +406,53 @@ def _canonical_confidence_metrics(metrics: object, configured: list[str]) -> obj
     ]
 
 
+MAX_PERSISTED_AGGREGATE_METRICS_BYTES = 1_000_000
+
+
+class MLRefinementEvidenceTooLargeError(ValueError):
+    """Raised before persistence when compact evidence exceeds its hard limit."""
+
+
 def _canonical_aggregate_metrics(
-    metrics: dict[str, object], configured: list[str]
+    metrics: dict[str, object],
+    configured: list[str],
+    *,
+    canonicalize_confidence: bool = True,
 ) -> dict[str, object]:
     persisted = cast(dict[str, object], _json_safe(metrics))
-    aggregates = metrics.get("confidence_bucket_aggregates")
-    if aggregates is not None:
-        persisted["confidence_bucket_aggregates"] = _canonical_confidence_metrics(
-            aggregates, configured
-        )
-    selected = metrics.get("selected_confidence_bucket")
-    if isinstance(selected, dict):
-        persisted["selected_confidence_bucket"] = {
-            **cast(dict[str, object], _json_safe(selected)),
-            "fraction": _canonical_fraction(selected.get("fraction"), configured),
+    economic_aggregates = persisted.get("economic_policy_v2_aggregates")
+    if isinstance(economic_aggregates, list):
+        persisted["economic_policy_v2_aggregates"] = [
+            {str(key): value for key, value in item.items() if key != "folds"}
+            if isinstance(item, dict)
+            else item
+            for item in economic_aggregates
+        ]
+    selected_policy = persisted.get("selected_economic_policy_v2")
+    if isinstance(selected_policy, dict):
+        persisted["selected_economic_policy_v2"] = {
+            str(key): value for key, value in selected_policy.items() if key != "folds"
         }
+    if canonicalize_confidence:
+        aggregates = metrics.get("confidence_bucket_aggregates")
+        if aggregates is not None:
+            persisted["confidence_bucket_aggregates"] = _canonical_confidence_metrics(
+                aggregates, configured
+            )
+        selected = metrics.get("selected_confidence_bucket")
+        if isinstance(selected, dict):
+            persisted["selected_confidence_bucket"] = {
+                **cast(dict[str, object], _json_safe(selected)),
+                "fraction": _canonical_fraction(selected.get("fraction"), configured),
+            }
+    encoded_size = len(
+        json.dumps(persisted, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    if encoded_size > MAX_PERSISTED_AGGREGATE_METRICS_BYTES:
+        raise MLRefinementEvidenceTooLargeError(
+            "compacted aggregate metrics exceed "
+            f"{MAX_PERSISTED_AGGREGATE_METRICS_BYTES} bytes: {encoded_size}"
+        )
     return persisted
 
 
@@ -445,6 +477,11 @@ async def persist_evaluation(
             if column.name
             not in {"id", "run_id", "reused_from_evaluation_id", "created_at"}
         }
+        values["aggregate_metrics"] = _canonical_aggregate_metrics(
+            reused.aggregate_metrics,
+            [str(item) for item in request.confidence_buckets],
+            canonicalize_confidence=False,
+        )
         values.update(
             id=uuid4(),
             run_id=run_id,
