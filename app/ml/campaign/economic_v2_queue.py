@@ -19,7 +19,10 @@ from app.ml.refinement.models import (
 from app.ml.refinement.persistence import completed_run_is_complete
 from app.ml.refinement.planning import planned_evaluation_from_persisted_values
 
-from .contracts import ECONOMIC_V2_STRATEGY_POLICY_VERSION
+from .contracts import (
+    DIAGNOSTIC_QUALIFICATION_PROVENANCE,
+    ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+)
 from .economic_v2_identity import (
     identical_payload,
     qualification_identity,
@@ -183,6 +186,12 @@ async def process_qualification(
         or evaluation.engine != family.engine
         or evaluation.objective != family.objective
         or evaluation.future_duration_seconds != family.future_duration_seconds
+        or record.evidence_end_exclusive != datetime(2025, 1, 1, tzinfo=UTC)
+        or (
+            record.provenance == DIAGNOSTIC_QUALIFICATION_PROVENANCE
+            and record.temporal_manifest_fingerprint
+            != str(record.frozen_inputs.get("temporal_manifest_fingerprint"))
+        )
     ):
         raise RuntimeError("qualification_identity_mismatch")
     candidate = planned_evaluation_from_persisted_values(
@@ -228,6 +237,7 @@ async def process_qualification(
         evaluation=evaluation,
         run=run,
         policy=record.policy_identity,
+        provenance=record.provenance,
     )
     if (
         not identical_payload(record.frozen_inputs, rebuilt_identity)
@@ -255,6 +265,9 @@ async def process_qualification(
         extra={
             "structured_fields": {
                 "qualification_id": str(qualification_id),
+                "campaign_id": str(record.campaign_id),
+                "family_id": str(record.family_id),
+                "provenance": record.provenance,
                 "candidate_fingerprint": candidate_fingerprint,
                 "policy_fingerprint": policy_fingerprint,
                 "read_start": "2020-01-01T00:00:00+00:00",
@@ -354,10 +367,14 @@ async def process_qualification(
         extra={
             "structured_fields": {
                 "qualification_id": str(qualification_id),
+                "campaign_id": str(record.campaign_id),
+                "family_id": str(record.family_id),
+                "provenance": record.provenance,
                 "classification": "qualified"
                 if not result.failed_rules
                 else "rejected",
                 "failed_rules": len(result.failed_rules),
+                "evidence_end_exclusive": str(record.evidence_end_exclusive),
             }
         },
     )

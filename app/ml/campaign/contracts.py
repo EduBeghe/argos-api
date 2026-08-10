@@ -47,6 +47,9 @@ ECONOMIC_V2_DEVELOPMENT_START = "2020-01-01T00:00:00+00:00"
 ECONOMIC_V2_DEVELOPMENT_END = "2024-01-01T00:00:00+00:00"
 ECONOMIC_V2_QUALIFICATION_END = "2025-01-01T00:00:00+00:00"
 ECONOMIC_V2_RESERVED_FINAL_END = "2026-01-01T00:00:00+00:00"
+DIAGNOSTIC_QUALIFICATION_REQUEST_VERSION = 1
+AUTOMATIC_QUALIFICATION_PROVENANCE = "automatic_development_candidate"
+DIAGNOSTIC_QUALIFICATION_PROVENANCE = "diagnostic_stage3_near_miss"
 ECONOMIC_V2_HORIZONS_SECONDS = tuple(
     hours * 3600 for hours in (1, 2, 3, 4, 6, 8, 12, 18, 24, 36, 48, 72)
 )
@@ -56,6 +59,28 @@ ECONOMIC_V2_CONFIDENCE_FRACTIONS = tuple(
 )
 ECONOMIC_V2_HOLDING_MULTIPLIERS = tuple(Decimal(item) for item in ("0.5", "1.0", "1.5"))
 ECONOMIC_V2_REGIME_POLICIES = SUPPORTED_ECONOMIC_POLICY_REGIME_POLICIES
+
+
+class QualificationProvenance(StrEnum):
+    AUTOMATIC_DEVELOPMENT_CANDIDATE = AUTOMATIC_QUALIFICATION_PROVENANCE
+    DIAGNOSTIC_STAGE3_NEAR_MISS = DIAGNOSTIC_QUALIFICATION_PROVENANCE
+
+
+class DiagnosticQualificationRequest(BaseModel):
+    """Versioned selection of Stage 3 near misses for 2024-only diagnosis."""
+
+    model_config = ConfigDict(frozen=True)
+    request_version: Literal[1] = 1
+    family_ids: tuple[UUID, ...] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def unique_family_ids(self) -> "DiagnosticQualificationRequest":
+        if len(set(self.family_ids)) != len(self.family_ids):
+            raise ValueError("family_ids must contain unique UUIDs")
+        return self
+
+    def canonical_family_ids(self) -> tuple[UUID, ...]:
+        return tuple(sorted(self.family_ids, key=str))
 
 
 def campaign_search_spaces() -> tuple[

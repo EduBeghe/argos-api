@@ -854,7 +854,7 @@ The command parses money as `Decimal`, stops the active experiment, and creates 
 
 Weekly research includes a bounded progressive composite-feature search after targeted
 refinement. Training-only association determines signed weights, and separate economic
-and exploratory beams grow through real parent lineage across depths 2–7. Exploratory
+and exploratory beams grow through real parent lineage across depths 2â€“7. Exploratory
 parents may produce descendants but cannot enter validation or test themselves. Each
 walk-forward window freezes its own
 training median/IQR. Retained configurations use the historical Paper Trading simulator,
@@ -936,4 +936,6 @@ economic strategy-policy search and immutable calendar-2024 qualification while
 structurally reserving all 2025 evidence. The same documentation describes its
 request, purged temporal protocol, canonical seeded-local neighborhoods, dedicated
 stage-5 lifecycle, lease-protected qualification, read endpoints, and one-shot
-enqueue command.
+enqueue command. It also documents the bounded authenticated diagnostic operation
+for explicitly selected Stage 3 near misses; diagnostic provenance does not alter the
+completed campaign or authorize access to reserved 2025 evidence.

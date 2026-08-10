@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import numpy as np
 import pytest
 import pytest_asyncio
+from fastapi.testclient import TestClient
 from sqlalchemy import delete, event, func, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -31,8 +32,13 @@ from app.ml.campaign.contracts import (
     ECONOMIC_V2_STRATEGY_POLICY_VERSION,
     FAMILIES_PER_INSTRUMENT,
     CampaignRequest,
+    DiagnosticQualificationRequest,
 )
 from app.ml.campaign.coordinator import coordinate_next_campaign
+from app.ml.campaign.diagnostic_qualification import (
+    DiagnosticQualificationConflictError,
+    enqueue_diagnostic_qualifications,
+)
 from app.ml.campaign.economic_v2_policy import strategy_policy_grid
 from app.ml.campaign.economic_v2_queue import (
     claim_next_qualification,
@@ -582,6 +588,145 @@ async def test_v2_invalid_seed_rejects_the_whole_enqueue_without_writes(
                 )
             )
             == 0
+        )
+
+
+async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    client: TestClient,
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="completed", covered=True, maximum_evaluations=6)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.contract_version = 2
+    record.policy_version = 2
+    record.classification_version = 2
+    record.outcome = "no_strong_candidate"
+    record.families_total = 6
+    record.families_covered = 6
+    record.families_uncovered = 0
+    record.current_stage = 4
+    original_completed_at = record.completed_at
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 6
+    run.evaluations_selected = 6
+    run.normalized_configuration = {
+        **run.normalized_configuration,
+        "future_durations_seconds": [3600],
+    }
+    policy = strategy_policy_grid(3600)[0]
+    policy_payload = {
+        "policy_fingerprint": policy.fingerprint,
+        "strategy_policy_version": policy.version,
+        "confidence_fraction": str(policy.confidence_fraction),
+        "holding_multiplier": str(policy.holding_multiplier),
+        "regime_policy": policy.regime_policy,
+        "holding_candles": policy.holding_candles,
+    }
+    families: list[MLSearchCampaignFamilyRecord] = []
+    evaluations: list[MLRefinementEvaluationRecord] = []
+    for ordinal in range(6):
+        family_record = family(record.id, source_id, state="discarded")
+        family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+        family_record.search_track = "diversified"
+        family_record.current_stage = 3
+        family_record.future_duration_seconds = 3600
+        family_record.deterministic_ordinal = ordinal
+        family_record.best_metrics = {
+            "policy_fingerprint": policy.fingerprint,
+            "observations": 150,
+            "round_trips": 20,
+            "positive_net_folds": 5,
+            "folds_beating_benchmark": 2,
+            "median_net_return": "0.001",
+            "worst_net_return": "-0.02",
+            "maximum_drawdown": "0.20",
+            "inactive_folds": 1,
+            "compounded_return_1_5x": "0.01",
+            "compounded_return_2x": "0.001",
+            "complete_and_finite": True,
+        }
+        family_record.selected_policy = policy_payload
+        family_record.selected_policy_fingerprint = policy.fingerprint
+        family_record.decision_reason = "failed_stage_3_economic_v2_gate"
+        evidence = evaluation(run.id, fingerprint=f"{ordinal + 100:064x}")
+        evidence.future_duration_seconds = 3600
+        evidence.hyperparameters = {"alpha": 1.0, "fit_intercept": True}
+        evidence.feature_policy = {"variant": "all"}
+        family_record.best_evaluation_id = evidence.id
+        families.append(family_record)
+        evaluations.append(evidence)
+
+    request = DiagnosticQualificationRequest(
+        family_ids=tuple(item.id for item in families)
+    )
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(run)
+        await session.flush()
+        session.add_all(evaluations)
+        await session.flush()
+        session.add_all(families)
+        await session.commit()
+
+        first = await enqueue_diagnostic_qualifications(
+            session, campaign_id=record.id, request=request
+        )
+        assert len(first.items) == 6
+        assert all(item.created for item in first.items)
+        assert [item.family_id for item in first.items] == list(request.family_ids)
+
+        reversed_request = DiagnosticQualificationRequest(
+            family_ids=tuple(reversed(request.family_ids))
+        )
+        reused = await enqueue_diagnostic_qualifications(
+            session, campaign_id=record.id, request=reversed_request
+        )
+        assert all(not item.created for item in reused.items)
+        assert {item.family_id: item.qualification_id for item in first.items} == {
+            item.family_id: item.qualification_id for item in reused.items
+        }
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(MLEconomicQualificationRecord)
+            )
+            == 6
+        )
+        await session.refresh(record)
+        assert record.status == "completed"
+        assert record.outcome == "no_strong_candidate"
+        assert record.completed_at == original_completed_at
+        assert all(item.state == "discarded" for item in families)
+
+        api_response = client.post(
+            f"/optimization/ml-search-campaigns/{record.id}/diagnostic-qualifications",
+            json={"family_ids": [str(item) for item in reversed(request.family_ids)]},
+        )
+        assert api_response.status_code == 202
+        assert [item["family_id"] for item in api_response.json()["items"]] == [
+            str(item) for item in reversed(request.family_ids)
+        ]
+        assert all(item["reused"] for item in api_response.json()["items"])
+
+        families[-1].best_metrics = {
+            **(families[-1].best_metrics or {}),
+            "positive_net_folds": 3,
+        }
+        await session.commit()
+        with pytest.raises(DiagnosticQualificationConflictError):
+            await enqueue_diagnostic_qualifications(
+                session,
+                campaign_id=record.id,
+                request=DiagnosticQualificationRequest(
+                    family_ids=(families[0].id, families[-1].id)
+                ),
+            )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(MLEconomicQualificationRecord)
+            )
+            == 6
         )
 
 

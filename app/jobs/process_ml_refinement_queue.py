@@ -138,6 +138,18 @@ async def process_once(
         await fail_stale_qualifications(session, stale_after=stale_after)
         qualification = await claim_next_qualification(session, worker_id=worker_id)
         if qualification is not None:
+            qualification_fields = {
+                "campaign_id": str(qualification.campaign_id),
+                "family_id": str(qualification.family_id),
+                "qualification_id": str(qualification.id),
+                "provenance": qualification.provenance,
+                "status": qualification.status,
+                "evidence_end_exclusive": str(qualification.evidence_end_exclusive),
+            }
+            logger.info(
+                "Claimed economic qualification",
+                extra={"structured_fields": qualification_fields},
+            )
             try:
                 await process_qualification(
                     session,
@@ -166,7 +178,16 @@ async def process_once(
                     owned_qualification.claimed_at = None
                     owned_qualification.heartbeat_at = None
                     await session.commit()
-                logger.exception("Economic v2 qualification failed")
+                logger.exception(
+                    "Economic v2 qualification failed",
+                    extra={
+                        "structured_fields": {
+                            **qualification_fields,
+                            "status": "failed",
+                            "reason_code": type(error).__name__,
+                        }
+                    },
+                )
             return True
         await coordinate_next_campaign(session)
         stale_count = await fail_stale_runs(session, stale_after=stale_after)

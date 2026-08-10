@@ -16,8 +16,10 @@ from app.ml.refinement.models import (
 )
 
 from .contracts import (
+    AUTOMATIC_QUALIFICATION_PROVENANCE,
     CAMPAIGN_FEE_RATE,
     CAMPAIGN_SLIPPAGE_RATE,
+    DIAGNOSTIC_QUALIFICATION_REQUEST_VERSION,
     ECONOMIC_V2_CONTRACT_VERSION,
     ECONOMIC_V2_DEVELOPMENT_END,
     ECONOMIC_V2_DEVELOPMENT_START,
@@ -39,10 +41,11 @@ def qualification_identity_payload(
     evaluation: MLRefinementEvaluationRecord,
     run: MLRefinementRunRecord,
     policy: dict[str, object],
+    provenance: str = AUTOMATIC_QUALIFICATION_PROVENANCE,
 ) -> dict[str, object]:
     """Build the complete immutable scientific identity for 2024 qualification."""
 
-    return {
+    identity = {
         "qualification_version": ECONOMIC_V2_QUALIFICATION_VERSION,
         "campaign_contract_version": ECONOMIC_V2_CONTRACT_VERSION,
         "campaign_policy_version": ECONOMIC_V2_POLICY_VERSION,
@@ -89,6 +92,27 @@ def qualification_identity_payload(
         "fee_rate": str(CAMPAIGN_FEE_RATE),
         "slippage_rate": str(CAMPAIGN_SLIPPAGE_RATE),
     }
+    # Preserve historical automatic identities byte-for-byte. Diagnostic provenance is
+    # identity-bearing so it can never collide with automatic scientific evidence.
+    if provenance != AUTOMATIC_QUALIFICATION_PROVENANCE:
+        identity["qualification_provenance"] = provenance
+        diagnostic_manifest = {
+            "qualification_start": ECONOMIC_V2_DEVELOPMENT_END,
+            "qualification_end_exclusive": ECONOMIC_V2_QUALIFICATION_END,
+            "status": "not_read",
+            "request_version": DIAGNOSTIC_QUALIFICATION_REQUEST_VERSION,
+        }
+        identity.update(
+            {
+                "diagnostic_request_version": DIAGNOSTIC_QUALIFICATION_REQUEST_VERSION,
+                "qualification_start": ECONOMIC_V2_DEVELOPMENT_END,
+                "temporal_manifest_fingerprint": qualification_identity(
+                    diagnostic_manifest
+                ),
+                "cost_multipliers": ["1", "1.5", "2"],
+            }
+        )
+    return identity
 
 
 def qualification_identity(payload: Mapping[str, object]) -> str:

@@ -121,6 +121,24 @@ Discover both preset contracts at
 read-only and paginated at
 `GET /optimization/ml-search-campaigns/{campaign_id}/qualifications`, with detail at
 `GET /optimization/ml-search-campaigns/{campaign_id}/qualifications/{qualification_id}`.
+The list accepts a `provenance` filter.
+
+An authenticated operator may submit one through ten explicitly selected discarded
+Stage 3 families to
+`POST /optimization/ml-search-campaigns/{campaign_id}/diagnostic-qualifications`.
+Eligibility is deliberately narrow: the completed v2 campaign must have full
+coverage and outcome `no_strong_candidate`, and every selected family must have
+failed Stage 3 only because it beat buy-and-hold in two folds instead of the required
+three. The request is atomic and idempotent; queued, running, or completed identities
+are reused, while failed or cancelled work requires the existing explicit retry
+operation. These rows carry provenance `diagnostic_stage3_near_miss`; automatic
+development-candidate rows retain `automatic_development_candidate`.
+
+Diagnostic qualification consumes only the untouched half-open interval
+`[2024-01-01T00:00:00Z, 2025-01-01T00:00:00Z)`. It cannot read the reserved 2025
+interval, change the source campaign or family classification, or imply promotion to
+strong development candidate. It uses the same qualification queue, worker, lease,
+cost-stress scenarios, and gates as automatic qualification.
 
 The first production enqueue can retain campaign
 `cf1fee07-143a-4759-bcc4-f662f03a7aa9` only as provenance and use its seed family,

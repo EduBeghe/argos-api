@@ -670,6 +670,7 @@ async def _advance_stage(
                             family.selected_policy["policy_fingerprint"]
                         ),
                         qualification_version=ECONOMIC_V2_QUALIFICATION_VERSION,
+                        provenance="automatic_development_candidate",
                         status="queued",
                         classification=None,
                         engine=family.engine,
