@@ -75,11 +75,13 @@ from app.ml.protected.queue import (
     enqueue_final_validation,
     enqueue_manifest_reconstruction,
 )
+from app.ml.protected.temporal import temporal_manifest_fingerprint
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
     MLRefinementRunRecord,
 )
+from app.ml.refinement.persistence import effective_evaluation_fingerprint
 from app.ml.refinement.planning import build_refinement_plan
 from app.ml.screening.config import ScreeningEngine
 from app.ml.screening.models import (
@@ -283,6 +285,62 @@ def evaluation(
         failed_rules=[],
         elapsed_seconds=Decimal("1"),
         created_at=NOW,
+    )
+
+
+def completed_development_manifest(
+    evaluation_id: UUID, dataset_fingerprint: str
+) -> MLTemporalManifestRecord:
+    folds: list[dict[str, object]] = []
+    for ordinal, definition in enumerate(temporal_fold_definitions()):
+        folds.append(
+            {
+                "ordinal": ordinal,
+                "fold_name": definition.name,
+                "training_start": definition.training_start.isoformat(),
+                "training_end_exclusive": definition.training_end.isoformat(),
+                "validation_start": definition.validation_start.isoformat(),
+                "validation_end_exclusive": definition.validation_end.isoformat(),
+                "target_latest_endpoint_exclusive": (
+                    definition.validation_end.isoformat()
+                ),
+                "training_eligibility": {
+                    "first_eligible_boundary": None,
+                    "last_eligible_boundary": None,
+                },
+                "validation_eligibility": {
+                    "first_eligible_boundary": None,
+                    "last_eligible_boundary": None,
+                },
+            }
+        )
+    payload: dict[str, object] = {
+        "manifest_version": 1,
+        "canonical_dataset_fingerprint": dataset_fingerprint,
+        "development_dataset_fingerprint": dataset_fingerprint,
+        "first_boundary": DEVELOPMENT_START.isoformat(),
+        "folds": folds,
+    }
+    return MLTemporalManifestRecord(
+        id=uuid4(),
+        evaluation_id=evaluation_id,
+        source="persisted_at_execution",
+        status="completed",
+        manifest_version=1,
+        split_policy_version=1,
+        dataset_fingerprint=dataset_fingerprint,
+        manifest_fingerprint=temporal_manifest_fingerprint(payload),
+        manifest=payload,
+        fingerprint_verified=True,
+        counts_verified=True,
+        worker_id=None,
+        claimed_at=None,
+        heartbeat_at=None,
+        cancellation_requested_at=None,
+        failure_code=None,
+        failure_message=None,
+        created_at=NOW,
+        completed_at=NOW,
     )
 
 
@@ -610,10 +668,31 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
     run = refinement_run(source_id, result_id, status="completed")
     run.evaluations_computed = 6
     run.evaluations_selected = 6
-    run.normalized_configuration = {
-        **run.normalized_configuration,
-        "future_durations_seconds": [3600],
-    }
+    diagnostic_refinement_request = MLRefinementRequest.model_validate(
+        {
+            **run.normalized_configuration,
+            "future_durations_seconds": [3600],
+            "confidence_buckets": [str(item) for item in CAMPAIGN_CONFIDENCE_BUCKETS],
+            "search_space": [
+                {
+                    "engine": "ridge",
+                    "alpha": {"values": [0.1, 1, 10]},
+                    "fit_intercept": {"values": [True]},
+                }
+            ],
+            "feature_selection": {
+                "strategies": [
+                    {"strategy": "all"},
+                    {"strategy": "top_k", "values": [16]},
+                ]
+            },
+            "maximum_trials": 6,
+        }
+    )
+    run.contract_version = 2
+    run.classification_version = 2
+    run.normalized_configuration = diagnostic_refinement_request.normalized_payload()
+    planned = build_refinement_plan(diagnostic_refinement_request).evaluations
     policy = strategy_policy_grid(3600)[0]
     policy_payload = {
         "policy_fingerprint": policy.fingerprint,
@@ -631,6 +710,11 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
         family_record.search_track = "diversified"
         family_record.current_stage = 3
         family_record.future_duration_seconds = 3600
+        family_record.feature_variant = (
+            "all"
+            if planned[ordinal].feature_strategy == "all"
+            else f"top_k_{planned[ordinal].top_k}"
+        )
         family_record.deterministic_ordinal = ordinal
         family_record.best_metrics = {
             "policy_fingerprint": policy.fingerprint,
@@ -649,10 +733,24 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
         family_record.selected_policy = policy_payload
         family_record.selected_policy_fingerprint = policy.fingerprint
         family_record.decision_reason = "failed_stage_3_economic_v2_gate"
-        evidence = evaluation(run.id, fingerprint=f"{ordinal + 100:064x}")
+        evidence = evaluation(
+            run.id,
+            fingerprint=effective_evaluation_fingerprint(
+                dataset_fingerprint=run.dataset_fingerprint,
+                candidate_fingerprint=planned[ordinal].fingerprint,
+                engine=planned[ordinal].engine.value,
+                versions=run.library_versions,
+                deterministic_seed=diagnostic_refinement_request.deterministic_seed,
+            ),
+        )
         evidence.future_duration_seconds = 3600
-        evidence.hyperparameters = {"alpha": 1.0, "fit_intercept": True}
-        evidence.feature_policy = {"variant": "all"}
+        evidence.classification_version = 2
+        evidence.hyperparameters = dict(planned[ordinal].hyperparameters)
+        evidence.feature_policy = {
+            "strategy": planned[ordinal].feature_strategy,
+            "variables": None,
+            "top_k": planned[ordinal].top_k,
+        }
         family_record.best_evaluation_id = evidence.id
         families.append(family_record)
         evaluations.append(evidence)
@@ -666,6 +764,11 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
         session.add(run)
         await session.flush()
         session.add_all(evaluations)
+        await session.flush()
+        session.add_all(
+            completed_development_manifest(item.id, run.dataset_fingerprint)
+            for item in evaluations
+        )
         await session.flush()
         session.add_all(families)
         await session.commit()
@@ -699,6 +802,29 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
         assert record.completed_at == original_completed_at
         assert all(item.state == "discarded" for item in families)
 
+        top_k_index = next(
+            index
+            for index, item in enumerate(evaluations)
+            if item.feature_policy["strategy"] == "top_k"
+        )
+        valid_top_k_policy = dict(evaluations[top_k_index].feature_policy)
+        evaluations[top_k_index].feature_policy = {
+            **valid_top_k_policy,
+            "top_k": True,
+        }
+        await session.commit()
+        with pytest.raises(DiagnosticQualificationConflictError) as malformed:
+            await enqueue_diagnostic_qualifications(
+                session,
+                campaign_id=record.id,
+                request=DiagnosticQualificationRequest(
+                    family_ids=(families[top_k_index].id,)
+                ),
+            )
+        assert malformed.value.reason_code == "family_refinement_evidence_incompatible"
+        evaluations[top_k_index].feature_policy = valid_top_k_policy
+        await session.commit()
+
         api_response = client.post(
             f"/optimization/ml-search-campaigns/{record.id}/diagnostic-qualifications",
             json={"family_ids": [str(item) for item in reversed(request.family_ids)]},
@@ -727,6 +853,23 @@ async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
                 select(func.count()).select_from(MLEconomicQualificationRecord)
             )
             == 6
+        )
+
+        await session.execute(
+            delete(MLTemporalManifestRecord).where(
+                MLTemporalManifestRecord.evaluation_id == evaluations[0].id
+            )
+        )
+        await session.commit()
+        with pytest.raises(DiagnosticQualificationConflictError) as missing_manifest:
+            await enqueue_diagnostic_qualifications(
+                session,
+                campaign_id=record.id,
+                request=DiagnosticQualificationRequest(family_ids=(families[0].id,)),
+            )
+        assert (
+            missing_manifest.value.reason_code
+            == "family_temporal_manifest_missing_or_incompatible"
         )
 
 

@@ -854,7 +854,7 @@ The command parses money as `Decimal`, stops the active experiment, and creates 
 
 Weekly research includes a bounded progressive composite-feature search after targeted
 refinement. Training-only association determines signed weights, and separate economic
-and exploratory beams grow through real parent lineage across depths 2â€“7. Exploratory
+and exploratory beams grow through real parent lineage across depths 2–7. Exploratory
 parents may produce descendants but cannot enter validation or test themselves. Each
 walk-forward window freezes its own
 training median/IQR. Retained configurations use the historical Paper Trading simulator,

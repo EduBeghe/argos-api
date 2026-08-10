@@ -10,7 +10,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ml.protected.models import MLFinalValidationRecord
+from app.ml.contract import DEVELOPMENT_END
+from app.ml.protected.contracts import (
+    DEVELOPMENT_MANIFEST_RECONSTRUCTION_VERSION,
+    TEMPORAL_MANIFEST_VERSION,
+)
+from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
+from app.ml.protected.temporal import (
+    TemporalManifestError,
+    validate_persisted_development_manifest,
+)
 from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementRunRecord
 from app.ml.refinement.persistence import completed_run_is_complete
 
@@ -21,6 +30,10 @@ from .contracts import (
     ECONOMIC_V2_QUALIFICATION_END,
     ECONOMIC_V2_QUALIFICATION_VERSION,
     DiagnosticQualificationRequest,
+)
+from .development_reaudit import (
+    DevelopmentReauditError,
+    validate_candidate_scientific_identity,
 )
 from .economic_v2_identity import qualification_identity, qualification_identity_payload
 from .economic_v2_policy import strategy_policy_grid
@@ -79,39 +92,6 @@ def _stage_three_only_benchmark_miss(metrics: dict[str, object]) -> bool:
         return False
 
 
-def _has_post_development_evidence(value: object, key: str = "") -> bool:
-    """Reject persisted evaluation timestamps that enter qualification/final data."""
-
-    if isinstance(value, dict):
-        return any(
-            _has_post_development_evidence(item, str(name))
-            for name, item in value.items()
-        )
-    if isinstance(value, list):
-        return any(_has_post_development_evidence(item, key) for item in value)
-    if isinstance(value, str) and any(
-        token in key.lower() for token in ("time", "date", "start", "end", "boundary")
-    ):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return False
-        return parsed.astimezone(UTC) >= datetime(2024, 1, 1, tzinfo=UTC)
-    if isinstance(value, (int, float)) and any(
-        token in key.lower() for token in ("time", "date", "start", "end", "boundary")
-    ):
-        numeric = float(value)
-        if numeric >= 1_000_000_000_000_000_000:
-            numeric /= 1_000_000_000
-        elif numeric >= 1_000_000_000_000:
-            numeric /= 1_000
-        if numeric >= 1_000_000_000:
-            return datetime.fromtimestamp(numeric, tz=UTC) >= datetime(
-                2024, 1, 1, tzinfo=UTC
-            )
-    return False
-
-
 def _configuration_contains(
     configuration: dict[str, object], key: str, expected: object
 ) -> bool:
@@ -121,7 +101,11 @@ def _configuration_contains(
 
 async def _validated_evidence(
     session: AsyncSession, family: MLSearchCampaignFamilyRecord
-) -> tuple[MLRefinementEvaluationRecord, MLRefinementRunRecord]:
+) -> tuple[
+    MLRefinementEvaluationRecord,
+    MLRefinementRunRecord,
+    MLTemporalManifestRecord,
+]:
     if (
         family.state != "discarded"
         or family.current_stage != 3
@@ -199,11 +183,54 @@ async def _validated_evidence(
         or evaluation.engine != family.engine
         or evaluation.objective != family.objective
         or evaluation.future_duration_seconds != family.future_duration_seconds
-        or evaluation.feature_policy.get("variant") != family.feature_variant
-        or _has_post_development_evidence(evaluation.fold_evidence)
     ):
         raise _conflict("family_refinement_evidence_incompatible")
-    return evaluation, run
+    try:
+        validate_candidate_scientific_identity(
+            family=family, evaluation=evaluation, run=run
+        )
+    except DevelopmentReauditError as error:
+        raise _conflict("family_refinement_evidence_incompatible") from error
+
+    manifests = tuple(
+        (
+            await session.scalars(
+                select(MLTemporalManifestRecord)
+                .where(
+                    MLTemporalManifestRecord.evaluation_id == evaluation.id,
+                    MLTemporalManifestRecord.manifest_version
+                    == TEMPORAL_MANIFEST_VERSION,
+                    MLTemporalManifestRecord.split_policy_version
+                    == DEVELOPMENT_MANIFEST_RECONSTRUCTION_VERSION,
+                    MLTemporalManifestRecord.status == "completed",
+                    MLTemporalManifestRecord.fingerprint_verified.is_(True),
+                    MLTemporalManifestRecord.counts_verified.is_(True),
+                    MLTemporalManifestRecord.manifest.is_not(None),
+                    MLTemporalManifestRecord.manifest_fingerprint.is_not(None),
+                )
+                .order_by(MLTemporalManifestRecord.id)
+            )
+        ).all()
+    )
+    if not manifests:
+        raise _conflict("family_temporal_manifest_missing_or_incompatible")
+    if len(manifests) != 1:
+        raise _conflict("family_temporal_manifest_ambiguous")
+    manifest = manifests[0]
+    assert manifest.manifest is not None
+    assert manifest.manifest_fingerprint is not None
+    try:
+        validate_persisted_development_manifest(
+            payload=manifest.manifest,
+            persisted_fingerprint=manifest.manifest_fingerprint,
+            canonical_dataset_fingerprint=run.dataset_fingerprint,
+            development_end_exclusive=DEVELOPMENT_END,
+        )
+    except TemporalManifestError as error:
+        raise _conflict("family_temporal_manifest_missing_or_incompatible") from error
+    if manifest.dataset_fingerprint != run.dataset_fingerprint:
+        raise _conflict("family_temporal_manifest_missing_or_incompatible")
+    return evaluation, run, manifest
 
 
 def _manifest() -> dict[str, object]:
@@ -261,7 +288,12 @@ async def enqueue_diagnostic_qualifications(
         raise DiagnosticQualificationNotFoundError("family_not_found")
     family_by_id = {family.id: family for family in families}
     validated: dict[
-        UUID, tuple[MLRefinementEvaluationRecord, MLRefinementRunRecord]
+        UUID,
+        tuple[
+            MLRefinementEvaluationRecord,
+            MLRefinementRunRecord,
+            MLTemporalManifestRecord,
+        ],
     ] = {}
     try:
         for family in families:
@@ -273,7 +305,7 @@ async def enqueue_diagnostic_qualifications(
         results: list[DiagnosticQualificationItemResult] = []
         for family_id in request.family_ids:
             family = family_by_id[family_id]
-            evaluation, run = validated[family_id]
+            evaluation, run, development_manifest = validated[family_id]
             manifest = _manifest()
             manifest_fingerprint = qualification_identity(manifest)
             frozen = qualification_identity_payload(
@@ -282,6 +314,7 @@ async def enqueue_diagnostic_qualifications(
                 run=run,
                 policy=family.selected_policy or {},
                 provenance=DIAGNOSTIC_QUALIFICATION_PROVENANCE,
+                development_manifest=development_manifest,
             )
             fingerprint = qualification_identity(frozen)
             record = await session.scalar(

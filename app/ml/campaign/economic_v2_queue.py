@@ -11,7 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.market.catalog import InstrumentCapability, resolve_instrument
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.ml.contract import DEVELOPMENT_END
 from app.ml.loading import load_ml_qualification_dataset
+from app.ml.protected.contracts import (
+    DEVELOPMENT_MANIFEST_RECONSTRUCTION_VERSION,
+    TEMPORAL_MANIFEST_VERSION,
+)
+from app.ml.protected.models import MLTemporalManifestRecord
+from app.ml.protected.temporal import (
+    TemporalManifestError,
+    validate_persisted_development_manifest,
+)
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
     MLRefinementRunRecord,
@@ -173,6 +183,45 @@ async def process_qualification(
         MLEconomicQualificationCampaignRecord,
         (record.campaign_id, record.id),
     )
+    development_manifest: MLTemporalManifestRecord | None = None
+    if provenance == DIAGNOSTIC_QUALIFICATION_PROVENANCE:
+        try:
+            development_manifest_id = UUID(
+                str(record.frozen_inputs["development_temporal_manifest_id"])
+            )
+        except (KeyError, ValueError) as error:
+            raise RuntimeError("qualification_identity_mismatch") from error
+        development_manifest = await session.get(
+            MLTemporalManifestRecord, development_manifest_id
+        )
+        if (
+            development_manifest is None
+            or development_manifest.evaluation_id != parsed_evaluation_id
+            or development_manifest.status != "completed"
+            or development_manifest.manifest_version != TEMPORAL_MANIFEST_VERSION
+            or development_manifest.split_policy_version
+            != DEVELOPMENT_MANIFEST_RECONSTRUCTION_VERSION
+            or development_manifest.dataset_fingerprint
+            != str(record.frozen_inputs.get("dataset_fingerprint"))
+            or not development_manifest.fingerprint_verified
+            or not development_manifest.counts_verified
+            or development_manifest.manifest is None
+            or development_manifest.manifest_fingerprint is None
+            or development_manifest.manifest_fingerprint
+            != str(
+                record.frozen_inputs.get("development_temporal_manifest_fingerprint")
+            )
+        ):
+            raise RuntimeError("qualification_development_manifest_mismatch")
+        try:
+            validate_persisted_development_manifest(
+                payload=development_manifest.manifest,
+                persisted_fingerprint=development_manifest.manifest_fingerprint,
+                canonical_dataset_fingerprint=development_manifest.dataset_fingerprint,
+                development_end_exclusive=DEVELOPMENT_END,
+            )
+        except TemporalManifestError as error:
+            raise RuntimeError("qualification_development_manifest_mismatch") from error
     if (
         family is None
         or evaluation is None
@@ -242,6 +291,7 @@ async def process_qualification(
         run=run,
         policy=record.policy_identity,
         provenance=record.provenance,
+        development_manifest=development_manifest,
     )
     if (
         not identical_payload(record.frozen_inputs, rebuilt_identity)
