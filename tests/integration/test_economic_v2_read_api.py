@@ -147,6 +147,11 @@ async def economic_v2_records() -> AsyncIterator[dict[str, object]]:
                 candidate_fingerprint=f"{index + 30:064x}",
                 policy_fingerprint=f"{index + 20:064x}",
                 qualification_version=1,
+                provenance=(
+                    "automatic_development_candidate"
+                    if index == 0
+                    else "diagnostic_stage3_near_miss"
+                ),
                 status="completed",
                 classification="qualified" if index == 0 else "rejected",
                 engine="ridge" if index == 0 else "lightgbm",
@@ -223,6 +228,16 @@ async def test_qualification_api_filters_paginates_and_preserves_evidence(
     item = filtered.json()["items"][0]
     assert item["scenario_metrics"]["base"]["total_net_return"] == (
         "0.050000000000000001"
+    )
+    assert item["provenance"] == "automatic_development_candidate"
+    diagnostic = client.get(
+        f"/optimization/ml-search-campaigns/{campaign_id}/qualifications",
+        params={"provenance": "diagnostic_stage3_near_miss"},
+    )
+    assert diagnostic.status_code == 200
+    assert diagnostic.json()["total"] == 1
+    assert diagnostic.json()["items"][0]["provenance"] == (
+        "diagnostic_stage3_near_miss"
     )
     detail = client.get(
         f"/optimization/ml-search-campaigns/{campaign_id}/qualifications/{item['id']}"

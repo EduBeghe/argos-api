@@ -936,4 +936,6 @@ economic strategy-policy search and immutable calendar-2024 qualification while
 structurally reserving all 2025 evidence. The same documentation describes its
 request, purged temporal protocol, canonical seeded-local neighborhoods, dedicated
 stage-5 lifecycle, lease-protected qualification, read endpoints, and one-shot
-enqueue command.
+enqueue command. It also documents the bounded authenticated diagnostic operation
+for explicitly selected Stage 3 near misses; diagnostic provenance does not alter the
+completed campaign or authorize access to reserved 2025 evidence.

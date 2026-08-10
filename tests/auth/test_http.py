@@ -263,6 +263,22 @@ def test_authenticated_request_reaches_business_router(auth_client: TestClient) 
     assert auth_client.get("/market/instruments").status_code == 200
 
 
+def test_diagnostic_qualification_post_is_authenticated_and_validated(
+    auth_client: TestClient,
+) -> None:
+    campaign_id = "00000000-0000-0000-0000-000000000001"
+    path = f"/optimization/ml-search-campaigns/{campaign_id}/diagnostic-qualifications"
+    assert auth_client.post(path, json={"family_ids": []}).status_code == 401
+
+    login(auth_client)
+    response = auth_client.post(
+        path,
+        json={"family_ids": []},
+        headers={"X-CSRF-Token": auth_client.cookies["argos_csrf"]},
+    )
+    assert response.status_code == 422
+
+
 def test_only_exact_health_and_login_are_public(auth_client: TestClient) -> None:
     assert frozenset({("GET", "/health"), ("POST", "/auth/login")}) == PUBLIC_ROUTES
     assert auth_client.get("/health").json() == {"status": "ok"}

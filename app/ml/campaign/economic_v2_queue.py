@@ -19,7 +19,10 @@ from app.ml.refinement.models import (
 from app.ml.refinement.persistence import completed_run_is_complete
 from app.ml.refinement.planning import planned_evaluation_from_persisted_values
 
-from .contracts import ECONOMIC_V2_STRATEGY_POLICY_VERSION
+from .contracts import (
+    DIAGNOSTIC_QUALIFICATION_PROVENANCE,
+    ECONOMIC_V2_STRATEGY_POLICY_VERSION,
+)
 from .economic_v2_identity import (
     identical_payload,
     qualification_identity,
@@ -31,6 +34,11 @@ from .models import (
     MLEconomicQualificationCampaignRecord,
     MLEconomicQualificationRecord,
     MLSearchCampaignFamilyRecord,
+)
+from .reuse_lineage import (
+    ResolvedDevelopmentEvidence,
+    ReuseLineageError,
+    resolve_development_evidence_lineage,
 )
 
 logger = logging.getLogger(__name__)
@@ -139,6 +147,10 @@ async def process_qualification(
     if heartbeat_interval_seconds <= 0:
         raise ValueError("qualification heartbeat interval must be positive")
     qualification_id = record.id
+    campaign_id = record.campaign_id
+    family_id = record.family_id
+    provenance = record.provenance
+    evidence_end_exclusive = record.evidence_end_exclusive
     candidate_fingerprint = record.candidate_fingerprint
     policy_fingerprint = record.policy_fingerprint
     deterministic_seed = int(str(record.frozen_inputs["deterministic_seed"]))
@@ -183,8 +195,25 @@ async def process_qualification(
         or evaluation.engine != family.engine
         or evaluation.objective != family.objective
         or evaluation.future_duration_seconds != family.future_duration_seconds
+        or record.evidence_end_exclusive != datetime(2025, 1, 1, tzinfo=UTC)
+        or (
+            record.provenance == DIAGNOSTIC_QUALIFICATION_PROVENANCE
+            and record.temporal_manifest_fingerprint
+            != str(record.frozen_inputs.get("temporal_manifest_fingerprint"))
+        )
     ):
         raise RuntimeError("qualification_identity_mismatch")
+    development_evidence: ResolvedDevelopmentEvidence | None = None
+    if provenance == DIAGNOSTIC_QUALIFICATION_PROVENANCE:
+        try:
+            development_evidence = await resolve_development_evidence_lineage(
+                session,
+                selected_evaluation=evaluation,
+                selected_run=run,
+                dataset_fingerprint=family.dataset_fingerprint,
+            )
+        except ReuseLineageError as error:
+            raise RuntimeError(error.reason_code) from error
     candidate = planned_evaluation_from_persisted_values(
         fingerprint=evaluation.fingerprint,
         engine=evaluation.engine,
@@ -228,6 +257,20 @@ async def process_qualification(
         evaluation=evaluation,
         run=run,
         policy=record.policy_identity,
+        provenance=record.provenance,
+        development_manifest=(
+            development_evidence.manifest if development_evidence is not None else None
+        ),
+        development_manifest_owner_evaluation_id=(
+            development_evidence.manifest_owner_evaluation_id
+            if development_evidence is not None
+            else None
+        ),
+        reuse_lineage_evaluation_ids=(
+            development_evidence.evaluation_ids
+            if development_evidence is not None
+            else None
+        ),
     )
     if (
         not identical_payload(record.frozen_inputs, rebuilt_identity)
@@ -255,6 +298,9 @@ async def process_qualification(
         extra={
             "structured_fields": {
                 "qualification_id": str(qualification_id),
+                "campaign_id": str(campaign_id),
+                "family_id": str(family_id),
+                "provenance": provenance,
                 "candidate_fingerprint": candidate_fingerprint,
                 "policy_fingerprint": policy_fingerprint,
                 "read_start": "2020-01-01T00:00:00+00:00",
@@ -354,10 +400,14 @@ async def process_qualification(
         extra={
             "structured_fields": {
                 "qualification_id": str(qualification_id),
+                "campaign_id": str(campaign_id),
+                "family_id": str(family_id),
+                "provenance": provenance,
                 "classification": "qualified"
                 if not result.failed_rules
                 else "rejected",
                 "failed_rules": len(result.failed_rules),
+                "evidence_end_exclusive": str(evidence_end_exclusive),
             }
         },
     )

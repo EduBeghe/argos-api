@@ -4,20 +4,24 @@ import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from app.ml.contract import (
     MISSING_DATA_POLICY_VERSION,
     ML_EXPERIMENT_CONTRACT_VERSION,
     VARIABLE_REGISTRY_VERSION,
 )
+from app.ml.protected.models import MLTemporalManifestRecord
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
     MLRefinementRunRecord,
 )
 
 from .contracts import (
+    AUTOMATIC_QUALIFICATION_PROVENANCE,
     CAMPAIGN_FEE_RATE,
     CAMPAIGN_SLIPPAGE_RATE,
+    DIAGNOSTIC_QUALIFICATION_REQUEST_VERSION,
     ECONOMIC_V2_CONTRACT_VERSION,
     ECONOMIC_V2_DEVELOPMENT_END,
     ECONOMIC_V2_DEVELOPMENT_START,
@@ -39,10 +43,14 @@ def qualification_identity_payload(
     evaluation: MLRefinementEvaluationRecord,
     run: MLRefinementRunRecord,
     policy: dict[str, object],
+    provenance: str = AUTOMATIC_QUALIFICATION_PROVENANCE,
+    development_manifest: MLTemporalManifestRecord | None = None,
+    development_manifest_owner_evaluation_id: UUID | None = None,
+    reuse_lineage_evaluation_ids: tuple[UUID, ...] | None = None,
 ) -> dict[str, object]:
     """Build the complete immutable scientific identity for 2024 qualification."""
 
-    return {
+    identity = {
         "qualification_version": ECONOMIC_V2_QUALIFICATION_VERSION,
         "campaign_contract_version": ECONOMIC_V2_CONTRACT_VERSION,
         "campaign_policy_version": ECONOMIC_V2_POLICY_VERSION,
@@ -89,6 +97,52 @@ def qualification_identity_payload(
         "fee_rate": str(CAMPAIGN_FEE_RATE),
         "slippage_rate": str(CAMPAIGN_SLIPPAGE_RATE),
     }
+    # Preserve historical automatic identities byte-for-byte. Diagnostic provenance is
+    # identity-bearing so it can never collide with automatic scientific evidence.
+    if provenance != AUTOMATIC_QUALIFICATION_PROVENANCE:
+        if (
+            development_manifest is None
+            or development_manifest.manifest_fingerprint is None
+            or development_manifest_owner_evaluation_id is None
+            or not reuse_lineage_evaluation_ids
+        ):
+            raise ValueError(
+                "diagnostic qualification requires a verified development manifest"
+            )
+        identity["qualification_provenance"] = provenance
+        diagnostic_manifest = {
+            "qualification_start": ECONOMIC_V2_DEVELOPMENT_END,
+            "qualification_end_exclusive": ECONOMIC_V2_QUALIFICATION_END,
+            "status": "not_read",
+            "request_version": DIAGNOSTIC_QUALIFICATION_REQUEST_VERSION,
+        }
+        identity.update(
+            {
+                "diagnostic_request_version": DIAGNOSTIC_QUALIFICATION_REQUEST_VERSION,
+                "qualification_start": ECONOMIC_V2_DEVELOPMENT_END,
+                "temporal_manifest_fingerprint": qualification_identity(
+                    diagnostic_manifest
+                ),
+                "development_temporal_manifest_id": str(development_manifest.id),
+                "development_temporal_manifest_owner_evaluation_id": str(
+                    development_manifest_owner_evaluation_id
+                ),
+                "development_temporal_manifest_fingerprint": (
+                    development_manifest.manifest_fingerprint
+                ),
+                "development_temporal_manifest_version": (
+                    development_manifest.manifest_version
+                ),
+                "development_split_policy_version": (
+                    development_manifest.split_policy_version
+                ),
+                "reuse_lineage_evaluation_ids": [
+                    str(item) for item in reuse_lineage_evaluation_ids
+                ],
+                "cost_multipliers": ["1", "1.5", "2"],
+            }
+        )
+    return identity
 
 
 def qualification_identity(payload: Mapping[str, object]) -> str:

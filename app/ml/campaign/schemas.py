@@ -94,6 +94,7 @@ class QualificationResponse(BaseModel):
     candidate_fingerprint: str
     policy_fingerprint: str
     qualification_version: int
+    provenance: str
     status: str
     classification: str | None
     engine: str
@@ -122,3 +123,17 @@ class QualificationPage(BaseModel):
     offset: int
     limit: int
     has_more: bool
+
+
+class DiagnosticQualificationItem(BaseModel):
+    family_id: UUID
+    qualification_id: UUID
+    status: str
+    created: bool
+    reused: bool
+
+
+class DiagnosticQualificationEnqueueResponse(BaseModel):
+    campaign_id: UUID
+    request_version: int
+    items: tuple[DiagnosticQualificationItem, ...]

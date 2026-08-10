@@ -12,6 +12,12 @@ from app.ml.campaign.contracts import (
     CampaignContract,
     CampaignContractsResponse,
     CampaignRequest,
+    DiagnosticQualificationRequest,
+)
+from app.ml.campaign.diagnostic_qualification import (
+    DiagnosticQualificationConflictError,
+    DiagnosticQualificationNotFoundError,
+    enqueue_diagnostic_qualifications,
 )
 from app.ml.campaign.models import (
     MLEconomicQualificationCampaignRecord,
@@ -23,6 +29,8 @@ from app.ml.campaign.schemas import (
     CampaignEnqueueResponse,
     CampaignPage,
     CampaignResponse,
+    DiagnosticQualificationEnqueueResponse,
+    DiagnosticQualificationItem,
     FamilyPage,
     FamilyResponse,
     QualificationPage,
@@ -477,6 +485,7 @@ async def list_ml_search_campaign_qualifications(
     objective: PredictionObjective | None = None,
     search_track: str | None = None,
     seed_family_id: UUID | None = None,
+    provenance: str | None = None,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> QualificationPage:
@@ -494,6 +503,7 @@ async def list_ml_search_campaign_qualifications(
         (MLEconomicQualificationRecord.objective, objective),
         (MLEconomicQualificationRecord.search_track, search_track),
         (MLEconomicQualificationRecord.seed_family_id, seed_family_id),
+        (MLEconomicQualificationRecord.provenance, provenance),
     ):
         if value is not None:
             predicates.append(
@@ -551,6 +561,46 @@ async def list_ml_search_campaign_qualifications(
         offset=offset,
         limit=limit,
         has_more=offset + len(rows) < total,
+    )
+
+
+@router.post(
+    "/ml-search-campaigns/{campaign_id}/diagnostic-qualifications",
+    response_model=DiagnosticQualificationEnqueueResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def enqueue_ml_search_campaign_diagnostic_qualifications(
+    campaign_id: UUID,
+    request: DiagnosticQualificationRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> DiagnosticQualificationEnqueueResponse:
+    try:
+        result = await enqueue_diagnostic_qualifications(
+            session, campaign_id=campaign_id, request=request
+        )
+    except DiagnosticQualificationNotFoundError as error:
+        raise HTTPException(
+            status_code=404,
+            detail={"reason_code": str(error)},
+        ) from error
+    except DiagnosticQualificationConflictError as error:
+        raise HTTPException(
+            status_code=409,
+            detail={"reason_code": error.reason_code},
+        ) from error
+    return DiagnosticQualificationEnqueueResponse(
+        campaign_id=result.campaign_id,
+        request_version=request.request_version,
+        items=tuple(
+            DiagnosticQualificationItem(
+                family_id=item.family_id,
+                qualification_id=item.qualification_id,
+                status=item.status,
+                created=item.created,
+                reused=not item.created,
+            )
+            for item in result.items
+        ),
     )
 
 

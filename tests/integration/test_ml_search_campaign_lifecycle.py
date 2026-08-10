@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import numpy as np
 import pytest
 import pytest_asyncio
+from fastapi.testclient import TestClient
 from sqlalchemy import delete, event, func, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -31,8 +32,13 @@ from app.ml.campaign.contracts import (
     ECONOMIC_V2_STRATEGY_POLICY_VERSION,
     FAMILIES_PER_INSTRUMENT,
     CampaignRequest,
+    DiagnosticQualificationRequest,
 )
 from app.ml.campaign.coordinator import coordinate_next_campaign
+from app.ml.campaign.diagnostic_qualification import (
+    DiagnosticQualificationConflictError,
+    enqueue_diagnostic_qualifications,
+)
 from app.ml.campaign.economic_v2_policy import strategy_policy_grid
 from app.ml.campaign.economic_v2_queue import (
     claim_next_qualification,
@@ -69,10 +75,15 @@ from app.ml.protected.queue import (
     enqueue_final_validation,
     enqueue_manifest_reconstruction,
 )
+from app.ml.protected.temporal import temporal_manifest_fingerprint
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
     MLRefinementRunRecord,
+)
+from app.ml.refinement.persistence import (
+    effective_evaluation_fingerprint,
+    persist_evaluation,
 )
 from app.ml.refinement.planning import build_refinement_plan
 from app.ml.screening.config import ScreeningEngine
@@ -108,6 +119,34 @@ def refinement_request(source_id: UUID, result_id: UUID) -> MLRefinementRequest:
             "maximum_trials": 1,
             "maximum_runtime_seconds": 60,
             "deterministic_seed": 1729,
+        }
+    )
+
+
+def diagnostic_refinement_request(
+    source_id: UUID, result_id: UUID, *, include_top_k: bool = False
+) -> MLRefinementRequest:
+    feature_strategies: list[dict[str, object]] = [{"strategy": "all"}]
+    alpha_values: list[float | int] = [1]
+    maximum_trials = 1
+    if include_top_k:
+        feature_strategies.append({"strategy": "top_k", "values": [16]})
+        alpha_values = [0.1, 1, 10]
+        maximum_trials = 6
+    return MLRefinementRequest.model_validate(
+        {
+            **refinement_request(source_id, result_id).normalized_payload(),
+            "future_durations_seconds": [3600],
+            "confidence_buckets": [str(item) for item in CAMPAIGN_CONFIDENCE_BUCKETS],
+            "search_space": [
+                {
+                    "engine": "ridge",
+                    "alpha": {"values": alpha_values},
+                    "fit_intercept": {"values": [True]},
+                }
+            ],
+            "feature_selection": {"strategies": feature_strategies},
+            "maximum_trials": maximum_trials,
         }
     )
 
@@ -280,6 +319,62 @@ def evaluation(
     )
 
 
+def completed_development_manifest(
+    evaluation_id: UUID, dataset_fingerprint: str
+) -> MLTemporalManifestRecord:
+    folds: list[dict[str, object]] = []
+    for ordinal, definition in enumerate(temporal_fold_definitions()):
+        folds.append(
+            {
+                "ordinal": ordinal,
+                "fold_name": definition.name,
+                "training_start": definition.training_start.isoformat(),
+                "training_end_exclusive": definition.training_end.isoformat(),
+                "validation_start": definition.validation_start.isoformat(),
+                "validation_end_exclusive": definition.validation_end.isoformat(),
+                "target_latest_endpoint_exclusive": (
+                    definition.validation_end.isoformat()
+                ),
+                "training_eligibility": {
+                    "first_eligible_boundary": None,
+                    "last_eligible_boundary": None,
+                },
+                "validation_eligibility": {
+                    "first_eligible_boundary": None,
+                    "last_eligible_boundary": None,
+                },
+            }
+        )
+    payload: dict[str, object] = {
+        "manifest_version": 1,
+        "canonical_dataset_fingerprint": dataset_fingerprint,
+        "development_dataset_fingerprint": dataset_fingerprint,
+        "first_boundary": DEVELOPMENT_START.isoformat(),
+        "folds": folds,
+    }
+    return MLTemporalManifestRecord(
+        id=uuid4(),
+        evaluation_id=evaluation_id,
+        source="persisted_at_execution",
+        status="completed",
+        manifest_version=1,
+        split_policy_version=1,
+        dataset_fingerprint=dataset_fingerprint,
+        manifest_fingerprint=temporal_manifest_fingerprint(payload),
+        manifest=payload,
+        fingerprint_verified=True,
+        counts_verified=True,
+        worker_id=None,
+        claimed_at=None,
+        heartbeat_at=None,
+        cancellation_requested_at=None,
+        failure_code=None,
+        failure_message=None,
+        created_at=NOW,
+        completed_at=NOW,
+    )
+
+
 @pytest_asyncio.fixture
 async def factory() -> AsyncIterator[
     tuple[async_sessionmaker[AsyncSession], UUID, UUID]
@@ -351,6 +446,19 @@ async def factory() -> AsyncIterator[
         await session.execute(
             delete(MLSearchCampaignRecord).where(
                 MLSearchCampaignRecord.id.in_(campaign_ids)
+            )
+        )
+        evaluation_ids = (
+            select(MLRefinementEvaluationRecord.id)
+            .join(
+                MLRefinementRunRecord,
+                MLRefinementRunRecord.id == MLRefinementEvaluationRecord.run_id,
+            )
+            .where(MLRefinementRunRecord.source_screening_run_id == source_id)
+        )
+        await session.execute(
+            delete(MLTemporalManifestRecord).where(
+                MLTemporalManifestRecord.evaluation_id.in_(evaluation_ids)
             )
         )
         await session.execute(
@@ -579,6 +687,428 @@ async def test_v2_invalid_seed_rejects_the_whole_enqueue_without_writes(
                 .select_from(MLSearchCampaignSourceRecord)
                 .where(
                     MLSearchCampaignSourceRecord.source_screening_run_id == source_id
+                )
+            )
+            == 0
+        )
+
+
+async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    client: TestClient,
+) -> None:
+    sessions, source_id, result_id = factory
+    record = campaign(status="completed", covered=True, maximum_evaluations=6)
+    record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    record.contract_version = 2
+    record.policy_version = 2
+    record.classification_version = 2
+    record.outcome = "no_strong_candidate"
+    record.families_total = 6
+    record.families_covered = 6
+    record.families_uncovered = 0
+    record.current_stage = 4
+    original_completed_at = record.completed_at
+    run = refinement_run(source_id, result_id, status="completed")
+    run.evaluations_computed = 6
+    run.evaluations_selected = 6
+    diagnostic_request = diagnostic_refinement_request(
+        source_id, result_id, include_top_k=True
+    )
+    run.contract_version = 2
+    run.classification_version = 2
+    run.normalized_configuration = diagnostic_request.normalized_payload()
+    planned = build_refinement_plan(diagnostic_request).evaluations
+    policy = strategy_policy_grid(3600)[0]
+    policy_payload = {
+        "policy_fingerprint": policy.fingerprint,
+        "strategy_policy_version": policy.version,
+        "confidence_fraction": str(policy.confidence_fraction),
+        "holding_multiplier": str(policy.holding_multiplier),
+        "regime_policy": policy.regime_policy,
+        "holding_candles": policy.holding_candles,
+    }
+    families: list[MLSearchCampaignFamilyRecord] = []
+    evaluations: list[MLRefinementEvaluationRecord] = []
+    for ordinal in range(6):
+        family_record = family(record.id, source_id, state="discarded")
+        family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+        family_record.search_track = "diversified"
+        family_record.current_stage = 3
+        family_record.future_duration_seconds = 3600
+        family_record.feature_variant = (
+            "all"
+            if planned[ordinal].feature_strategy == "all"
+            else f"top_k_{planned[ordinal].top_k}"
+        )
+        family_record.deterministic_ordinal = ordinal
+        family_record.best_metrics = {
+            "policy_fingerprint": policy.fingerprint,
+            "observations": 150,
+            "round_trips": 20,
+            "positive_net_folds": 5,
+            "folds_beating_benchmark": 2,
+            "median_net_return": "0.001",
+            "worst_net_return": "-0.02",
+            "maximum_drawdown": "0.20",
+            "inactive_folds": 1,
+            "compounded_return_1_5x": "0.01",
+            "compounded_return_2x": "0.001",
+            "complete_and_finite": True,
+        }
+        family_record.selected_policy = policy_payload
+        family_record.selected_policy_fingerprint = policy.fingerprint
+        family_record.decision_reason = "failed_stage_3_economic_v2_gate"
+        evidence = evaluation(
+            run.id,
+            fingerprint=effective_evaluation_fingerprint(
+                dataset_fingerprint=run.dataset_fingerprint,
+                candidate_fingerprint=planned[ordinal].fingerprint,
+                engine=planned[ordinal].engine.value,
+                versions=run.library_versions,
+                deterministic_seed=diagnostic_request.deterministic_seed,
+            ),
+        )
+        evidence.future_duration_seconds = 3600
+        evidence.classification_version = 2
+        evidence.hyperparameters = dict(planned[ordinal].hyperparameters)
+        evidence.feature_policy = {
+            "strategy": planned[ordinal].feature_strategy,
+            "variables": None,
+            "top_k": planned[ordinal].top_k,
+        }
+        family_record.best_evaluation_id = evidence.id
+        families.append(family_record)
+        evaluations.append(evidence)
+
+    request = DiagnosticQualificationRequest(
+        family_ids=tuple(item.id for item in families)
+    )
+    campaign_id = record.id
+    family_ids = tuple(item.id for item in families)
+    evaluation_ids = tuple(item.id for item in evaluations)
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(run)
+        await session.flush()
+        session.add_all(evaluations)
+        await session.flush()
+        session.add_all(
+            completed_development_manifest(item.id, run.dataset_fingerprint)
+            for item in evaluations
+        )
+        await session.flush()
+        session.add_all(families)
+        await session.commit()
+
+        first = await enqueue_diagnostic_qualifications(
+            session, campaign_id=record.id, request=request
+        )
+        assert len(first.items) == 6
+        assert all(item.created for item in first.items)
+        assert [item.family_id for item in first.items] == list(request.family_ids)
+
+        reversed_request = DiagnosticQualificationRequest(
+            family_ids=tuple(reversed(request.family_ids))
+        )
+        reused = await enqueue_diagnostic_qualifications(
+            session, campaign_id=record.id, request=reversed_request
+        )
+        assert all(not item.created for item in reused.items)
+        assert {item.family_id: item.qualification_id for item in first.items} == {
+            item.family_id: item.qualification_id for item in reused.items
+        }
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(MLEconomicQualificationRecord)
+            )
+            == 6
+        )
+        await session.refresh(record)
+        assert record.status == "completed"
+        assert record.outcome == "no_strong_candidate"
+        assert record.completed_at == original_completed_at
+        assert all(item.state == "discarded" for item in families)
+
+        api_response = client.post(
+            f"/optimization/ml-search-campaigns/{campaign_id}/diagnostic-qualifications",
+            json={"family_ids": [str(item) for item in reversed(request.family_ids)]},
+        )
+        assert api_response.status_code == 202
+        assert [item["family_id"] for item in api_response.json()["items"]] == [
+            str(item) for item in reversed(request.family_ids)
+        ]
+        assert all(item["reused"] for item in api_response.json()["items"])
+
+        families[-1].best_metrics = {
+            **(families[-1].best_metrics or {}),
+            "positive_net_folds": 3,
+        }
+        await session.commit()
+        with pytest.raises(DiagnosticQualificationConflictError):
+            await enqueue_diagnostic_qualifications(
+                session,
+                campaign_id=record.id,
+                request=DiagnosticQualificationRequest(
+                    family_ids=(families[0].id, families[-1].id)
+                ),
+            )
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(MLEconomicQualificationRecord)
+            )
+            == 6
+        )
+
+        top_k_index = next(
+            index
+            for index, item in enumerate(planned)
+            if item.feature_strategy == "top_k"
+        )
+        top_k_evaluation = await session.get(
+            MLRefinementEvaluationRecord, evaluation_ids[top_k_index]
+        )
+        assert top_k_evaluation is not None
+        valid_top_k_policy = dict(top_k_evaluation.feature_policy)
+        top_k_evaluation.feature_policy = {**valid_top_k_policy, "top_k": True}
+        await session.commit()
+        with pytest.raises(DiagnosticQualificationConflictError) as malformed:
+            await enqueue_diagnostic_qualifications(
+                session,
+                campaign_id=campaign_id,
+                request=DiagnosticQualificationRequest(
+                    family_ids=(family_ids[top_k_index],)
+                ),
+            )
+        assert malformed.value.reason_code == "family_refinement_evidence_incompatible"
+        top_k_evaluation = await session.get(
+            MLRefinementEvaluationRecord, evaluation_ids[top_k_index]
+        )
+        assert top_k_evaluation is not None
+        top_k_evaluation.feature_policy = valid_top_k_policy
+        await session.commit()
+
+        await session.execute(
+            delete(MLTemporalManifestRecord).where(
+                MLTemporalManifestRecord.evaluation_id == evaluation_ids[0]
+            )
+        )
+        await session.commit()
+        with pytest.raises(DiagnosticQualificationConflictError) as missing_manifest:
+            await enqueue_diagnostic_qualifications(
+                session,
+                campaign_id=campaign_id,
+                request=DiagnosticQualificationRequest(family_ids=(family_ids[0],)),
+            )
+        assert (
+            missing_manifest.value.reason_code
+            == "family_temporal_manifest_missing_or_incompatible"
+        )
+
+
+async def test_reused_diagnostic_resolves_lineage_and_completes_worker(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions, source_id, result_id = factory
+    request = diagnostic_refinement_request(source_id, result_id)
+    planned = build_refinement_plan(request).evaluations[0]
+    fingerprint = effective_evaluation_fingerprint(
+        dataset_fingerprint="d" * 64,
+        candidate_fingerprint=planned.fingerprint,
+        engine=planned.engine.value,
+        versions={},
+        deterministic_seed=request.deterministic_seed,
+    )
+
+    def completed_run() -> MLRefinementRunRecord:
+        result = refinement_run(source_id, result_id, status="completed")
+        result.contract_version = 2
+        result.classification_version = 2
+        result.normalized_configuration = request.normalized_payload()
+        result.evaluations_computed = 1
+        result.evaluations_reused = 0
+        result.evaluations_selected = 1
+        return result
+
+    source_run = completed_run()
+    source_evaluation = evaluation(source_run.id, fingerprint=fingerprint)
+    source_evaluation.future_duration_seconds = 3600
+    source_evaluation.classification_version = 2
+    source_evaluation.hyperparameters = dict(planned.hyperparameters)
+    source_evaluation.feature_policy = {
+        "strategy": "all",
+        "variables": None,
+        "top_k": None,
+    }
+    first_reuse_run = completed_run()
+    first_reuse_run.evaluations_computed = 0
+    first_reuse_run.evaluations_reused = 1
+    second_reuse_run = completed_run()
+    second_reuse_run.evaluations_computed = 0
+    second_reuse_run.evaluations_reused = 1
+
+    campaign_record = campaign(status="completed", covered=True)
+    campaign_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    campaign_record.contract_version = 2
+    campaign_record.policy_version = 2
+    campaign_record.classification_version = 2
+    campaign_record.outcome = "no_strong_candidate"
+    campaign_record.current_stage = 4
+    policy = strategy_policy_grid(3600)[0]
+
+    async with sessions() as session:
+        session.add_all((source_run, first_reuse_run, second_reuse_run))
+        await session.flush()
+        session.add(source_evaluation)
+        await session.flush()
+        source_manifest = completed_development_manifest(
+            source_evaluation.id, source_run.dataset_fingerprint
+        )
+        session.add(source_manifest)
+        await session.commit()
+
+        await persist_evaluation(
+            session=session,
+            run_id=first_reuse_run.id,
+            fingerprint=fingerprint,
+            result=None,
+            reused=source_evaluation,
+            request=request,
+            now=NOW,
+        )
+        first_reuse = await session.scalar(
+            select(MLRefinementEvaluationRecord).where(
+                MLRefinementEvaluationRecord.run_id == first_reuse_run.id
+            )
+        )
+        assert first_reuse is not None
+        identical_nearer_manifest = completed_development_manifest(
+            first_reuse.id, first_reuse_run.dataset_fingerprint
+        )
+        identical_nearer_manifest.manifest = source_manifest.manifest
+        identical_nearer_manifest.manifest_fingerprint = (
+            source_manifest.manifest_fingerprint
+        )
+        session.add(identical_nearer_manifest)
+        await session.commit()
+
+        await persist_evaluation(
+            session=session,
+            run_id=second_reuse_run.id,
+            fingerprint=fingerprint,
+            result=None,
+            reused=first_reuse,
+            request=request,
+            now=NOW,
+        )
+        selected = await session.scalar(
+            select(MLRefinementEvaluationRecord).where(
+                MLRefinementEvaluationRecord.run_id == second_reuse_run.id
+            )
+        )
+        assert selected is not None
+
+        family_record = family(campaign_record.id, source_id, state="discarded")
+        family_record.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+        family_record.search_track = "diversified"
+        family_record.current_stage = 3
+        family_record.future_duration_seconds = 3600
+        family_record.best_evaluation_id = selected.id
+        family_record.best_metrics = {
+            "observations": 150,
+            "round_trips": 20,
+            "positive_net_folds": 5,
+            "folds_beating_benchmark": 2,
+            "median_net_return": "0.001",
+            "worst_net_return": "-0.02",
+            "inactive_folds": 1,
+            "complete_and_finite": True,
+        }
+        family_record.selected_policy = {
+            "policy_fingerprint": policy.fingerprint,
+            "strategy_policy_version": policy.version,
+            "confidence_fraction": str(policy.confidence_fraction),
+            "holding_multiplier": str(policy.holding_multiplier),
+            "regime_policy": policy.regime_policy,
+            "holding_candles": policy.holding_candles,
+        }
+        family_record.selected_policy_fingerprint = policy.fingerprint
+        session.add(campaign_record)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+
+        enqueued = await enqueue_diagnostic_qualifications(
+            session,
+            campaign_id=campaign_record.id,
+            request=DiagnosticQualificationRequest(family_ids=(family_record.id,)),
+        )
+        qualification = await session.get(
+            MLEconomicQualificationRecord, enqueued.items[0].qualification_id
+        )
+        assert qualification is not None
+        assert qualification.frozen_inputs["reuse_lineage_evaluation_ids"] == [
+            str(selected.id),
+            str(first_reuse.id),
+            str(source_evaluation.id),
+        ]
+        assert qualification.frozen_inputs[
+            "development_temporal_manifest_owner_evaluation_id"
+        ] == str(first_reuse.id)
+
+        claimed = await claim_next_qualification(session, worker_id="reuse-worker")
+        assert claimed is not None
+
+        async def load_dataset(**_kwargs: object) -> object:
+            return _qualification_dataset()
+
+        monkeypatch.setattr(
+            qualification_queue, "load_ml_qualification_dataset", load_dataset
+        )
+        monkeypatch.setattr(
+            qualification_queue,
+            "calculate_qualification",
+            lambda **_kwargs: SimpleNamespace(
+                temporal_manifest={"qualification_end_exclusive": "2025-01-01"},
+                temporal_manifest_fingerprint="q" * 64,
+                scenario_metrics={"base": {"net_return": "0.01"}},
+                quarter_returns=(Decimal("0.01"),) * 4,
+                trades=(
+                    {
+                        "entry_at": "2024-03-01T00:00:00+00:00",
+                        "exit_at": "2024-03-02T00:00:00+00:00",
+                    },
+                ),
+                failed_rules=(),
+            ),
+        )
+        await process_qualification(
+            session,
+            record=claimed,
+            worker_id="reuse-worker",
+            heartbeat_interval_seconds=60,
+        )
+        await session.refresh(claimed)
+        await session.refresh(campaign_record)
+        await session.refresh(family_record)
+        assert claimed.status == "completed"
+        assert claimed.provenance == "diagnostic_stage3_near_miss"
+        assert claimed.classification == "qualified"
+        assert claimed.scenario_metrics == {"base": {"net_return": "0.01"}}
+        assert len(claimed.quarter_returns or []) == 4
+        assert all(
+            str(trade["entry_at"]).startswith("2024-")
+            for trade in (claimed.trades or [])
+        )
+        assert campaign_record.status == "completed"
+        assert campaign_record.outcome == "no_strong_candidate"
+        assert family_record.state == "discarded"
+        assert (
+            await session.scalar(
+                select(func.count(MLFinalValidationRecord.id)).where(
+                    MLFinalValidationRecord.evaluation_id == selected.id
                 )
             )
             == 0

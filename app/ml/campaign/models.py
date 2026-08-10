@@ -230,6 +230,11 @@ class MLEconomicQualificationRecord(Base):
             name="ck_ml_economic_qualification_classification",
         ),
         CheckConstraint(
+            "provenance IN ('automatic_development_candidate',"
+            "'diagnostic_stage3_near_miss')",
+            name="ck_ml_economic_qualification_provenance",
+        ),
+        CheckConstraint(
             "(status = 'queued' AND classification IS NULL AND worker_id IS NULL "
             "AND completed_at IS NULL AND failed_at IS NULL) OR "
             "(status = 'running' AND classification IS NULL AND worker_id IS NOT NULL "
@@ -279,6 +284,9 @@ class MLEconomicQualificationRecord(Base):
     candidate_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     policy_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     qualification_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    provenance: Mapped[str] = mapped_column(
+        String(48), nullable=False, default="automatic_development_candidate"
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     classification: Mapped[str | None] = mapped_column(String(16))
     engine: Mapped[str] = mapped_column(String(16), nullable=False)
