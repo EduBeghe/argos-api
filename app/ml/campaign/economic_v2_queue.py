@@ -142,6 +142,10 @@ async def process_qualification(
     if heartbeat_interval_seconds <= 0:
         raise ValueError("qualification heartbeat interval must be positive")
     qualification_id = record.id
+    campaign_id = record.campaign_id
+    family_id = record.family_id
+    provenance = record.provenance
+    evidence_end_exclusive = record.evidence_end_exclusive
     candidate_fingerprint = record.candidate_fingerprint
     policy_fingerprint = record.policy_fingerprint
     deterministic_seed = int(str(record.frozen_inputs["deterministic_seed"]))
@@ -265,9 +269,9 @@ async def process_qualification(
         extra={
             "structured_fields": {
                 "qualification_id": str(qualification_id),
-                "campaign_id": str(record.campaign_id),
-                "family_id": str(record.family_id),
-                "provenance": record.provenance,
+                "campaign_id": str(campaign_id),
+                "family_id": str(family_id),
+                "provenance": provenance,
                 "candidate_fingerprint": candidate_fingerprint,
                 "policy_fingerprint": policy_fingerprint,
                 "read_start": "2020-01-01T00:00:00+00:00",
@@ -367,14 +371,14 @@ async def process_qualification(
         extra={
             "structured_fields": {
                 "qualification_id": str(qualification_id),
-                "campaign_id": str(record.campaign_id),
-                "family_id": str(record.family_id),
-                "provenance": record.provenance,
+                "campaign_id": str(campaign_id),
+                "family_id": str(family_id),
+                "provenance": provenance,
                 "classification": "qualified"
                 if not result.failed_rules
                 else "rejected",
                 "failed_rules": len(result.failed_rules),
-                "evidence_end_exclusive": str(record.evidence_end_exclusive),
+                "evidence_end_exclusive": str(evidence_end_exclusive),
             }
         },
     )

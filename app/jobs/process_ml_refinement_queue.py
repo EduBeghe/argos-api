@@ -139,12 +139,14 @@ async def process_once(
         qualification = await claim_next_qualification(session, worker_id=worker_id)
         if qualification is not None:
             qualification_fields = {
-                "campaign_id": str(qualification.campaign_id),
-                "family_id": str(qualification.family_id),
+                "campaign_id": str(getattr(qualification, "campaign_id", "unknown")),
+                "family_id": str(getattr(qualification, "family_id", "unknown")),
                 "qualification_id": str(qualification.id),
-                "provenance": qualification.provenance,
+                "provenance": str(getattr(qualification, "provenance", "unknown")),
                 "status": qualification.status,
-                "evidence_end_exclusive": str(qualification.evidence_end_exclusive),
+                "evidence_end_exclusive": str(
+                    getattr(qualification, "evidence_end_exclusive", "unknown")
+                ),
             }
             logger.info(
                 "Claimed economic qualification",
