@@ -1154,9 +1154,7 @@ async def test_persistence_compacts_economic_policy_folds_and_enforces_size_limi
             request=refinement_request,
             now=NOW,
         )
-        persisted = await existing_run_evaluation(
-            session, run.id, "e" * 64, refinement_request
-        )
+        persisted = await existing_run_evaluation(session, run.id, "e" * 64)
         assert persisted is not None
         aggregates = persisted.aggregate_metrics["economic_policy_v2_aggregates"]
         assert isinstance(aggregates, list)
