@@ -414,7 +414,10 @@ class MLRefinementEvidenceTooLargeError(ValueError):
 
 
 def _canonical_aggregate_metrics(
-    metrics: dict[str, object], configured: list[str]
+    metrics: dict[str, object],
+    configured: list[str],
+    *,
+    canonicalize_confidence: bool = True,
 ) -> dict[str, object]:
     persisted = cast(dict[str, object], _json_safe(metrics))
     economic_aggregates = persisted.get("economic_policy_v2_aggregates")
@@ -430,17 +433,18 @@ def _canonical_aggregate_metrics(
         persisted["selected_economic_policy_v2"] = {
             str(key): value for key, value in selected_policy.items() if key != "folds"
         }
-    aggregates = metrics.get("confidence_bucket_aggregates")
-    if aggregates is not None:
-        persisted["confidence_bucket_aggregates"] = _canonical_confidence_metrics(
-            aggregates, configured
-        )
-    selected = metrics.get("selected_confidence_bucket")
-    if isinstance(selected, dict):
-        persisted["selected_confidence_bucket"] = {
-            **cast(dict[str, object], _json_safe(selected)),
-            "fraction": _canonical_fraction(selected.get("fraction"), configured),
-        }
+    if canonicalize_confidence:
+        aggregates = metrics.get("confidence_bucket_aggregates")
+        if aggregates is not None:
+            persisted["confidence_bucket_aggregates"] = _canonical_confidence_metrics(
+                aggregates, configured
+            )
+        selected = metrics.get("selected_confidence_bucket")
+        if isinstance(selected, dict):
+            persisted["selected_confidence_bucket"] = {
+                **cast(dict[str, object], _json_safe(selected)),
+                "fraction": _canonical_fraction(selected.get("fraction"), configured),
+            }
     encoded_size = len(
         json.dumps(persisted, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
@@ -474,8 +478,9 @@ async def persist_evaluation(
             not in {"id", "run_id", "reused_from_evaluation_id", "created_at"}
         }
         values["aggregate_metrics"] = _canonical_aggregate_metrics(
-            cast(dict[str, object], reused.aggregate_metrics),
+            reused.aggregate_metrics,
             [str(item) for item in request.confidence_buckets],
+            canonicalize_confidence=False,
         )
         values.update(
             id=uuid4(),
