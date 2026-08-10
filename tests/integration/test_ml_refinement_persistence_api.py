@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -54,6 +55,8 @@ from app.ml.refinement.models import (
     MLRefinementRunRecord,
 )
 from app.ml.refinement.persistence import (
+    MAX_PERSISTED_AGGREGATE_METRICS_BYTES,
+    MLRefinementEvidenceTooLargeError,
     complete_run,
     effective_evaluation_fingerprint,
     existing_run_evaluation,
@@ -1093,3 +1096,104 @@ async def test_concurrent_enqueue_skip_locked_and_stale_recovery(
             )
             == evaluation_count
         )
+
+
+async def test_persistence_compacts_economic_policy_folds_and_enforces_size_limit(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    refinement_request = request(source_run_id, source_result_id)
+    plan = build_refinement_plan(refinement_request)
+    versions = library_versions()
+    async with factory() as session:
+        run = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key="z" * 64,
+            dataset_fingerprint="d" * 64,
+            versions=versions,
+            now=NOW,
+        )
+        candidate = plan.evaluations[0]
+        duplicated_fold = {
+            "policy_fingerprint": "p" * 64,
+            "net_return": "0.01",
+            "trades": [{"payload": "x" * 600_000}],
+            "equity_curve": [["2039-01-01T00:00:00+00:00", "1"]] * 20_000,
+        }
+        aggregate_metrics = {
+            "fold_count": 7,
+            "economic_policy_v2_aggregates": [
+                {
+                    "policy_fingerprint": "p" * 64,
+                    "positive_net_folds": 7,
+                    "folds": [duplicated_fold, duplicated_fold],
+                }
+            ],
+            "selected_economic_policy_v2": {
+                "policy_fingerprint": "p" * 64,
+                "positive_net_folds": 7,
+                "folds": [duplicated_fold, duplicated_fold],
+            },
+        }
+        result = RefinementEvaluationResult(
+            candidate,
+            (),
+            aggregate_metrics,
+            RefinementClassification.PROMISING,
+            (),
+            0.1,
+        )
+        await persist_evaluation(
+            session=session,
+            run_id=run.id,
+            fingerprint="e" * 64,
+            result=result,
+            reused=None,
+            request=refinement_request,
+            now=NOW,
+        )
+        persisted = await existing_run_evaluation(
+            session, run.id, "e" * 64, refinement_request
+        )
+        assert persisted is not None
+        aggregates = persisted.aggregate_metrics["economic_policy_v2_aggregates"]
+        assert isinstance(aggregates, list)
+        assert "folds" not in aggregates[0]
+        selected = persisted.aggregate_metrics["selected_economic_policy_v2"]
+        assert isinstance(selected, dict)
+        assert "folds" not in selected
+        assert (
+            len(
+                json.dumps(
+                    persisted.aggregate_metrics,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            <= MAX_PERSISTED_AGGREGATE_METRICS_BYTES
+        )
+
+        oversized = RefinementEvaluationResult(
+            candidate,
+            (),
+            {"unrelated_payload": "x" * (MAX_PERSISTED_AGGREGATE_METRICS_BYTES + 1)},
+            RefinementClassification.INCOMPLETE,
+            ("incomplete_fold_count",),
+            0.1,
+        )
+        with pytest.raises(
+            MLRefinementEvidenceTooLargeError,
+            match="compacted aggregate metrics exceed",
+        ):
+            await persist_evaluation(
+                session=session,
+                run_id=run.id,
+                fingerprint="o" * 64,
+                result=oversized,
+                reused=None,
+                request=refinement_request,
+                now=NOW,
+            )
+        assert await existing_run_evaluation(session, run.id, "o" * 64) is None
