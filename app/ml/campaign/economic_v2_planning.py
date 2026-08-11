@@ -168,7 +168,7 @@ def build_economic_v2_universe(
                     also_seeded_by=(seed.id,),
                 )
                 duplicate = identities.get(candidate.scientific_identity)
-                if offset == 0 and duplicate is not None:
+                if duplicate is not None:
                     existing = diversified[duplicate]
                     diversified[duplicate] = EconomicV2Family(
                         existing.fingerprint,
