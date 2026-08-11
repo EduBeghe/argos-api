@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -89,6 +90,13 @@ def _feature_policy_matches_family(
 ) -> bool:
     """Validate canonical refinement evidence against its campaign family."""
 
+    feature_policy = evaluation.feature_policy
+    if not isinstance(feature_policy, Mapping) or set(feature_policy) - {
+        "strategy",
+        "variables",
+        "top_k",
+    }:
+        return False
     try:
         planned = planned_evaluation_from_persisted_values(
             fingerprint=evaluation.fingerprint,
@@ -96,7 +104,7 @@ def _feature_policy_matches_family(
             future_duration_seconds=evaluation.future_duration_seconds,
             objective=evaluation.objective,
             hyperparameters=evaluation.hyperparameters,
-            feature_policy=evaluation.feature_policy,
+            feature_policy=feature_policy,
         )
         variant = FeatureVariant(family.feature_variant)
     except (AttributeError, TypeError, ValueError):
