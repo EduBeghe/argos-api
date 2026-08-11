@@ -15,6 +15,7 @@ from app.ml.campaign.contracts import (
     ECONOMIC_POLICY_SEARCH_V2_PRESET,
     ECONOMIC_V2_DIVERSIFIED_FAMILIES,
     CampaignRequest,
+    FeatureVariant,
     campaign_search_spaces,
     seeded_local_search_space,
 )
@@ -183,11 +184,69 @@ def test_seed_offsets_are_bounded_deduplicated_and_record_provenance() -> None:
     )
     universe = build_economic_v2_universe((_source(),), (seed,))
     assert len(universe) <= 600
+    assert len({item.fingerprint for item in universe}) == len(universe)
     assert len({item.scientific_identity for item in universe}) == len(universe)
     assert any(seed.id in item.also_seeded_by for item in universe)
     assert all(
         3600 <= item.future_duration_seconds <= 7 * 24 * 3600 for item in universe
     )
+
+
+def test_two_48_hour_seeds_add_only_nonduplicate_local_horizons() -> None:
+    source = _source()
+    seeds = (
+        SeedFamily(
+            uuid4(),
+            source.source_run_id,
+            ScreeningEngine.RIDGE,
+            48 * 3600,
+            PredictionObjective.FUTURE_RETURN_REGRESSION,
+            FeatureVariant.TOP_64,
+            "e" * 64,
+            (("alpha", 1.0), ("fit_intercept", True)),
+        ),
+        SeedFamily(
+            uuid4(),
+            source.source_run_id,
+            ScreeningEngine.CATBOOST,
+            48 * 3600,
+            PredictionObjective.FUTURE_RETURN_REGRESSION,
+            FeatureVariant.TOP_16,
+            "f" * 64,
+            (),
+        ),
+    )
+
+    universe = build_economic_v2_universe((source,), seeds)
+
+    assert len(universe) == 438
+    assert sum(item.search_track == "seeded_local" for item in universe) == 6
+    assert len({item.fingerprint for item in universe}) == 438
+    assert len({item.scientific_identity for item in universe}) == 438
+    for seed in seeds:
+        seeded = tuple(item for item in universe if seed.id in item.also_seeded_by)
+        assert len(seeded) == 5
+        assert {item.future_duration_seconds // 3600 for item in seeded} == {
+            36,
+            42,
+            48,
+            54,
+            60,
+        }
+        assert {
+            item.future_duration_seconds // 3600
+            for item in seeded
+            if item.search_track == "diversified"
+        } == {36, 48}
+        assert {
+            item.future_duration_seconds // 3600
+            for item in seeded
+            if item.search_track == "seeded_local"
+        } == {42, 54, 60}
+        assert all(item.engine is seed.engine for item in seeded)
+        assert all(item.objective is seed.objective for item in seeded)
+        assert all(item.feature_variant is seed.feature_variant for item in seeded)
+        assert all(item.source == source for item in seeded)
 
 
 @pytest.mark.parametrize("engine", tuple(ScreeningEngine))

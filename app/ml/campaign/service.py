@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -25,6 +26,7 @@ from app.ml.refinement.persistence import (
     completed_run_is_complete,
     incompatible_run_evaluations,
 )
+from app.ml.refinement.planning import planned_evaluation_from_persisted_values
 from app.ml.screening.config import ML_MODEL_SCREENING_VERSION, ScreeningEngine
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
@@ -80,6 +82,38 @@ class CampaignSourceError(ValueError):
 class CampaignEnqueueResult:
     campaign: MLSearchCampaignRecord
     created: bool
+
+
+def _feature_policy_matches_family(
+    evaluation: MLRefinementEvaluationRecord,
+    family: MLSearchCampaignFamilyRecord,
+) -> bool:
+    """Validate canonical refinement evidence against its campaign family."""
+
+    feature_policy = evaluation.feature_policy
+    if not isinstance(feature_policy, Mapping) or set(feature_policy) - {
+        "strategy",
+        "variables",
+        "top_k",
+    }:
+        return False
+    try:
+        planned = planned_evaluation_from_persisted_values(
+            fingerprint=evaluation.fingerprint,
+            engine=evaluation.engine,
+            future_duration_seconds=evaluation.future_duration_seconds,
+            objective=evaluation.objective,
+            hyperparameters=evaluation.hyperparameters,
+            feature_policy=feature_policy,
+        )
+        variant = FeatureVariant(family.feature_variant)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if planned.explicit_variables is not None:
+        return False
+    if variant is FeatureVariant.ALL:
+        return planned.feature_strategy == "all" and planned.top_k is None
+    return planned.feature_strategy == "top_k" and planned.top_k == variant.top_k
 
 
 def _experiment_key(
@@ -210,6 +244,11 @@ async def _validated_seeds(
         run_complete = (
             await completed_run_is_complete(session, run) if run is not None else False
         )
+        feature_policy_matches = (
+            _feature_policy_matches_family(evaluation, family)
+            if evaluation is not None
+            else False
+        )
         if (
             campaign is None
             or campaign.status != "completed"
@@ -226,7 +265,7 @@ async def _validated_seeds(
             or evaluation.engine != family.engine
             or evaluation.objective != family.objective
             or evaluation.future_duration_seconds != family.future_duration_seconds
-            or evaluation.feature_policy.get("variant") != family.feature_variant
+            or not feature_policy_matches
             or protected is not None
         ):
             raise CampaignSourceError(

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -30,6 +31,7 @@ from app.ml.campaign.promotion import (
     is_strong_candidate,
     passes_stage_gate,
 )
+from app.ml.campaign.service import _feature_policy_matches_family
 from app.ml.contract import FUTURE_DURATIONS
 from app.ml.refinement.contracts import (
     MLRefinementRequest,
@@ -127,6 +129,62 @@ def family() -> MLSearchCampaignFamilyRecord:
         deterministic_ordinal=0,
         created_at=datetime.now(UTC),
     )
+
+
+@pytest.mark.parametrize(
+    ("variant", "feature_policy"),
+    (
+        ("all", {"strategy": "all"}),
+        ("all", {"strategy": "all", "variables": None, "top_k": None}),
+        ("top_k_16", {"strategy": "top_k", "top_k": 16}),
+        ("top_k_32", {"strategy": "top_k", "variables": None, "top_k": 32}),
+        ("top_k_64", {"strategy": "top_k", "top_k": 64}),
+        ("top_k_96", {"strategy": "top_k", "top_k": 96}),
+    ),
+)
+def test_canonical_feature_policy_matches_seed_family(
+    variant: str, feature_policy: dict[str, object]
+) -> None:
+    candidate = evaluation("e" * 64, median="0.01", worst="-0.01")
+    candidate.objective = PredictionObjective.FUTURE_RETURN_REGRESSION.value
+    candidate.feature_policy = feature_policy
+    seed_family = family()
+    seed_family.feature_variant = variant
+
+    assert _feature_policy_matches_family(candidate, seed_family)
+
+
+@pytest.mark.parametrize(
+    ("variant", "feature_policy"),
+    (
+        ("all", {"strategy": "top_k", "top_k": 16}),
+        ("all", {"strategy": "all", "top_k": 16}),
+        ("all", {"strategy": "all", "variables": ["close"]}),
+        ("top_k_16", {"strategy": "top_k", "top_k": 32}),
+        ("top_k_64", {"strategy": "top_k", "top_k": True}),
+        ("top_k_96", {"strategy": "top_k", "top_k": None}),
+        ("top_k_32", {"strategy": "explicit", "variables": ["close"]}),
+        ("top_k_32", {"strategy": "unknown", "top_k": 32}),
+        ("top_k_32", {}),
+        (
+            "top_k_16",
+            {"strategy": "top_k", "top_k": 16, "variant": "all"},
+        ),
+        ("top_k_16", {"strategy": "top_k", "top_k": 16, "note": "legacy"}),
+        ("unknown", {"strategy": "top_k", "top_k": 16}),
+        ("top_k_16", "not-a-mapping"),
+    ),
+)
+def test_incompatible_feature_policy_fails_closed(
+    variant: str, feature_policy: object
+) -> None:
+    candidate = evaluation("e" * 64, median="0.01", worst="-0.01")
+    candidate.objective = PredictionObjective.FUTURE_RETURN_REGRESSION.value
+    candidate.feature_policy = cast(dict[str, object], feature_policy)
+    seed_family = family()
+    seed_family.feature_variant = variant
+
+    assert not _feature_policy_matches_family(candidate, seed_family)
 
 
 def test_contract_contains_exact_policy_values() -> None:

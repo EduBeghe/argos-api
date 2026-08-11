@@ -33,6 +33,7 @@ from app.ml.campaign.contracts import (
     FAMILIES_PER_INSTRUMENT,
     CampaignRequest,
     DiagnosticQualificationRequest,
+    campaign_search_spaces,
 )
 from app.ml.campaign.coordinator import coordinate_next_campaign
 from app.ml.campaign.diagnostic_qualification import (
@@ -55,6 +56,7 @@ from app.ml.campaign.models import (
 from app.ml.campaign.planning import CampaignFamily, SourceInstrument
 from app.ml.campaign.service import (
     CampaignConflictError,
+    CampaignEnqueueResult,
     CampaignSourceError,
     cancel_campaign,
     enqueue_campaign,
@@ -691,6 +693,291 @@ async def test_v2_invalid_seed_rejects_the_whole_enqueue_without_writes(
             )
             == 0
         )
+
+
+async def test_v2_canonical_seed_policies_create_exact_idempotent_universe(
+    enqueue_factory: tuple[async_sessionmaker[AsyncSession], UUID],
+) -> None:
+    sessions, source_id = enqueue_factory
+    seed_campaign = campaign(status="completed", covered=True, maximum_evaluations=3)
+    seed_campaign.preset = ECONOMIC_POLICY_SEARCH_V2_PRESET
+    seed_campaign.families_total = 3
+    seed_campaign.families_covered = 3
+    seeds: list[MLSearchCampaignFamilyRecord] = []
+    runs: list[MLRefinementRunRecord] = []
+    evaluations: list[MLRefinementEvaluationRecord] = []
+    async with sessions() as session:
+        screening_results = {
+            row.engine: row.id
+            for row in (
+                await session.scalars(
+                    select(MLModelScreeningResultRecord).where(
+                        MLModelScreeningResultRecord.run_id == source_id,
+                        MLModelScreeningResultRecord.engine.in_(("ridge", "catboost")),
+                        MLModelScreeningResultRecord.future_duration_seconds
+                        == 48 * 3600,
+                    )
+                )
+            ).all()
+        }
+        for ordinal, (engine_name, feature_variant, top_k) in enumerate(
+            (
+                ("ridge", "top_k_64", 64),
+                ("catboost", "top_k_16", 16),
+                ("ridge", "all", None),
+            )
+        ):
+            run = refinement_run(
+                source_id, screening_results[engine_name], status="completed"
+            )
+            run.dataset_fingerprint = "q" * 64
+            run.evaluations_computed = 1
+            run.evaluations_selected = 1
+            candidate = evaluation(run.id, fingerprint=f"{ordinal + 1:064x}")
+            candidate.engine = engine_name
+            candidate.future_duration_seconds = 48 * 3600
+            canonical = next(
+                item
+                for item in campaign_search_spaces()
+                if item.engine.value == engine_name
+            )
+            candidate.hyperparameters = {
+                name: getattr(canonical, name).expand()[0]
+                for name in type(canonical).model_fields
+                if name != "engine"
+            }
+            candidate.feature_policy = (
+                {"strategy": "all"}
+                if top_k is None
+                else {
+                    "strategy": "top_k",
+                    "variables": None,
+                    "top_k": top_k,
+                }
+            )
+            seed = family(seed_campaign.id, source_id, state="survived")
+            seed.dataset_fingerprint = "q" * 64
+            seed.engine = engine_name
+            seed.future_duration_seconds = 48 * 3600
+            seed.feature_variant = feature_variant
+            seed.best_evaluation_id = candidate.id
+            seed.deterministic_ordinal = ordinal
+            seeds.append(seed)
+            runs.append(run)
+            evaluations.append(candidate)
+
+        session.add(seed_campaign)
+        await session.flush()
+        session.add_all(runs)
+        await session.flush()
+        session.add_all(evaluations)
+        await session.flush()
+        session.add_all(seeds)
+        await session.commit()
+
+    request = CampaignRequest(
+        source_screening_run_ids=(source_id,),
+        preset=ECONOMIC_POLICY_SEARCH_V2_PRESET,
+        seed_family_ids=tuple(item.id for item in seeds[:2]),
+        maximum_evaluations=438,
+    )
+
+    async with sessions() as session:
+        before = (
+            await session.scalar(
+                select(func.count()).select_from(MLSearchCampaignRecord)
+            ),
+            await session.scalar(
+                select(func.count()).select_from(MLSearchCampaignSourceRecord)
+            ),
+            await session.scalar(
+                select(func.count()).select_from(MLSearchCampaignFamilyRecord)
+            ),
+        )
+        invalid = await session.get(MLRefinementEvaluationRecord, evaluations[1].id)
+        assert invalid is not None
+        canonical_policy = dict(invalid.feature_policy)
+        invalid.feature_policy = {**canonical_policy, "variant": "top_k_16"}
+        await session.commit()
+        with pytest.raises(
+            CampaignSourceError,
+            match=(
+                f"seed family {seeds[1].id} lacks compatible owned development evidence"
+            ),
+        ):
+            await enqueue_campaign(session, request, now=NOW)
+        after = (
+            await session.scalar(
+                select(func.count()).select_from(MLSearchCampaignRecord)
+            ),
+            await session.scalar(
+                select(func.count()).select_from(MLSearchCampaignSourceRecord)
+            ),
+            await session.scalar(
+                select(func.count()).select_from(MLSearchCampaignFamilyRecord)
+            ),
+        )
+        assert after == before
+        await session.refresh(invalid)
+        invalid.feature_policy = canonical_policy
+        await session.commit()
+
+    async with sessions() as session:
+        with pytest.raises(CampaignSourceError, match="exact minimum is 438"):
+            await enqueue_campaign(
+                session,
+                request.model_copy(update={"maximum_evaluations": 437}),
+                now=NOW,
+            )
+
+    async def submit(candidate_request: CampaignRequest) -> CampaignEnqueueResult:
+        async with sessions() as session:
+            return await enqueue_campaign(session, candidate_request, now=NOW)
+
+    concurrent = await asyncio.gather(submit(request), submit(request))
+    assert sum(item.created for item in concurrent) == 1
+    assert len({item.campaign.id for item in concurrent}) == 1
+    created = next(item for item in concurrent if item.created)
+
+    async with sessions() as session:
+        repeated = await enqueue_campaign(session, request, now=NOW)
+        reversed_seed_ids = await enqueue_campaign(
+            session,
+            request.model_copy(
+                update={"seed_family_ids": tuple(reversed(request.seed_family_ids))}
+            ),
+            now=NOW,
+        )
+        persisted = tuple(
+            (
+                await session.scalars(
+                    select(MLSearchCampaignFamilyRecord)
+                    .where(
+                        MLSearchCampaignFamilyRecord.campaign_id == created.campaign.id
+                    )
+                    .order_by(MLSearchCampaignFamilyRecord.deterministic_ordinal)
+                )
+            ).all()
+        )
+        assert repeated.created is False
+        assert reversed_seed_ids.created is False
+        assert repeated.campaign.id == created.campaign.id
+        assert reversed_seed_ids.campaign.id == created.campaign.id
+        assert len(persisted) == 438
+        assert [item.deterministic_ordinal for item in persisted] == list(range(438))
+        assert sum(item.search_track == "seeded_local" for item in persisted) == 6
+        assert len({item.fingerprint for item in persisted}) == 438
+        scientific_identities = {
+            (
+                item.source_screening_run_id,
+                item.engine,
+                item.future_duration_seconds,
+                item.objective,
+                item.feature_variant,
+            )
+            for item in persisted
+        }
+        assert len(scientific_identities) == 438
+        for seed in seeds[:2]:
+            seeded = tuple(
+                item for item in persisted if str(seed.id) in item.seed_provenance
+            )
+            assert {item.future_duration_seconds // 3600 for item in seeded} == {
+                36,
+                42,
+                48,
+                54,
+                60,
+            }
+            assert {
+                item.future_duration_seconds // 3600
+                for item in seeded
+                if item.search_track == "diversified"
+            } == {36, 48}
+            assert all(
+                item.seed_family_id is None
+                for item in seeded
+                if item.search_track == "diversified"
+            )
+            local = tuple(
+                item for item in seeded if item.search_track == "seeded_local"
+            )
+            assert {item.future_duration_seconds // 3600 for item in local} == {
+                42,
+                54,
+                60,
+            }
+            assert all(item.seed_family_id == seed.id for item in local)
+            assert all(item.engine == seed.engine for item in seeded)
+            assert all(item.objective == seed.objective for item in seeded)
+            assert all(item.feature_variant == seed.feature_variant for item in seeded)
+            assert all(item.source_screening_run_id == source_id for item in seeded)
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignRecord)
+                .where(
+                    MLSearchCampaignRecord.experiment_key
+                    == created.campaign.experiment_key
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignSourceRecord)
+                .where(MLSearchCampaignSourceRecord.campaign_id == created.campaign.id)
+            )
+            == 1
+        )
+
+    all_request = CampaignRequest(
+        source_screening_run_ids=(source_id,),
+        preset=ECONOMIC_POLICY_SEARCH_V2_PRESET,
+        seed_family_ids=(seeds[2].id,),
+        maximum_evaluations=435,
+    )
+    async with sessions() as session:
+        all_created = await enqueue_campaign(session, all_request, now=NOW)
+        assert all_created.created is True
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(MLSearchCampaignFamilyRecord)
+                .where(
+                    MLSearchCampaignFamilyRecord.campaign_id == all_created.campaign.id
+                )
+            )
+            == 435
+        )
+
+    async with sessions() as session:
+        await session.execute(
+            delete(MLSearchCampaignFamilyRecord).where(
+                MLSearchCampaignFamilyRecord.campaign_id.in_(
+                    (created.campaign.id, all_created.campaign.id)
+                )
+            )
+        )
+        await session.execute(
+            delete(MLSearchCampaignRecord).where(
+                MLSearchCampaignRecord.id.in_(
+                    (created.campaign.id, all_created.campaign.id)
+                )
+            )
+        )
+        await session.execute(
+            delete(MLSearchCampaignRecord).where(
+                MLSearchCampaignRecord.id == seed_campaign.id
+            )
+        )
+        await session.execute(
+            delete(MLRefinementRunRecord).where(
+                MLRefinementRunRecord.source_screening_run_id == source_id
+            )
+        )
+        await session.commit()
 
 
 async def test_diagnostic_enqueue_is_atomic_and_reuses_six_selected_families(
