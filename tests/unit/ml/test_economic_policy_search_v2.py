@@ -20,6 +20,7 @@ from app.ml.campaign.contracts import (
     seeded_local_search_space,
 )
 from app.ml.campaign.economic_v2_calculation import (
+    aggregate_policy_folds,
     evaluate_policy_grid_fold,
     evaluate_strategy_policy,
 )
@@ -184,6 +185,7 @@ def test_seed_offsets_are_bounded_deduplicated_and_record_provenance() -> None:
     universe = build_economic_v2_universe((_source(),), (seed,))
     assert len(universe) <= 600
     assert len({item.fingerprint for item in universe}) == len(universe)
+    assert len({item.scientific_identity for item in universe}) == len(universe)
     assert any(seed.id in item.also_seeded_by for item in universe)
     assert all(
         3600 <= item.future_duration_seconds <= 7 * 24 * 3600 for item in universe
@@ -217,13 +219,34 @@ def test_two_48_hour_seeds_add_only_nonduplicate_local_horizons() -> None:
 
     universe = build_economic_v2_universe((source,), seeds)
 
-    assert len(universe) == 440
-    assert sum(item.search_track == "seeded_local" for item in universe) == 8
-    assert len({item.fingerprint for item in universe}) == 440
+    assert len(universe) == 438
+    assert sum(item.search_track == "seeded_local" for item in universe) == 6
+    assert len({item.fingerprint for item in universe}) == 438
+    assert len({item.scientific_identity for item in universe}) == 438
     for seed in seeds:
         seeded = tuple(item for item in universe if seed.id in item.also_seeded_by)
         assert len(seeded) == 5
-        assert sum(item.future_duration_seconds == 48 * 3600 for item in seeded) == 1
+        assert {item.future_duration_seconds // 3600 for item in seeded} == {
+            36,
+            42,
+            48,
+            54,
+            60,
+        }
+        assert {
+            item.future_duration_seconds // 3600
+            for item in seeded
+            if item.search_track == "diversified"
+        } == {36, 48}
+        assert {
+            item.future_duration_seconds // 3600
+            for item in seeded
+            if item.search_track == "seeded_local"
+        } == {42, 54, 60}
+        assert all(item.engine is seed.engine for item in seeded)
+        assert all(item.objective is seed.objective for item in seeded)
+        assert all(item.feature_variant is seed.feature_variant for item in seeded)
+        assert all(item.source == source for item in seeded)
 
 
 @pytest.mark.parametrize("engine", tuple(ScreeningEngine))
@@ -533,3 +556,28 @@ def test_trend_policy_requires_finite_preceding_ema_and_strict_alignment() -> No
         slippage_rate=Decimal("0.0005"),
     )
     assert result["eligible_observations"] == 5
+
+
+def test_policy_aggregation_omits_duplicated_fold_payloads() -> None:
+    fold = {
+        "policy_fingerprint": "p" * 64,
+        "strategy_policy_version": 2,
+        "confidence_fraction": "0.10",
+        "holding_multiplier": "1",
+        "holding_candles": 12,
+        "regime_policy": "all_regimes",
+        "eligible_observations": 10,
+        "round_trips": 2,
+        "net_return": "0.01",
+        "buy_and_hold_return": "0.00",
+        "maximum_drawdown": "0.02",
+        "return_1_5x": "0.01",
+        "return_2x": "0.01",
+        "trades": [{"payload": "x" * 100_000}],
+        "equity_curve": [["2039-01-01T00:00:00+00:00", "1"]],
+    }
+    result = aggregate_policy_folds(((fold,),))
+    assert len(result) == 1
+    assert "folds" not in result[0]
+    assert result[0]["policy_fingerprint"] == "p" * 64
+    assert result[0]["round_trips"] == 2
