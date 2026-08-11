@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -165,14 +166,21 @@ def test_canonical_feature_policy_matches_seed_family(
         ("top_k_32", {"strategy": "explicit", "variables": ["close"]}),
         ("top_k_32", {"strategy": "unknown", "top_k": 32}),
         ("top_k_32", {}),
+        (
+            "top_k_16",
+            {"strategy": "top_k", "top_k": 16, "variant": "all"},
+        ),
+        ("top_k_16", {"strategy": "top_k", "top_k": 16, "note": "legacy"}),
+        ("unknown", {"strategy": "top_k", "top_k": 16}),
+        ("top_k_16", "not-a-mapping"),
     ),
 )
 def test_incompatible_feature_policy_fails_closed(
-    variant: str, feature_policy: dict[str, object]
+    variant: str, feature_policy: object
 ) -> None:
     candidate = evaluation("e" * 64, median="0.01", worst="-0.01")
     candidate.objective = PredictionObjective.FUTURE_RETURN_REGRESSION.value
-    candidate.feature_policy = feature_policy
+    candidate.feature_policy = cast(dict[str, object], feature_policy)
     seed_family = family()
     seed_family.feature_variant = variant
 
