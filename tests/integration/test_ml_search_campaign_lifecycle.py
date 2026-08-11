@@ -801,12 +801,19 @@ async def test_v2_canonical_seed_policies_create_exact_idempotent_universe(
         assert family_count == 440
 
     async with sessions() as session:
-        campaign_ids = select(MLSearchCampaignRecord.id).where(
-            MLSearchCampaignRecord.experiment_key.like(f"{PREFIX}%")
+        await session.execute(
+            delete(MLSearchCampaignFamilyRecord).where(
+                MLSearchCampaignFamilyRecord.campaign_id == created.campaign.id
+            )
         )
         await session.execute(
             delete(MLSearchCampaignRecord).where(
-                MLSearchCampaignRecord.id.in_(campaign_ids)
+                MLSearchCampaignRecord.id == created.campaign.id
+            )
+        )
+        await session.execute(
+            delete(MLSearchCampaignRecord).where(
+                MLSearchCampaignRecord.id == seed_campaign.id
             )
         )
         await session.execute(
