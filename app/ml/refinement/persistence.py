@@ -2,7 +2,7 @@ import hashlib
 import json
 import logging
 import math
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
@@ -18,7 +18,7 @@ from app.ml.protected.contracts import (
     TEMPORAL_MANIFEST_VERSION,
     canonicalize_confidence_bucket,
 )
-from app.ml.protected.models import MLTemporalManifestRecord
+from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
 from app.ml.protected.temporal import reconstruct_temporal_manifest
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
@@ -57,6 +57,15 @@ class SourceScreeningMismatchError(MLRefinementError):
 
 class SourceScreeningIncompleteError(MLRefinementError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class IncompleteRunRecovery:
+    run: MLRefinementRunRecord
+    prior_persisted_count: int
+    preserved_count: int
+    deleted_out_of_plan_count: int
+    deleted_incompatible_count: int
 
 
 def decimal_metric(value: float) -> Decimal:
@@ -163,6 +172,171 @@ async def incompatible_run_evaluations(
             future_duration_seconds=row.future_duration_seconds,
         ).compatible
     )
+
+
+async def requeue_incomplete_completed_run(
+    *,
+    session: AsyncSession,
+    run: MLRefinementRunRecord,
+    request: MLRefinementRequest,
+    plan: RefinementPlan,
+    dataset_fingerprint: str,
+    versions: dict[str, str],
+    caller_context: str | None = None,
+) -> IncompleteRunRecovery:
+    """Requeue one locked incomplete run without committing its transaction."""
+
+    expected_key = experiment_key(
+        request=request,
+        dataset_fingerprint=dataset_fingerprint,
+        versions=versions,
+    )
+    identity_matches = (
+        run.experiment_key == expected_key
+        and run.source_screening_run_id == request.source_screening_run_id
+        and run.source_screening_result_id == request.source_screening_result_id
+        and run.dataset_fingerprint == dataset_fingerprint
+        and run.contract_version == ML_REFINEMENT_CONTRACT_VERSION
+        and run.classification_version == ML_REFINEMENT_CLASSIFICATION_VERSION
+        and run.variable_registry_version == VARIABLE_REGISTRY_VERSION
+        and run.missing_data_policy_version == MISSING_DATA_POLICY_VERSION
+        and run.library_versions == versions
+        and run.normalized_configuration == request.normalized_payload()
+        and run.combinations_planned == plan.total_combinations
+        and run.maximum_trials == request.maximum_trials
+        and run.maximum_runtime_seconds == request.maximum_runtime_seconds
+        # Notes are provenance text excluded from normalized scientific identity.
+        # Preserve the historical value rather than requiring or rewriting it.
+    )
+    if not identity_matches:
+        raise MLRefinementError(
+            "incomplete completed refinement has incompatible scientific identity"
+        )
+    if run.status != "completed":
+        raise MLRefinementError("only a completed refinement can be recovered")
+    if await completed_run_is_complete(session, run, request):
+        raise MLRefinementError("a complete completed refinement cannot be recovered")
+
+    allowed_fingerprints = {
+        effective_evaluation_fingerprint(
+            dataset_fingerprint=dataset_fingerprint,
+            candidate_fingerprint=candidate.fingerprint,
+            engine=candidate.engine.value,
+            versions=versions,
+            deterministic_seed=request.deterministic_seed,
+        )
+        for candidate in plan.evaluations
+    }
+    rows = tuple(
+        (
+            await session.scalars(
+                select(MLRefinementEvaluationRecord)
+                .where(MLRefinementEvaluationRecord.run_id == run.id)
+                .with_for_update()
+            )
+        ).all()
+    )
+    out_of_plan_ids: list[UUID] = []
+    incompatible_ids: list[UUID] = []
+    for row in rows:
+        if row.fingerprint not in allowed_fingerprints:
+            out_of_plan_ids.append(row.id)
+        elif not economic_policy_evidence_compatibility(
+            aggregate_metrics=row.aggregate_metrics,
+            request=request,
+            future_duration_seconds=row.future_duration_seconds,
+        ).compatible:
+            incompatible_ids.append(row.id)
+    deleted_ids = (*out_of_plan_ids, *incompatible_ids)
+    if deleted_ids:
+        temporal_manifest_evaluation_ids = set(
+            (
+                await session.scalars(
+                    select(MLTemporalManifestRecord.evaluation_id).where(
+                        MLTemporalManifestRecord.evaluation_id.in_(deleted_ids)
+                    )
+                )
+            ).all()
+        )
+        final_validation_evaluation_ids = set(
+            (
+                await session.scalars(
+                    select(MLFinalValidationRecord.evaluation_id).where(
+                        MLFinalValidationRecord.evaluation_id.in_(deleted_ids)
+                    )
+                )
+            ).all()
+        )
+        protected_evaluation_ids = (
+            temporal_manifest_evaluation_ids | final_validation_evaluation_ids
+        )
+        if protected_evaluation_ids:
+            logger.warning(
+                "Protected ML refinement evidence prevented automatic recovery",
+                extra={
+                    "structured_fields": {
+                        "run_id": str(run.id),
+                        "protected_candidate_count": len(protected_evaluation_ids),
+                        "has_temporal_manifest_references": bool(
+                            temporal_manifest_evaluation_ids
+                        ),
+                        "has_final_validation_references": bool(
+                            final_validation_evaluation_ids
+                        ),
+                        "caller_context": caller_context or "unknown",
+                    }
+                },
+            )
+            raise MLRefinementError(
+                "incomplete refinement evidence is protected and cannot be "
+                "automatically replaced"
+            )
+        await session.execute(
+            delete(MLRefinementEvaluationRecord).where(
+                MLRefinementEvaluationRecord.id.in_(deleted_ids)
+            )
+        )
+
+    run.status = "queued"
+    run.evaluations_selected = len(plan.evaluations)
+    run.evaluations_computed = 0
+    run.evaluations_reused = 0
+    run.evaluations_omitted = plan.omitted_by_trial_budget
+    run.budget_exhausted = plan.omitted_by_trial_budget > 0
+    run.termination_reason = None
+    run.started_at = None
+    run.completed_at = None
+    run.failed_at = None
+    run.failure_type = None
+    run.failure_message = None
+    run.elapsed_seconds = None
+    run.worker_id = None
+    run.claimed_at = None
+    run.heartbeat_at = None
+    run.cancellation_requested_at = None
+    preserved_count = len(rows) - len(deleted_ids)
+    recovery = IncompleteRunRecovery(
+        run=run,
+        prior_persisted_count=len(rows),
+        preserved_count=preserved_count,
+        deleted_out_of_plan_count=len(out_of_plan_ids),
+        deleted_incompatible_count=len(incompatible_ids),
+    )
+    logger.warning(
+        "Requeued incomplete completed ML refinement",
+        extra={
+            "structured_fields": {
+                "run_id": str(run.id),
+                "prior_persisted_count": recovery.prior_persisted_count,
+                "preserved_count": recovery.preserved_count,
+                "deleted_out_of_plan_count": recovery.deleted_out_of_plan_count,
+                "deleted_incompatible_count": recovery.deleted_incompatible_count,
+                "evaluations_selected": run.evaluations_selected,
+                "caller_context": caller_context or "unknown",
+            }
+        },
+    )
+    return recovery
 
 
 async def start_run(
