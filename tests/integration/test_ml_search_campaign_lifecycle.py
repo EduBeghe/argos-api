@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import get_settings
 from app.jobs import process_ml_refinement_queue as refinement_worker
+from app.market.catalog import Instrument
+from app.market.enums import Asset, Interval, MarketType, Provider
 from app.ml.campaign import economic_v2_qualification as qualification_calculation
 from app.ml.campaign import economic_v2_queue as qualification_queue
 from app.ml.campaign import planning as campaign_planning
@@ -65,10 +67,12 @@ from app.ml.campaign.service import (
 )
 from app.ml.contract import (
     DEVELOPMENT_START,
+    FINAL_TEST_START,
     FUTURE_DURATIONS,
     QUALIFICATION_END,
     temporal_fold_definitions,
 )
+from app.ml.dataset import MLExperimentDataset, build_ml_experiment_dataset
 from app.ml.gaps import datetime_to_ns
 from app.ml.protected.audit import assemble_family_audit
 from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
@@ -78,6 +82,7 @@ from app.ml.protected.queue import (
     enqueue_manifest_reconstruction,
 )
 from app.ml.protected.temporal import temporal_manifest_fingerprint
+from app.ml.reader import candle_columns
 from app.ml.refinement.contracts import MLRefinementRequest
 from app.ml.refinement.models import (
     MLRefinementEvaluationRecord,
@@ -97,6 +102,28 @@ from app.ml.screening.models import (
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 PREFIX = "ml-campaign-lifecycle-"
 NOW = datetime(2040, 1, 1, tzinfo=UTC)
+
+
+def minimal_development_dataset() -> MLExperimentDataset:
+    candle_open = DEVELOPMENT_START
+    return build_ml_experiment_dataset(
+        instrument=Instrument(
+            Asset.BTC_USDT,
+            Provider.BINANCE,
+            MarketType.SPOT,
+            Interval.FIVE_MINUTES,
+        ),
+        columns=candle_columns(
+            open_times=[candle_open],
+            close_times=[candle_open + timedelta(minutes=5, microseconds=-1)],
+            open_prices=[100.0],
+            high_prices=[101.0],
+            low_prices=[99.0],
+            close_prices=[100.5],
+            volumes=[10.0],
+        ),
+        requested_end=FINAL_TEST_START,
+    )
 
 
 def refinement_request(source_id: UUID, result_id: UUID) -> MLRefinementRequest:
@@ -1593,6 +1620,133 @@ async def test_initial_coordinator_claim_sets_runtime_clock_once(
         )
 
 
+async def test_campaign_recovers_incomplete_completed_run_with_different_notes(
+    factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions, source_id, _ = factory
+    record = campaign(status="running", first_claimed_at=NOW)
+    family_record = family(record.id, source_id, state="pending")
+    async with sessions() as session:
+        session.add(record)
+        await session.flush()
+        session.add(family_record)
+        await session.commit()
+
+    # First coordination materializes the exact scientific child identity.
+    async with sessions() as session:
+        assert await coordinate_next_campaign(session, now=NOW)
+    async with sessions() as session:
+        original_child = await session.scalar(
+            select(MLSearchCampaignChildRecord).where(
+                MLSearchCampaignChildRecord.campaign_id == record.id
+            )
+        )
+        assert original_child is not None
+        run = await session.get(MLRefinementRunRecord, original_child.refinement_run_id)
+        persisted_family = await session.get(
+            MLSearchCampaignFamilyRecord, family_record.id
+        )
+        assert run is not None
+        assert persisted_family is not None
+        run.status = "completed"
+        run.evaluations_selected = 1
+        run.evaluations_computed = 1
+        run.evaluations_reused = 0
+        run.completed_at = NOW
+        run.notes = "historical provenance from a different campaign family"
+        await session.delete(original_child)
+        persisted_family.state = "pending"
+        await session.commit()
+        run_id = run.id
+
+    # The new campaign note differs, but notes are not scientific identity.
+    async with sessions() as session:
+        assert await coordinate_next_campaign(session, now=NOW + timedelta(seconds=1))
+    async with sessions() as session:
+        recovered = await session.get(MLRefinementRunRecord, run_id)
+        persisted_campaign = await session.get(MLSearchCampaignRecord, record.id)
+        children = tuple(
+            (
+                await session.scalars(
+                    select(MLSearchCampaignChildRecord).where(
+                        MLSearchCampaignChildRecord.campaign_id == record.id
+                    )
+                )
+            ).all()
+        )
+        assert recovered is not None
+        assert persisted_campaign is not None
+        assert recovered.status == "queued"
+        assert (
+            recovered.notes == "historical provenance from a different campaign family"
+        )
+        assert persisted_campaign.status == "running"
+        assert len(children) == 1
+        assert children[0].refinement_run_id == run_id
+
+    monkeypatch.setattr(refinement_worker, "fail_stale_protected_work", AsyncMock())
+    monkeypatch.setattr(
+        refinement_worker, "claim_protected_work", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(refinement_worker, "fail_stale_qualifications", AsyncMock())
+    monkeypatch.setattr(
+        refinement_worker, "claim_next_qualification", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(refinement_worker, "fail_stale_runs", AsyncMock(return_value=0))
+    monkeypatch.setattr(refinement_worker, "validate_engine_dependencies", lambda: None)
+    dataset = minimal_development_dataset()
+    monkeypatch.setattr(
+        refinement_worker,
+        "load_refinement_identity_metadata",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                fingerprint="d" * 64,
+                instrument=dataset.metadata.instrument,
+                requested_start=DEVELOPMENT_START,
+                requested_end=FINAL_TEST_START,
+                candle_count=55_000,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        refinement_worker,
+        "validate_dataset_identity",
+        lambda **_kwargs: SimpleNamespace(structured_fields=lambda: {}),
+    )
+    monkeypatch.setattr(
+        refinement_worker,
+        "load_ml_development_dataset",
+        AsyncMock(return_value=dataset),
+    )
+
+    assert await refinement_worker.process_once(
+        sessions, worker_id="campaign-recovery-worker", stale_after=timedelta(hours=2)
+    )
+    async with sessions() as session:
+        completed = await session.get(MLRefinementRunRecord, run_id)
+        assert completed is not None
+        assert completed.status == "completed"
+        assert completed.evaluations_selected == 1
+        assert (
+            await session.scalar(
+                select(func.count(MLRefinementEvaluationRecord.id)).where(
+                    MLRefinementEvaluationRecord.run_id == run_id
+                )
+            )
+            == 1
+        )
+
+    async with sessions() as session:
+        assert await coordinate_next_campaign(session, now=NOW + timedelta(seconds=2))
+    async with sessions() as session:
+        advanced_family = await session.get(
+            MLSearchCampaignFamilyRecord, family_record.id
+        )
+        assert advanced_family is not None
+        assert advanced_family.current_stage == 1
+
+
 async def test_retry_reclaim_preserves_original_runtime_clock(
     factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
 ) -> None:
@@ -2554,3 +2708,4 @@ async def test_other_evidence_failure_still_blocks_manifest_enqueue(
             )
             == 0
         )
+
