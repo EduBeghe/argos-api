@@ -205,7 +205,8 @@ async def requeue_incomplete_completed_run(
         and run.combinations_planned == plan.total_combinations
         and run.maximum_trials == request.maximum_trials
         and run.maximum_runtime_seconds == request.maximum_runtime_seconds
-        and run.notes == request.notes
+        # Notes are provenance text excluded from normalized scientific identity.
+        # Preserve the historical value rather than requiring or rewriting it.
     )
     if not identity_matches:
         raise MLRefinementError(
@@ -817,3 +818,4 @@ async def cancel_claimed_run(
         await session.rollback()
         raise MLRefinementError("worker lost the refinement lease")
     await session.commit()
+
