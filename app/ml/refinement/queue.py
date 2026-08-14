@@ -18,7 +18,12 @@ from .contracts import (
     MLRefinementRequest,
 )
 from .models import MLRefinementRunRecord
-from .persistence import completed_run_is_complete, experiment_key
+from .persistence import (
+    MLRefinementError,
+    completed_run_is_complete,
+    experiment_key,
+    requeue_incomplete_completed_run,
+)
 from .planning import build_refinement_plan
 
 
@@ -27,6 +32,7 @@ class QueueDisposition(StrEnum):
     ALREADY_QUEUED = "already_queued"
     ALREADY_RUNNING = "already_running"
     REUSED_COMPLETED = "reused_completed"
+    REQUEUED_INCOMPLETE = "requeued_incomplete"
     REQUEUED_FAILED = "requeued_failed"
     REQUEUED_CANCELLED = "requeued_cancelled"
 
@@ -106,8 +112,24 @@ async def enqueue_refinement(
             session, existing, request
         ):
             return EnqueueResult(existing, QueueDisposition.REUSED_COMPLETED)
+        if existing.status == "completed":
+            try:
+                await requeue_incomplete_completed_run(
+                    session=session,
+                    run=existing,
+                    request=request,
+                    plan=plan,
+                    dataset_fingerprint=source.dataset_fingerprint,
+                    versions=versions,
+                    caller_context="public_enqueue",
+                )
+            except MLRefinementError as error:
+                raise RefinementQueueConflictError(str(error)) from error
+            await session.commit()
+            await session.refresh(existing)
+            return EnqueueResult(existing, QueueDisposition.REQUEUED_INCOMPLETE)
         if existing.status not in {"failed", "cancelled"}:
-            raise RefinementQueueConflictError("identical completed run is incomplete")
+            raise RefinementQueueConflictError("identical run has an invalid lifecycle")
         disposition = (
             QueueDisposition.REQUEUED_FAILED
             if existing.status == "failed"

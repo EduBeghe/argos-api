@@ -25,8 +25,10 @@ from app.ml.refinement.economic_policy_contract import (
 )
 from app.ml.refinement.models import MLRefinementEvaluationRecord, MLRefinementRunRecord
 from app.ml.refinement.persistence import (
+    MLRefinementError,
     completed_run_is_complete,
     experiment_key,
+    requeue_incomplete_completed_run,
     resolve_source,
 )
 from app.ml.refinement.planning import build_refinement_plan
@@ -852,9 +854,19 @@ async def _stage_child_run(
         ):
             return existing, True
         if existing.status == "completed":
-            raise CampaignCoordinationError(
-                "identical completed child refinement is incomplete"
-            )
+            try:
+                await requeue_incomplete_completed_run(
+                    session=session,
+                    run=existing,
+                    request=request,
+                    plan=plan,
+                    dataset_fingerprint=source.dataset_fingerprint,
+                    versions=versions,
+                    caller_context="campaign_coordinator",
+                )
+            except MLRefinementError as error:
+                raise CampaignCoordinationError(str(error)) from error
+            return existing, True
         if existing.status not in {"failed", "cancelled"}:
             raise CampaignCoordinationError(
                 "identical child refinement has an invalid lifecycle"

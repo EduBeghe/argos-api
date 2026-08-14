@@ -64,6 +64,7 @@ from app.ml.refinement.persistence import (
     fail_run,
     find_completed_run,
     persist_evaluation,
+    requeue_incomplete_completed_run,
     resolve_source,
     start_run,
 )
@@ -1195,3 +1196,149 @@ async def test_persistence_compacts_economic_policy_folds_and_enforces_size_limi
                 now=NOW,
             )
         assert await existing_run_evaluation(session, run.id, "o" * 64) is None
+
+
+async def test_incomplete_completed_enqueue_requeues_same_run_concurrently(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    refinement_request = request(source_run_id, source_result_id)
+    async with factory() as session:
+        queued = await enqueue_refinement(session, refinement_request, now=NOW)
+        run_id = queued.run.id
+        queued.run.status = "completed"
+        queued.run.started_at = NOW
+        queued.run.evaluations_computed = queued.run.evaluations_selected
+        queued.run.completed_at = NOW
+        await session.commit()
+
+    async def enqueue_once() -> tuple[UUID, QueueDisposition]:
+        async with factory() as session:
+            result = await enqueue_refinement(session, refinement_request, now=NOW)
+            return result.run.id, result.disposition
+
+    first, second = await asyncio.gather(enqueue_once(), enqueue_once())
+    assert first[0] == second[0] == run_id
+    assert {first[1], second[1]} == {
+        QueueDisposition.REQUEUED_INCOMPLETE,
+        QueueDisposition.ALREADY_QUEUED,
+    }
+    async with factory() as session:
+        recovered = await session.get(MLRefinementRunRecord, run_id)
+        assert recovered is not None
+        assert recovered.status == "queued"
+        assert recovered.completed_at is None
+        assert recovered.evaluations_computed == 0
+        assert recovered.evaluations_reused == 0
+
+
+async def test_incomplete_recovery_preserves_compatible_evidence_and_rolls_back(
+    refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
+) -> None:
+    factory, source_run_id, source_result_id = refinement_factory
+    payload = request(source_run_id, source_result_id).model_dump(mode="json")
+    payload["search_space"][0]["alpha"] = {"values": [1.0, 2.0]}
+    payload["maximum_trials"] = 2
+    refinement_request = MLRefinementRequest.model_validate(payload)
+    plan = build_refinement_plan(refinement_request)
+    versions = library_versions()
+    key = experiment_key(
+        request=refinement_request,
+        dataset_fingerprint="d" * 64,
+        versions=versions,
+    )
+    async with factory() as session:
+        run = await start_run(
+            session=session,
+            request=refinement_request,
+            plan=plan,
+            key=key,
+            dataset_fingerprint="d" * 64,
+            versions=versions,
+            now=NOW,
+        )
+        candidate = plan.evaluations[0]
+        fingerprint = effective_evaluation_fingerprint(
+            dataset_fingerprint="d" * 64,
+            candidate_fingerprint=candidate.fingerprint,
+            engine=candidate.engine.value,
+            versions=versions,
+            deterministic_seed=refinement_request.deterministic_seed,
+        )
+        result = RefinementEvaluationResult(
+            candidate,
+            (),
+            {"fold_count": 0},
+            RefinementClassification.INCOMPLETE,
+            ("incomplete_fold_count",),
+            0.1,
+        )
+        await persist_evaluation(
+            session=session,
+            run_id=run.id,
+            fingerprint=fingerprint,
+            result=result,
+            reused=None,
+            request=refinement_request,
+            now=NOW,
+        )
+        await complete_run(
+            session,
+            run.id,
+            computed=1,
+            reused=0,
+            omitted=0,
+            budget_exhausted=False,
+            reason="interrupted_after_partial_persistence",
+            elapsed=1.0,
+            now=NOW,
+        )
+
+    async with factory() as session:
+        locked = await session.scalar(
+            select(MLRefinementRunRecord)
+            .where(MLRefinementRunRecord.id == run.id)
+            .with_for_update()
+        )
+        assert locked is not None
+        recovery = await requeue_incomplete_completed_run(
+            session=session,
+            run=locked,
+            request=refinement_request,
+            plan=plan,
+            dataset_fingerprint="d" * 64,
+            versions=versions,
+            caller_context="rollback_test",
+        )
+        assert recovery.preserved_count == 1
+        assert recovery.deleted_incompatible_count == 0
+        await session.rollback()
+
+    async with factory() as session:
+        unchanged = await session.get(MLRefinementRunRecord, run.id)
+        assert unchanged is not None
+        assert unchanged.status == "completed"
+        assert unchanged.evaluations_computed == 1
+        assert (
+            await session.scalar(
+                select(func.count(MLRefinementEvaluationRecord.id)).where(
+                    MLRefinementEvaluationRecord.run_id == run.id
+                )
+            )
+            == 1
+        )
+
+        recovered = await enqueue_refinement(session, refinement_request, now=NOW)
+        assert recovered.disposition is QueueDisposition.REQUEUED_INCOMPLETE
+        assert recovered.run.id == run.id
+        assert recovered.run.evaluations_selected == 2
+        assert recovered.run.evaluations_computed == 0
+        assert recovered.run.evaluations_reused == 0
+        assert (
+            await session.scalar(
+                select(func.count(MLRefinementEvaluationRecord.id)).where(
+                    MLRefinementEvaluationRecord.run_id == run.id
+                )
+            )
+            == 1
+        )
