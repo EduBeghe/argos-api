@@ -1663,7 +1663,7 @@ async def test_campaign_recovers_incomplete_completed_run_with_different_notes(
 
     # The new campaign note differs, but notes are not scientific identity.
     async with sessions() as session:
-        assert await coordinate_next_campaign(session, now=NOW + timedelta(seconds=1))
+        assert await coordinate_next_campaign(session, now=NOW)
     async with sessions() as session:
         recovered = await session.get(MLRefinementRunRecord, run_id)
         persisted_campaign = await session.get(MLSearchCampaignRecord, record.id)
