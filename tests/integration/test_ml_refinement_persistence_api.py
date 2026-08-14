@@ -1503,6 +1503,7 @@ async def test_incomplete_recovery_preserves_compatible_evidence_and_rolls_back(
             == 1
         )
 
+
 async def test_recovery_deletes_only_unprotected_out_of_plan_evidence(
     refinement_factory: tuple[async_sessionmaker[AsyncSession], UUID, UUID],
 ) -> None:
