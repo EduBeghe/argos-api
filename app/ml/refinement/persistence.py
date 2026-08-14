@@ -18,7 +18,7 @@ from app.ml.protected.contracts import (
     TEMPORAL_MANIFEST_VERSION,
     canonicalize_confidence_bucket,
 )
-from app.ml.protected.models import MLTemporalManifestRecord
+from app.ml.protected.models import MLFinalValidationRecord, MLTemporalManifestRecord
 from app.ml.protected.temporal import reconstruct_temporal_manifest
 from app.ml.screening.models import (
     MLModelScreeningResultRecord,
@@ -230,9 +230,9 @@ async def requeue_incomplete_completed_run(
     rows = tuple(
         (
             await session.scalars(
-                select(MLRefinementEvaluationRecord).where(
-                    MLRefinementEvaluationRecord.run_id == run.id
-                )
+                select(MLRefinementEvaluationRecord)
+                .where(MLRefinementEvaluationRecord.run_id == run.id)
+                .with_for_update()
             )
         ).all()
     )
@@ -249,6 +249,48 @@ async def requeue_incomplete_completed_run(
             incompatible_ids.append(row.id)
     deleted_ids = (*out_of_plan_ids, *incompatible_ids)
     if deleted_ids:
+        temporal_manifest_evaluation_ids = set(
+            (
+                await session.scalars(
+                    select(MLTemporalManifestRecord.evaluation_id).where(
+                        MLTemporalManifestRecord.evaluation_id.in_(deleted_ids)
+                    )
+                )
+            ).all()
+        )
+        final_validation_evaluation_ids = set(
+            (
+                await session.scalars(
+                    select(MLFinalValidationRecord.evaluation_id).where(
+                        MLFinalValidationRecord.evaluation_id.in_(deleted_ids)
+                    )
+                )
+            ).all()
+        )
+        protected_evaluation_ids = (
+            temporal_manifest_evaluation_ids | final_validation_evaluation_ids
+        )
+        if protected_evaluation_ids:
+            logger.warning(
+                "Protected ML refinement evidence prevented automatic recovery",
+                extra={
+                    "structured_fields": {
+                        "run_id": str(run.id),
+                        "protected_candidate_count": len(protected_evaluation_ids),
+                        "has_temporal_manifest_references": bool(
+                            temporal_manifest_evaluation_ids
+                        ),
+                        "has_final_validation_references": bool(
+                            final_validation_evaluation_ids
+                        ),
+                        "caller_context": caller_context or "unknown",
+                    }
+                },
+            )
+            raise MLRefinementError(
+                "incomplete refinement evidence is protected and cannot be "
+                "automatically replaced"
+            )
         await session.execute(
             delete(MLRefinementEvaluationRecord).where(
                 MLRefinementEvaluationRecord.id.in_(deleted_ids)
