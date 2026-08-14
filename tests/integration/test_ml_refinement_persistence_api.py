@@ -58,6 +58,7 @@ from app.ml.refinement.models import (
 from app.ml.refinement.persistence import (
     MAX_PERSISTED_AGGREGATE_METRICS_BYTES,
     MLRefinementEvidenceTooLargeError,
+    MLRefinementError,
     complete_run,
     effective_evaluation_fingerprint,
     existing_run_evaluation,
