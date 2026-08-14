@@ -1653,6 +1653,7 @@ async def test_campaign_recovers_incomplete_completed_run_with_different_notes(
         run.evaluations_selected = 1
         run.evaluations_computed = 1
         run.evaluations_reused = 0
+        run.started_at = NOW
         run.completed_at = NOW
         run.notes = "historical provenance from a different campaign family"
         await session.delete(original_child)
