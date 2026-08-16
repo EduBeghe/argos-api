@@ -1,8 +1,10 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.optimization._pagination import count_matching
+from app.optimization._persistence_helpers import require
 from app.optimization.composite_search import (
     CompositeCandidateStatus,
     CompositeSelectionTrack,
@@ -28,20 +30,20 @@ class CompositeSearchNotFoundError(LookupError):
 async def get_composite_search(
     session: AsyncSession, predictive_edge_run_id: UUID
 ) -> CompositeSearchSummaryResponse:
-    run = await session.scalar(
-        select(CompositeSearchRunRecord).where(
-            CompositeSearchRunRecord.predictive_edge_run_id == predictive_edge_run_id
-        )
+    run = require(
+        await session.scalar(
+            select(CompositeSearchRunRecord).where(
+                CompositeSearchRunRecord.predictive_edge_run_id
+                == predictive_edge_run_id
+            )
+        ),
+        CompositeSearchNotFoundError("composite search was not found"),
     )
-    if run is None:
-        raise CompositeSearchNotFoundError("composite search was not found")
-    confirmed = await session.scalar(
-        select(func.count())
-        .select_from(CompositeSearchCandidateRecord)
-        .where(
-            CompositeSearchCandidateRecord.run_id == run.id,
-            CompositeSearchCandidateRecord.status == "confirmed_candidate",
-        )
+    confirmed = await count_matching(
+        session,
+        CompositeSearchCandidateRecord,
+        CompositeSearchCandidateRecord.run_id == run.id,
+        CompositeSearchCandidateRecord.status == "confirmed_candidate",
     )
     return CompositeSearchSummaryResponse(
         id=run.id,
@@ -65,7 +67,7 @@ async def get_composite_search(
         test_simulations_reused=run.test_simulations_reused,
         best_depth=run.best_depth,
         best_candidate_fingerprint=run.best_candidate_fingerprint,
-        confirmed_candidate_count=int(confirmed or 0),
+        confirmed_candidate_count=confirmed,
         dominant_rejection_reason=run.dominant_rejection_reason,
         best_economic_candidate_fingerprint=run.best_economic_candidate_fingerprint,
         best_exploratory_candidate_fingerprint=(
@@ -107,13 +109,15 @@ async def list_composite_candidates(
     limit: int,
     offset: int,
 ) -> CompositeCandidatePageResponse:
-    run = await session.scalar(
-        select(CompositeSearchRunRecord).where(
-            CompositeSearchRunRecord.predictive_edge_run_id == predictive_edge_run_id
-        )
+    run = require(
+        await session.scalar(
+            select(CompositeSearchRunRecord).where(
+                CompositeSearchRunRecord.predictive_edge_run_id
+                == predictive_edge_run_id
+            )
+        ),
+        CompositeSearchNotFoundError("composite search was not found"),
     )
-    if run is None:
-        raise CompositeSearchNotFoundError("composite search was not found")
     filters = [CompositeSearchCandidateRecord.run_id == run.id]
     if depth is not None:
         filters.append(CompositeSearchCandidateRecord.depth == depth)
@@ -125,14 +129,7 @@ async def list_composite_candidates(
         )
     if feature_name is not None:
         filters.append(CompositeSearchCandidateRecord.features.contains([feature_name]))
-    total = int(
-        await session.scalar(
-            select(func.count())
-            .select_from(CompositeSearchCandidateRecord)
-            .where(*filters)
-        )
-        or 0
-    )
+    total = await count_matching(session, CompositeSearchCandidateRecord, *filters)
     records = tuple(
         (
             await session.scalars(
@@ -158,16 +155,18 @@ async def list_composite_candidates(
 async def get_composite_candidate(
     session: AsyncSession, predictive_edge_run_id: UUID, candidate_id: UUID
 ) -> CompositeCandidateDetailResponse:
-    record = await session.scalar(
-        select(CompositeSearchCandidateRecord)
-        .join(CompositeSearchRunRecord)
-        .where(
-            CompositeSearchRunRecord.predictive_edge_run_id == predictive_edge_run_id,
-            CompositeSearchCandidateRecord.id == candidate_id,
-        )
+    record = require(
+        await session.scalar(
+            select(CompositeSearchCandidateRecord)
+            .join(CompositeSearchRunRecord)
+            .where(
+                CompositeSearchRunRecord.predictive_edge_run_id
+                == predictive_edge_run_id,
+                CompositeSearchCandidateRecord.id == candidate_id,
+            )
+        ),
+        CompositeSearchNotFoundError("composite candidate was not found"),
     )
-    if record is None:
-        raise CompositeSearchNotFoundError("composite candidate was not found")
     return CompositeCandidateDetailResponse(
         run_id=record.run_id, **_candidate(record).model_dump()
     )

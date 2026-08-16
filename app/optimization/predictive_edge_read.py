@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.optimization._persistence_helpers import require
 from app.optimization.predictive_edge_memory import (
     PredictiveEdgeAggregateRecord,
     PredictiveEdgeBinAggregateRecord,
@@ -126,9 +127,10 @@ async def list_predictive_edge_runs(
 async def get_predictive_edge_run(
     session: AsyncSession, run_id: UUID
 ) -> PredictiveEdgeRunDetailResponse:
-    run = await session.get(PredictiveEdgeRunRecord, run_id)
-    if run is None:
-        raise PredictiveEdgeNotFoundError(f"predictive-edge run {run_id} was not found")
+    run = require(
+        await session.get(PredictiveEdgeRunRecord, run_id),
+        PredictiveEdgeNotFoundError(f"predictive-edge run {run_id} was not found"),
+    )
     return PredictiveEdgeRunDetailResponse(
         run=_run(run),
         configuration={
@@ -392,15 +394,16 @@ async def get_predictive_edge_diagnostics(
     session: AsyncSession, run_id: UUID
 ) -> PredictiveEdgeDiagnosticResponse:
     await _require_run(session, run_id)
-    record = await session.scalar(
-        select(PredictiveEdgeRunDiagnosticRecord).where(
-            PredictiveEdgeRunDiagnosticRecord.run_id == run_id
-        )
-    )
-    if record is None:
-        raise PredictiveEdgeNotFoundError(
+    record = require(
+        await session.scalar(
+            select(PredictiveEdgeRunDiagnosticRecord).where(
+                PredictiveEdgeRunDiagnosticRecord.run_id == run_id
+            )
+        ),
+        PredictiveEdgeNotFoundError(
             f"predictive-edge run {run_id} has no v4 diagnostics"
-        )
+        ),
+    )
     return PredictiveEdgeDiagnosticResponse.model_validate(record, from_attributes=True)
 
 
@@ -443,16 +446,17 @@ async def get_predictive_edge_near_miss(
     session: AsyncSession, *, run_id: UUID, near_miss_id: UUID
 ) -> PredictiveEdgeNearMissDetailResponse:
     await _require_run(session, run_id)
-    record = await session.scalar(
-        select(PredictiveEdgeNearMissRecord).where(
-            PredictiveEdgeNearMissRecord.id == near_miss_id,
-            PredictiveEdgeNearMissRecord.run_id == run_id,
-        )
-    )
-    if record is None:
-        raise PredictiveEdgeNotFoundError(
+    record = require(
+        await session.scalar(
+            select(PredictiveEdgeNearMissRecord).where(
+                PredictiveEdgeNearMissRecord.id == near_miss_id,
+                PredictiveEdgeNearMissRecord.run_id == run_id,
+            )
+        ),
+        PredictiveEdgeNotFoundError(
             f"predictive-edge near miss {near_miss_id} was not found"
-        )
+        ),
+    )
     sensitivity = (
         await session.scalars(
             select(PredictiveEdgeSensitivityRecord)

@@ -12,8 +12,6 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
-    delete,
-    select,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
@@ -21,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database.base import Base
+from app.optimization._persistence_helpers import replace_by_column, to_json_safe
 from app.optimization.targeted_refinement import (
     TARGETED_REFINEMENT_CONTRACT_VERSION,
     TargetedCandidateResult,
@@ -88,27 +87,13 @@ class TargetedRefinementCandidateRecord(Base):
     )
 
 
-def _json(value: object) -> object:
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if hasattr(value, "value"):
-        return value.value
-    if hasattr(value, "total_seconds"):
-        return int(value.total_seconds())
-    if isinstance(value, tuple):
-        return [_json(item) for item in value]
-    if isinstance(value, list):
-        return [_json(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _json(item) for key, item in value.items()}
-    return value
-
-
 def _metrics(item: TargetedCandidateResult, name: str) -> dict[str, object] | None:
     value = getattr(item, name)
-    return cast(dict[str, object], _json(asdict(value))) if value is not None else None
+    return (
+        cast(dict[str, object], to_json_safe(asdict(value)))
+        if value is not None
+        else None
+    )
 
 
 async def persist_targeted_refinement_result(
@@ -120,18 +105,12 @@ async def persist_targeted_refinement_result(
 ) -> UUID:
     """Atomically replace an incomplete stage graph with one complete result."""
 
-    existing = await session.scalar(
-        select(TargetedRefinementRunRecord).where(
-            TargetedRefinementRunRecord.predictive_edge_run_id == predictive_edge_run_id
-        )
+    await replace_by_column(
+        session,
+        TargetedRefinementRunRecord,
+        TargetedRefinementRunRecord.predictive_edge_run_id,
+        predictive_edge_run_id,
     )
-    if existing is not None:
-        await session.execute(
-            delete(TargetedRefinementRunRecord).where(
-                TargetedRefinementRunRecord.id == existing.id
-            )
-        )
-        await session.flush()
     run_id = uuid4()
     now = datetime.now(UTC)
     session.add(
@@ -141,7 +120,7 @@ async def persist_targeted_refinement_result(
             experiment_key=experiment_key,
             contract_version=TARGETED_REFINEMENT_CONTRACT_VERSION,
             conclusion=result.conclusion.value,
-            summary=_json(asdict(result.summary)),
+            summary=to_json_safe(asdict(result.summary)),
             created_at=now,
         )
     )
@@ -155,13 +134,13 @@ async def persist_targeted_refinement_result(
                 seed_fingerprint=item.configuration.seed_fingerprint,
                 status=item.status.value,
                 normalized_distance=item.normalized_distance_to_pass,
-                configuration=_json(asdict(item.candidate)),
+                configuration=to_json_safe(asdict(item.candidate)),
                 training_metrics=_metrics(item, "training"),
                 validation_metrics=_metrics(item, "validation"),
                 test_metrics=_metrics(item, "test"),
                 passed_requirements=list(item.passed_requirements),
                 failed_requirements=list(item.failed_requirements),
-                requirement_margins=_json(
+                requirement_margins=to_json_safe(
                     [asdict(value) for value in item.requirement_margins]
                 ),
                 rejection_reason=item.rejection_reason,

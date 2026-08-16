@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.optimization._persistence_helpers import require
 from app.optimization.memory import StrategyCandidateRecord
 from app.optimization.schemas import (
     CandidateDefinitionResponse,
@@ -40,27 +41,29 @@ class WalkForwardReadNotFoundError(LookupError):
 async def read_refinement_walk_forward(
     session: AsyncSession, refinement_run_id: UUID
 ) -> WalkForwardRunResponse:
-    run = await session.scalar(
-        select(WalkForwardRunRecord)
-        .where(WalkForwardRunRecord.refinement_run_id == refinement_run_id)
-        .order_by(
-            WalkForwardRunRecord.started_at.desc(), WalkForwardRunRecord.id.desc()
-        )
-        .limit(1)
-    )
-    if run is None:
-        raise WalkForwardReadNotFoundError(
+    run = require(
+        await session.scalar(
+            select(WalkForwardRunRecord)
+            .where(WalkForwardRunRecord.refinement_run_id == refinement_run_id)
+            .order_by(
+                WalkForwardRunRecord.started_at.desc(), WalkForwardRunRecord.id.desc()
+            )
+            .limit(1)
+        ),
+        WalkForwardReadNotFoundError(
             f"walk-forward run for refinement run {refinement_run_id} was not found"
-        )
+        ),
+    )
     return _run_response(run)
 
 
 async def read_walk_forward_run(
     session: AsyncSession, run_id: UUID
 ) -> WalkForwardRunDetailResponse:
-    run = await session.get(WalkForwardRunRecord, run_id)
-    if run is None:
-        raise WalkForwardReadNotFoundError(f"walk-forward run {run_id} was not found")
+    run = require(
+        await session.get(WalkForwardRunRecord, run_id),
+        WalkForwardReadNotFoundError(f"walk-forward run {run_id} was not found"),
+    )
     windows = (
         (
             await session.execute(

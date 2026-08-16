@@ -1,8 +1,10 @@
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.optimization._pagination import count_matching
+from app.optimization._persistence_helpers import require
 from app.optimization.targeted_refinement import TargetedCandidateStatus
 from app.optimization.targeted_refinement_memory import (
     TargetedRefinementCandidateRecord,
@@ -25,13 +27,15 @@ class TargetedRefinementNotFoundError(LookupError):
 async def get_targeted_refinement(
     session: AsyncSession, predictive_edge_run_id: UUID
 ) -> TargetedRefinementSummaryResponse:
-    row = await session.scalar(
-        select(TargetedRefinementRunRecord).where(
-            TargetedRefinementRunRecord.predictive_edge_run_id == predictive_edge_run_id
-        )
+    row = require(
+        await session.scalar(
+            select(TargetedRefinementRunRecord).where(
+                TargetedRefinementRunRecord.predictive_edge_run_id
+                == predictive_edge_run_id
+            )
+        ),
+        TargetedRefinementNotFoundError("targeted refinement was not found"),
     )
-    if row is None:
-        raise TargetedRefinementNotFoundError("targeted refinement was not found")
     confirmed = list(
         (
             await session.scalars(
@@ -88,24 +92,19 @@ async def list_targeted_candidates(
     limit: int,
     offset: int,
 ) -> TargetedCandidatePageResponse:
-    run = await session.scalar(
-        select(TargetedRefinementRunRecord.id).where(
-            TargetedRefinementRunRecord.predictive_edge_run_id == predictive_edge_run_id
-        )
+    run = require(
+        await session.scalar(
+            select(TargetedRefinementRunRecord.id).where(
+                TargetedRefinementRunRecord.predictive_edge_run_id
+                == predictive_edge_run_id
+            )
+        ),
+        TargetedRefinementNotFoundError("targeted refinement was not found"),
     )
-    if run is None:
-        raise TargetedRefinementNotFoundError("targeted refinement was not found")
     filters = [TargetedRefinementCandidateRecord.run_id == run]
     if status is not None:
         filters.append(TargetedRefinementCandidateRecord.status == status.value)
-    total = int(
-        await session.scalar(
-            select(func.count())
-            .select_from(TargetedRefinementCandidateRecord)
-            .where(*filters)
-        )
-        or 0
-    )
+    total = await count_matching(session, TargetedRefinementCandidateRecord, *filters)
     priority = case(
         (
             TargetedRefinementCandidateRecord.status
@@ -139,20 +138,22 @@ async def list_targeted_candidates(
 async def get_targeted_candidate(
     session: AsyncSession, predictive_edge_run_id: UUID, candidate_id: UUID
 ) -> TargetedCandidateDetailResponse:
-    row = await session.scalar(
-        select(TargetedRefinementCandidateRecord)
-        .join(
-            TargetedRefinementRunRecord,
-            TargetedRefinementRunRecord.id == TargetedRefinementCandidateRecord.run_id,
-        )
-        .where(
-            TargetedRefinementRunRecord.predictive_edge_run_id
-            == predictive_edge_run_id,
-            TargetedRefinementCandidateRecord.id == candidate_id,
-        )
+    row = require(
+        await session.scalar(
+            select(TargetedRefinementCandidateRecord)
+            .join(
+                TargetedRefinementRunRecord,
+                TargetedRefinementRunRecord.id
+                == TargetedRefinementCandidateRecord.run_id,
+            )
+            .where(
+                TargetedRefinementRunRecord.predictive_edge_run_id
+                == predictive_edge_run_id,
+                TargetedRefinementCandidateRecord.id == candidate_id,
+            )
+        ),
+        TargetedRefinementNotFoundError("targeted candidate was not found"),
     )
-    if row is None:
-        raise TargetedRefinementNotFoundError("targeted candidate was not found")
     return TargetedCandidateDetailResponse(
         **_response(row).model_dump(), run_id=row.run_id
     )
