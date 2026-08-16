@@ -47,7 +47,12 @@ class RidgeEngine:
         from sklearn.preprocessing import StandardScaler
 
         model = make_pipeline(
-            StandardScaler(), Ridge(alpha=self.configuration.ridge.alpha)
+            StandardScaler(),
+            # solver="svd" avoids forming the (ill-conditioned, given the
+            # registry's overlapping multi-scale features) X^T X matrix that the
+            # default cholesky-based solver factorizes; it computes the same
+            # closed-form ridge solution without the spurious LinAlgWarning.
+            Ridge(alpha=self.configuration.ridge.alpha, solver="svd"),
         )
         model.fit(training_features, training_targets)
         return np.asarray(model.predict(validation_features), dtype=np.float64)

@@ -146,7 +146,10 @@ def fit_refinement_model(
         if regression:
             from sklearn.linear_model import Ridge
 
-            model = Ridge(**parameters, random_state=None)
+            # solver="svd" avoids the ill-conditioned X^T X factorization the
+            # default solver hits with this registry's collinear multi-scale
+            # features; see app/ml/screening/engines.py for the same fix.
+            model = Ridge(**parameters, random_state=None, solver="svd")
         else:
             from sklearn.linear_model import LogisticRegression
 

@@ -14,7 +14,11 @@ Eligibility protects the complete target interval as well as its starting bounda
 
 ## Fixed version 1 configuration
 
-All engines use deterministic seed `1729` and at most two threads by default. Ridge uses `alpha=1`. LightGBM uses 120 trees, depth 5, 24 leaves, and learning rate 0.05. CatBoost uses 120 iterations, depth 5, and learning rate 0.05. Tree engines use CPU execution and no early stopping. These conservative configurations compare engine families rather than optimize hyperparameters.
+All engines use deterministic seed `1729` and at most two threads by default. Ridge uses `alpha=1` and the SVD solver. LightGBM uses 120 trees, depth 5, 24 leaves, and learning rate 0.05. CatBoost uses 120 iterations, depth 5, and learning rate 0.05. Tree engines use CPU execution and no early stopping. These conservative configurations compare engine families rather than optimize hyperparameters.
+
+### Ridge and multicollinearity
+
+The 126-variable registry deliberately includes overlapping multi-scale predictors (e.g. `return_30m` through `return_7d`, or adjacent-scale EMA distances), which are highly collinear with each other by construction. Fit against this design matrix, scikit-learn's default Ridge solver factorizes `XᵀX + αI`, which becomes severely ill-conditioned under that collinearity and previously emitted a `LinAlgWarning` on effectively every fit. Both Ridge call sites (`app/ml/screening/engines.py` and `app/ml/refinement/calculation.py`) explicitly pass `solver="svd"`, which computes the identical closed-form ridge solution via direct SVD of the (already standardized) feature matrix instead of forming `XᵀX`. This changes only the numerical method, not the statistical model, hyperparameters, or predictions — individual Ridge coefficients remain hard to interpret in isolation under this feature set (a LightGBM/CatBoost result should be preferred over Ridge for feature-importance narratives for that reason), but the fitted model and its predictive evidence are unaffected.
 
 ## Evidence
 
