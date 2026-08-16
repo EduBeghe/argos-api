@@ -2,7 +2,11 @@
 
 ## Services and schedules
 
-Deploy `argos-api`, `argos-ingest`, and `argos-decide` from this repository, PostgreSQL as the shared datastore, and `argos-web` from its separate repository. Configure external cron schedules:
+Deploy `argos-api`, `argos-ingest`, `argos-decide`, and `argos-research` from this repository, PostgreSQL as the shared datastore, and `argos-web` from its separate repository — six services in total. `argos-api`, `argos-research`, `argos-web`, and PostgreSQL are continuously serving deployments; `argos-ingest` and `argos-decide` are Railway Cron Runs. Configure external cron schedules:
+
+- ingest: every five minutes;
+- decide: `2,32 * * * *` (UTC), allowing boundary candles and Scores to be persisted before the 30-minute cycle;
+- research: **not** a cron. `argos-research` runs `python -m app.jobs.process_ml_refinement_queue` as a long-lived, continuously serving process (a durable queue worker), not a Cron Run. Deploy it as exactly **one replica** — PostgreSQL row locks make concurrent workers safe, but a second replica only doubles compute cost without doubling throughput, since only one worker can hold a given run's lease at a time.
 
 The weekly Predictive Edge Discovery v4 cron remains intentionally pending until its
 first-run timing and diagnostics have been validated on Railway. Do not infer a
@@ -14,8 +18,11 @@ predictive ID. Verify first run, exact reuse, and weekly range extension by comp
 current computed/reused work with original-run work and compute avoided. Historical
 work must not be reported as newly computed.
 
-- ingest: every five minutes;
-- decide: `2,32 * * * *` (UTC), allowing boundary candles and Scores to be persisted before the 30-minute cycle.
+### `argos-research` operational notes
+
+`process_ml_refinement_queue` claims queued ML refinement runs, search-campaign children, and protected final-validation work through a database lease (`--poll-seconds`, 1–300; `--stale-after-seconds`, 300–86400; `--once` processes at most one available run and exits). A stale lease — a worker that died mid-claim — is marked failed and requires an explicit retry through the corresponding `POST .../retry` endpoint; it is never silently re-executed. Redeploying `argos-research` (e.g. after a code change) is safe: in-flight work resumes from its last committed evaluation on the next poll, and completed evaluations are never recomputed. Deploy the migration and API before starting or redeploying this worker, since it depends on the current schema.
+
+Screening and refinement runs are CPU-bound (Ridge/LightGBM/CatBoost fits across up to seven folds per configuration); a full `exhaustive_ohlcv_v1` or `economic_policy_search_v2` campaign can occupy the worker for an extended period. Start with a one-duration canary (`python -m app.jobs.screen_ml_models --engine all --future-duration-seconds 1800`) or `--dry-run` before enqueueing a full campaign on a new instrument or after a registry/contract-version change.
 
 Railway’s Cron Run is a one-shot execution created by a schedule or **Run now**. It is distinct from a continuously serving deployment. **Active** means the process is currently running; **Completed** means it exited successfully; **Failed** means a non-zero exit or platform failure. Open the run’s **Deploy Logs** for structured job output and traceback. Use **Run now** for one controlled retry. Disable a schedule before maintenance or expensive historical work and re-enable it only after verifying resources and configuration.
 
@@ -55,6 +62,17 @@ python -m app.jobs.refinement_storage
 
 # Predictive Edge Map and persisted edge-guided qualification
 python -m app.jobs.analyze_predictive_edges --asset BTC/USDT --provider binance --market-type spot --interval 5m --from 2025-01-01T00:00:00Z --to 2026-01-01T00:00:00Z --training-days 180 --validation-days 60 --test-days 60 --step-days 60 --maximum-windows 6 --bins 5 --persist --edge-guided-candidates --max-edge-guided-candidates 12 --initial-cash 10000
+
+# ML pipeline (see docs/ml-experiment-contract.md, ml-model-screening.md, ml-search-campaign.md)
+python -m app.jobs.validate_ml_experiment_dataset --asset BTC/USDT --contract-only
+python -m app.jobs.screen_ml_models --asset BTC/USDT --engine all --future-duration-seconds 1800
+python -m app.jobs.screen_ml_models --asset BTC/USDT --engine all --all-future-durations
+python -m app.jobs.refine_ml_screening_result --config docs/examples/ml-refinement-catboost-30m.json --dry-run
+python -m app.jobs.enqueue_ml_search_campaign --source-screening-run-id <run-id> --preset exhaustive_ohlcv_v1 --dry-run
+python -m app.jobs.audit_ml_search_near_misses --campaign-id <campaign-id> --maximum-candidates 15 --output development-reaudit.json
+
+# Durable ML worker (argos-research; run as one continuously serving replica, not a cron)
+python -m app.jobs.process_ml_refinement_queue --poll-seconds 5 --stale-after-seconds 900
 ```
 
 Use each command’s `--help` as the parser-authoritative flag reference. `refinement_storage` intentionally has no flags.
