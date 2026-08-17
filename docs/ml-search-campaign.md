@@ -207,3 +207,46 @@ future profitability.
 For rollback, stop the research worker and API version using the new endpoints, then
 downgrade one Alembic revision. The downgrade removes only campaign tables and does
 not delete historical screening or refinement evidence.
+
+## Protected final validation
+
+Protected final validation (`app/ml/protected/`) is the only stage permitted to read the
+reserved final-test interval `[2025-01-01T00:00:00Z, 2026-01-01T00:00:00Z)`. It is a
+distinct lifecycle from qualification: qualification (`economic_policy_search_v2`) only
+ever reads `[2024-01-01, 2025-01-01)`. Before any protected read, the worker
+reconstructs the complete development-window identity (`app/ml/protected/temporal.py`)
+and requires it to match the frozen family/refinement/screening lineage exactly; any
+mismatch fails closed rather than silently narrowing the window.
+
+An authenticated operator enqueues final validation for a qualified family with
+`POST /optimization/ml-search-campaigns/{campaign_id}/families/{family_id}/final-validations`.
+The `argos-research` worker claims and executes it under the same durable-lease
+discipline as refinement and campaign work; `GET /optimization/ml-final-validations` and
+`GET /optimization/ml-final-validations/{validation_id}` are read-only, and
+`POST .../retry` / `POST .../cancel` mirror the other queue-backed workflows.
+
+### Promotion gates
+
+`app/ml/protected/policy.py` defines the complete, fixed gate set. A validation's
+classification is `passed` only when **every** gate clears; any single failure yields
+`failed` with the specific failed-gate codes recorded, never a partial pass:
+
+| Gate | Requirement |
+| --- | --- |
+| Evidence completeness | All required evidence is present and finite |
+| Round trips | At least 20 complete round-trip trades |
+| Total net return | At least 10% over the complete protected period, after fees and slippage |
+| Half-year coverage | All four half-year evidence blocks present (2025 H1/H2 plus the two adjoining blocks the walk-forward windows require) |
+| Half-year consistency | At least three of the four half-years have positive return |
+| Half-year floor | No half-year lost more than 5% |
+| Maximum drawdown | At or below 25% |
+| Stress at 1.5× costs | Still strictly positive net return with fees and slippage multiplied by 1.5 |
+| Stress at 2× costs | Still strictly positive net return with fees and slippage doubled |
+
+A `passed`, `completed` validation is the only precondition `POST /paper/deployments`
+accepts: it must resolve to an `MLStrategySpecificationRecord` with a trusted,
+hash-verified `MLModelArtifactRecord` (feature order and library versions checked
+against the running environment) before a Paper Deployment can be created. There is no
+code path that promotes a Strategy to Paper Trading, let alone real money, without
+clearing every gate above. See [Current System Reference](010-current-system.md#protected-final-validation)
+and [Paper Deployments](010-current-system.md#paper-deployments-parallel-wallets).

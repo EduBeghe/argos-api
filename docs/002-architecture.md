@@ -8,13 +8,20 @@ The frontend is a responsive Angular application maintained in the separate `arg
 
 ## Current Deployed Execution
 
-The repository is deployed as two one-shot backend jobs plus the continuously serving API:
+The repository is deployed as four Railway services built from this repository, plus the separately deployed frontend and the shared database — six services in total, not two one-shot jobs plus an API:
 
 - `argos-ingest` runs every five minutes, persists fully closed Binance Spot candles, then calculates only bounded live Features and Scores. It does not generate Decisions.
-- `argos-decide` runs at UTC minutes 02 and 32, consumes existing persisted evidence for the latest 30-minute boundary, creates Decision Cycles and Decision Snapshots, executes Paper Trading, and records equity snapshots.
-- `argos-api` exposes explicit read-only HTTP operations and never runs periodic jobs as a side effect of a request.
-- PostgreSQL is the shared transactional evidence store.
+- `argos-decide` runs at UTC minutes 02 and 32, consumes existing persisted evidence for the latest 30-minute boundary, creates Decision Cycles and Decision Snapshots for every active Paper Deployment (baseline and ML), executes Paper Trading, and records equity snapshots.
+- `argos-research` runs continuously as a single replica. It claims and executes queued ML screening, refinement, search-campaign, and protected final-validation work through `python -m app.jobs.process_ml_refinement_queue`. This is where essentially all ML CPU time is spent; see [Current System Reference](010-current-system.md#machine-learning-pipeline).
+- `argos-api` exposes explicit read-only (plus a small authenticated mutating surface: auth, Paper Deployment lifecycle, and ML run/campaign enqueue-cancel-retry) HTTP operations and never runs periodic jobs as a side effect of a request.
+- PostgreSQL is the shared transactional evidence store for all four services above.
 - `argos-web` is a static Angular SPA from a separate repository and resolves instruments from the catalog rather than symbol-specific branches.
+
+## Research and Optimization Module
+
+`app/optimization/` holds five independently versioned search variants layered over a shared base refinement system (`memory.py`, `refinement.py`, `experiment_service.py`, originally the only search mechanism): `walk_forward` (built directly on the base system's tables), `composite_search`, `edge_guided`, `targeted_refinement`, and `predictive_edge` (v3 `predictive_edges.py` plus v4/v4.1 engines). Each variant is a genuinely distinct research methodology with its own statistical gates, reuse-eligibility rules, and persistence shape — they are not interchangeable implementations of the same algorithm, and their gate thresholds (e.g. minimum hit-rate improvement, economic margin) are independently tuned per variant, not shared constants.
+
+What the five variants do share, and where that sharing is centralized, is infrastructure plumbing: JSON-safe Decimal/datetime coercion for JSONB persistence, a `find-existing → delete → reinsert` idempotent replace pattern, offset and keyset pagination helpers, and a not-found guard for read services. This plumbing lives in `app/optimization/_persistence_helpers.py` and `app/optimization/_pagination.py` and is imported by each variant's `*_memory.py`/`*_read.py` files rather than reimplemented per variant. `predictive_edge` is a partial exception: its ORM tables live in `predictive_edge_memory.py` but its reuse/persist logic lives in `predictive_edge_service.py` instead of following the `*_memory.py`-owns-logic convention the other four variants use.
 
 Candle ingestion, Feature calculation, and Score calculation commit as separate stages. A downstream failure therefore preserves earlier committed candles, and a later run retries missing recent analytics even when candle inserts are duplicates. Live Feature calculation loads at most 1,000 context candles per instrument, so historical backfill does not make live runtime proportional to the complete candle table.
 

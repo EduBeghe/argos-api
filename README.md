@@ -32,12 +32,16 @@ Every generated signal must retain its component scores, supporting metrics, and
 ## Current phase
 
 Argos currently runs closed-candle ingestion, bounded live Feature and Score
-calculation, 30-minute decision cycles, versioned Paper Trading, portfolio and
-performance history, historical simulation/refinement, Predictive Edge Map
-analysis, and edge-guided candidate qualification v2. The API exposes current
-and historical evidence to the separately deployed `argos-web` SPA. Candidate
-approval, parallel Strategy wallets, scheduled exploration, additional
-providers, ML, sentiment/news, multi-user identity, and real-money trading are not
+calculation, 30-minute decision cycles, versioned Paper Trading across parallel
+Paper Deployments (baseline and ML), portfolio and performance history,
+historical simulation/refinement, Predictive Edge Map analysis, edge-guided
+candidate qualification v3, and a full ML pipeline (dataset contract, model
+screening, refinement, exhaustive and economic-policy search campaigns, and
+protected final validation). The API exposes current and historical evidence
+to the separately deployed `argos-web` SPA. No ML Strategy has yet cleared
+protected final validation, so every ML search campaign's output to date is
+research evidence, not a deployed Strategy. Additional providers/assets,
+sentiment/news, multi-user identity, and real-money trading are not
 implemented. See the [current system reference](docs/010-current-system.md).
 
 ## Development

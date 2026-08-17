@@ -185,7 +185,7 @@ The initial MVP excludes:
 
 - News Score;
 - Sentiment Score;
-- Machine Learning Score;
+- Machine Learning Score (this exclusion described only the initial MVP boundary; a Machine Learning Score/Strategy pipeline is implemented as a later, separately versioned addition — see [Current System Reference](010-current-system.md#machine-learning-pipeline));
 - news ingestion;
 - social-media ingestion;
 - autonomous agents;

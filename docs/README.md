@@ -22,6 +22,7 @@ This index separates current system truth from historical decisions and future w
 | [Predictive Edge Map](009-predictive-edge-map.md) | Walk-forward predictive evidence and hypotheses | current |
 | [ML experiment dataset contract](ml-experiment-contract.md) | Leak-free variables, targets, temporal folds, and read-only validation | current |
 | [ML model screening](ml-model-screening.md) | Reproducible Ridge, LightGBM, and CatBoost development-fold screening | current |
+| [ML search campaigns](ml-search-campaign.md) | Exhaustive and economic-policy search coordination, qualification, protected final validation, and development re-audit | current |
 
 ## Architecture decisions
 
