@@ -1,6 +1,5 @@
 from dataclasses import asdict
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -13,7 +12,6 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
-    delete,
     select,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -23,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database.base import Base
 from app.market.catalog import Instrument
+from app.optimization._persistence_helpers import replace_by_column, to_json_safe
 from app.optimization.composite_search import (
     COMPOSITE_FEATURE_POOL,
     COMPOSITE_FEATURE_POOL_VERSION,
@@ -190,24 +189,6 @@ class CompositeSearchCandidateRecord(Base):
     )
 
 
-def _json(value: object) -> object:
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, tuple):
-        return [_json(item) for item in value]
-    if isinstance(value, list):
-        return [_json(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _json(item) for key, item in value.items()}
-    if hasattr(value, "value"):
-        return value.value
-    if hasattr(value, "total_seconds"):
-        return int(value.total_seconds())
-    return value
-
-
 async def find_reusable_composite_search(
     session: AsyncSession, experiment_key: str
 ) -> CompositeSearchRunRecord | None:
@@ -235,18 +216,12 @@ async def persist_composite_search_result(
     result: CompositeSearchResult,
     started_at: datetime,
 ) -> UUID:
-    existing = await session.scalar(
-        select(CompositeSearchRunRecord).where(
-            CompositeSearchRunRecord.predictive_edge_run_id == predictive_edge_run_id
-        )
+    await replace_by_column(
+        session,
+        CompositeSearchRunRecord,
+        CompositeSearchRunRecord.predictive_edge_run_id,
+        predictive_edge_run_id,
     )
-    if existing is not None:
-        await session.execute(
-            delete(CompositeSearchRunRecord).where(
-                CompositeSearchRunRecord.id == existing.id
-            )
-        )
-        await session.flush()
     run_id = uuid4()
     now = datetime.now(UTC)
     session.add(
@@ -266,9 +241,11 @@ async def persist_composite_search_result(
             feature_pool_version=COMPOSITE_FEATURE_POOL_VERSION,
             ranking_version=COMPOSITE_RANKING_VERSION,
             normalization_version=COMPOSITE_NORMALIZATION_VERSION,
-            search_configuration=_json(asdict(budget)),
+            search_configuration=to_json_safe(asdict(budget)),
             feature_pool=list(COMPOSITE_FEATURE_POOL),
-            funnel_by_depth=_json([asdict(item) for item in result.funnel_by_depth]),
+            funnel_by_depth=to_json_safe(
+                [asdict(item) for item in result.funnel_by_depth]
+            ),
             excluded_features=result.excluded_features,
             conclusion=result.conclusion.value,
             maximum_depth_reached=result.maximum_depth_reached,
@@ -326,18 +303,20 @@ async def persist_composite_search_result(
                 parent_fingerprint=item.parent_fingerprint,
                 depth=item.depth,
                 features=list(candidate.features),
-                signed_weights=_json([asdict(value) for value in candidate.weights]),
-                normalization_parameters=_json(
+                signed_weights=to_json_safe(
+                    [asdict(value) for value in candidate.weights]
+                ),
+                normalization_parameters=to_json_safe(
                     [asdict(value) for value in candidate.normalization]
                 ),
-                configuration=_json(asdict(candidate)),
+                configuration=to_json_safe(asdict(candidate)),
                 status=item.status.value,
-                ranking_breakdown=_json(asdict(item.ranking)),
-                training_metrics=_json(asdict(item.training_metrics)),
-                validation_metrics=_json(asdict(item.validation_metrics))
+                ranking_breakdown=to_json_safe(asdict(item.ranking)),
+                training_metrics=to_json_safe(asdict(item.training_metrics)),
+                validation_metrics=to_json_safe(asdict(item.validation_metrics))
                 if item.validation_metrics
                 else None,
-                test_metrics=_json(asdict(item.test_metrics))
+                test_metrics=to_json_safe(asdict(item.test_metrics))
                 if item.test_metrics
                 else None,
                 passed_requirements=list(item.passed_requirements),

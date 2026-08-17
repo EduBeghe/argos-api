@@ -7,6 +7,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import Subquery
 
 from app.market.enums import Asset, Interval, MarketType, Provider
+from app.optimization._persistence_helpers import require
 from app.optimization.edge_guided import (
     EDGE_GUIDED_QUALIFICATION_CONTRACT_VERSION,
     CandidateFamily,
@@ -137,8 +138,7 @@ async def get_edge_guided_run(
             .where(EdgeGuidedRunRecord.id == run_id)
         )
     ).first()
-    if row is None:
-        raise EdgeGuidedReadNotFoundError("edge-guided run was not found")
+    row = require(row, EdgeGuidedReadNotFoundError("edge-guided run was not found"))
     return _run(row[0], row[1] or 0, row[2] or 0, row[3] or 0)
 
 
@@ -214,8 +214,9 @@ async def get_edge_guided_candidate(
             .where(EdgeGuidedCandidateRecord.id == candidate_evaluation_id)
         )
     ).first()
-    if row is None:
-        raise EdgeGuidedReadNotFoundError("edge-guided candidate was not found")
+    row = require(
+        row, EdgeGuidedReadNotFoundError("edge-guided candidate was not found")
+    )
     candidate, run = row
     windows = (
         await session.scalars(
